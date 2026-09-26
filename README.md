@@ -1,9 +1,32 @@
 # go-xmlsec
 
-**XML Signature, XML Encryption and WS-Security in pure Go.** No cgo, no
-libxml2, no `encoding/xml`: parsing and canonicalization come from
-[go-xml](https://github.com/knroy/go-xml), and this module never serializes
-anything it digests except through `go-xml/c14n`.
+XML Signature, XML Encryption and WS-Security for Go. Pure Go, no cgo, no
+libxml2.
+
+Parsing and canonicalization come from [go-xml](https://github.com/knroy/go-xml);
+this library never serializes XML for a digest any other way. That matters,
+because a signature is only as correct as the canonical octets it covers.
+
+> **Status: v0.** The API may change. Output is verified against `xmlsec1`
+> in both directions on every commit, but not yet against a second
+> independent implementation, so treat it as not yet independently validated.
+> See [what is tested](#how-it-is-tested).
+
+## Features
+
+- **XML Signature**: enveloped signatures over a whole document, and detached
+  signatures over elements by ID and over MIME attachments by `cid:`.
+- **Signature coverage**: verification reports exactly which elements and
+  attachments a signature covers, the defence against XML Signature Wrapping.
+- **WS-Security**: the `wsse:Security` header, binary security tokens,
+  security token references, `wsu:Id` and timestamps.
+- **XML Encryption**: RSA-OAEP key transport with an explicit MGF, and AES-GCM
+  for elements and for attachments by `CipherReference`.
+- **Hardened by default**: no DOCTYPE, no network or file access, no SHA-1, no
+  XSLT or XPath transforms, algorithm allow-lists checked before any
+  cryptography.
+
+## Install
 
 ```
 go get github.com/knroy/go-xmlsec
@@ -11,88 +34,113 @@ go get github.com/knroy/go-xmlsec
 
 Requires Go 1.26 or later.
 
-## Status: v0, not yet independently validated
+## Quick start
 
-Read this before depending on it.
-
-| Evidence | Status |
-|---|---|
-| Unit and conformance tests | 74 test and fuzz functions, run on Linux, macOS and Windows in CI; 100% statement coverage, enforced by CI |
-| Security assessment | XXE and every external-fetch route, signature wrapping, key substitution, algorithm confusion, comment truncation, encryption downgrade, nil-input crashes: each a regression test in CI; results in [docs/security.md](docs/security.md#assessment) |
-| Negative corpus: modified element, modified attachment, relocated element, duplicated ID, algorithm outside allow-list, truncated signature | Yes, each a named test |
-| Differential against `xmlsec1` 1.3 | **Yes**, in CI: it verifies our enveloped and detached signatures (RSA, ECDSA; inclusive, exclusive) and decrypts our AES-GCM / RSA-OAEP encryption, and we do the same for its output |
-| Differential against Apache Santuario | **Not yet built** |
-| Signature byte-equality with phase4 (Gate 2) | **Not yet built**: needs the captured-message corpus and the AS4 consumer this library serves |
-| Fuzzing | Three targets on the parse-and-verify and decrypt paths, nightly at one hour each |
-| Canonicalization conformance (Gate 1) | Owned upstream by `go-xml/c14n` v1.4.0, which reports differential testing against `xmllint` and `xmlsec1`; the Santuario differential and real-message corpus are still open there |
-
-One independent implementation accepts what this module produces, and the
-spec asks for two before anything is called validated. That is why it is v0. See [docs/testing.md](docs/testing.md) for exactly what
-runs and [docs/todo.md](docs/todo.md) for what stands between here and v1.
-
-## Sign and verify
-
-A WS-Security signature over two header elements and an attachment:
+Sign a document, then verify it as the receiver. `key` is an
+`xmlsec.KeyProvider`: any `crypto.Signer` with its certificate, so a PEM key,
+a PKCS#11 token and a cloud KMS key all work.
 
 ```go
-tree, _ := xmlsec.Parse(envelope)
-doc := tree.Root
+tree, err := xmlsec.Parse([]byte(`<Invoice><Total>100.00</Total></Invoice>`))
 
-bodyID, _ := wss.AssignID(doc, body)
-hdr, _ := wss.NewHeader(doc, wss.NSSOAP12, "", true)
-tokenID, _ := hdr.AddBinarySecurityToken(key.Certificate, nil, xmlsec.BSTValueTypeX509v3)
-
-exc := []dsig.TransformSpec{{Algorithm: string(c14n.Exclusive10)}}
-sig, err := dsig.Sign(doc, key, dsig.SignOptions{
+signed, err := dsig.SignEnveloped(tree.Root, key, dsig.SignOptions{
     SignatureAlgorithm:        xmlsec.SigRSASHA256,
     CanonicalizationAlgorithm: string(c14n.Exclusive10),
-    References: []dsig.Reference{
-        {URI: "#" + bodyID, Transforms: exc, DigestAlgorithm: xmlsec.DigestSHA256},
-        {URI: "cid:att-1@example.com", DigestAlgorithm: xmlsec.DigestSHA256,
-            Transforms: []dsig.TransformSpec{{Algorithm: xmlsec.TransformAttachmentContentOnly}}},
-    },
-    KeyInfo:         dsig.KeyInfoSecurityTokenReference,
-    SecurityTokenID: tokenID,
-    Attachments:     atts,
+    References: []dsig.Reference{{
+        URI:             "", // the whole document
+        DigestAlgorithm: xmlsec.DigestSHA256,
+        Transforms: []dsig.TransformSpec{
+            {Algorithm: xmlsec.TransformEnvelopedSignature},
+            {Algorithm: string(c14n.Exclusive10)},
+        },
+    }},
+    KeyInfo: dsig.KeyInfoX509Data,
 })
-hdr.Append(sig)
 ```
 
-Verify, and **check what was signed**:
+`signed` is the signed document as octets. Send exactly those; never
+re-serialize a signed document.
 
 ```go
-tree, _ := xmlsec.Parse(received)
-cov, err := dsig.Verify(tree.Root, sigElement, dsig.VerifyOptions{
+received, err := xmlsec.Parse(signed)
+invoice := received.Root.ChildElements()[0]
+sig := invoice.ChildElements()[1] // the signature is appended last
+
+cov, err := dsig.Verify(received.Root, sig, dsig.VerifyOptions{
+    Certificate:                       senderCert,
     AllowedSignatureAlgorithms:        []string{xmlsec.SigRSASHA256},
     AllowedDigestAlgorithms:           []string{xmlsec.DigestSHA256},
     AllowedCanonicalizationAlgorithms: []string{string(c14n.Exclusive10)},
-    Attachments:                       atts,
 })
-if err != nil || !cov.Covers(bodyID) || !cov.CoversAttachments("att-1@example.com") {
-    // reject
-}
-// cov.Certificate is NOT trusted by this library. Establish that yourself.
+// err == nil and cov.WholeDocumentSigned: the invoice is signed by senderCert.
 ```
 
-A nil error means the signature is valid over the nodes in `Coverage` and
-nothing more. It says nothing about whether the certificate is trusted, and
-nothing about elements `Coverage` does not list. That is how XML Signature
-Wrapping works; [docs/security.md](docs/security.md) explains it.
+Both snippets are adapted from `Example_enveloped` in
+[dsig/example_test.go](dsig/example_test.go), with error handling left out;
+`go test` compiles and runs the example, so it cannot drift from the API.
+`Example_wsSecurity` in the same file signs a SOAP body inside a WS-Security
+header, and [docs/usage.md](docs/usage.md) covers WS-Security, attachments
+and encryption in full.
 
-More, including enveloped signatures and encryption, in
-[docs/usage.md](docs/usage.md).
+## Verifying safely
 
-## What it refuses
+`dsig.Verify` returning nil means the signature is valid over exactly what
+`Coverage` lists, and nothing more. Before trusting a message:
 
-SHA-1 in every role, the `rsa-oaep-mgf1p` key transport, XSLT and XPath
-transforms, DOCTYPEs, any network or filesystem access, and trust decisions.
-Each is deliberate; [docs/security.md](docs/security.md#deliberate-refusals)
-gives the reason.
+1. **Pin the certificate** with `VerifyOptions.Certificate` when you know the
+   sender. Otherwise the certificate comes from the message itself, and
+   deciding whether to trust it is up to you: this library makes no trust
+   decisions.
+2. **Check `Coverage`.** Confirm it includes every element and attachment you
+   are about to read (`Covers`, `CoversAttachments`, `SignedElements`). A
+   valid signature over the wrong element is how XML Signature Wrapping works.
+3. **Pass allow-lists** naming exactly the algorithms your profile permits.
+4. **Parse with `xmlsec.Parse`**, and cap the size of what you hand it.
+
+[docs/security.md](docs/security.md) explains each rule, with the threat model
+and measured costs.
+
+## Algorithms
+
+Every algorithm is named explicitly at every call site. There are no defaults:
+the right canonicalization differs between document families, and a wrong
+default produces a signature that looks valid and that no peer accepts.
+
+| Purpose | Supported |
+|---|---|
+| Signature | RSA PKCS#1 v1.5 and ECDSA, each with SHA-256, SHA-384, SHA-512 |
+| Digest | SHA-256, SHA-384, SHA-512 |
+| Canonicalization | Canonical XML 1.0 and 1.1, Exclusive Canonical XML 1.0, with or without comments, from `go-xml/c14n` |
+| Transforms | enveloped signature, base64, SwA `Attachment-Content-Only` |
+| Key transport | RSA-OAEP (XML Encryption 1.1), MGF1 with SHA-256, SHA-384, SHA-512 |
+| Data encryption | AES-128-GCM, AES-192-GCM, AES-256-GCM |
+
+Refused on purpose, whoever asks: SHA-1 in any role, `rsa-oaep-mgf1p`,
+`rsa-1_5`, XSLT and XPath transforms, DOCTYPE, and dereferencing any URI
+outside the document and its attachments. The reasons are in
+[docs/security.md](docs/security.md#deliberate-refusals).
+
+## How it is tested
+
+| | |
+|---|---|
+| Unit and conformance tests | Linux, macOS and Windows on every commit; 100% statement coverage, enforced |
+| Interoperability | [`xmlsec1`](https://www.aleksey.com/xmlsec/) 1.3 verifies our signatures and decrypts our output, and we do the same for its output, on every commit |
+| Security | XXE, external fetches, signature wrapping, key substitution, algorithm confusion, comment truncation and encryption downgrade, each a regression test |
+| Fuzzing | Three targets on the verify and decrypt paths, one hour each, nightly |
+
+Not yet: a second independent implementation (Apache Santuario) and
+real-world message corpora. Until both pass, the version stays below 1.0.
+[docs/testing.md](docs/testing.md) has the detail and
+[docs/todo.md](docs/todo.md) what remains.
 
 ## Documentation
 
-[docs/](docs/README.md) · [CHANGELOG.md](CHANGELOG.md) ·
-[SECURITY.md](SECURITY.md) · [RELEASE.md](RELEASE.md)
+- [Usage](docs/usage.md): signing, verifying, WS-Security, encryption
+- [Security](docs/security.md): threat model, refusals, limits, assessment
+- [Testing](docs/testing.md): what runs and how to run it
+- [CHANGELOG.md](CHANGELOG.md) · [SECURITY.md](SECURITY.md) for reporting
+  vulnerabilities · [RELEASE.md](RELEASE.md)
 
 ## License
 
