@@ -505,3 +505,26 @@ func TestOmittedURI(t *testing.T) {
 		})
 	}
 }
+
+// StrictSecurityTokenReference applies the Basic Security Profile rules to
+// the token reference: a message this library builds passes, and one whose
+// reference lacks a ValueType passes only in the default, lenient mode.
+func TestStrictSecurityTokenReference(t *testing.T) {
+	signed, _, _ := signAS4(t, newKey(t, rsaKey))
+	opts := as4Allow
+	opts.Attachments = attachments(t, "payload")
+	opts.StrictSecurityTokenReference = true
+	doc := parse(t, signed)
+	if _, err := dsig.Verify(doc, findSignature(doc), opts); err != nil {
+		t.Fatalf("our own message, strict: %v", err)
+	}
+
+	loose := parse(t, []byte(strings.Replace(string(signed), ` ValueType="`+xmlsec.BSTValueTypeX509v3+`"></wsse:Reference>`, `></wsse:Reference>`, 1)))
+	if _, err := dsig.Verify(loose, findSignature(loose), opts); !errors.Is(err, xmlsec.ErrMalformed) {
+		t.Fatalf("no ValueType, strict: %v", err)
+	}
+	opts.StrictSecurityTokenReference = false
+	if _, err := dsig.Verify(loose, findSignature(loose), opts); err != nil {
+		t.Fatalf("no ValueType, lenient: %v", err)
+	}
+}

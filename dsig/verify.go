@@ -98,6 +98,14 @@ type VerifyOptions struct {
 	// canonicalization on every reference can turn it on.
 	RequireExplicitCanonicalization bool
 
+	// StrictSecurityTokenReference resolves a wsse:SecurityTokenReference in
+	// ds:KeyInfo with wss.ResolveSecurityTokenReferenceStrict: the reference
+	// must carry the token's ValueType (and TokenType where the profile
+	// requires one), and the token must be in the same wsse:Security header,
+	// before the reference. For profiles that demand WS-I Basic Security
+	// Profile conformance of what they receive.
+	StrictSecurityTokenReference bool
+
 	// ResolveOmittedURI supplies the data object of a ds:Reference without
 	// a URI attribute, which XML-DSig 4.4.3.1 allows on at most one
 	// Reference: "the receiving application is expected to know the
@@ -294,7 +302,7 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 		}
 	}
 
-	cert, pub, form, err := resolveKeyInfo(doc, p.keyInfo, opts.IDAttributes)
+	cert, pub, form, err := resolveKeyInfo(doc, p.keyInfo, opts.IDAttributes, opts.StrictSecurityTokenReference)
 	pinned := opts.Certificate != nil || opts.PublicKey != nil
 	switch {
 	case pinned && errors.Is(err, xmlsec.ErrUnsupportedKeyInfo):

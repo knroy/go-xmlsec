@@ -41,7 +41,7 @@ var namedCurves = map[elliptic.Curve]string{
 // dsig11:KeyInfoReference to a ds:KeyInfo in the same document holding one
 // of those. idAttrs are the ID attributes the reference resolves against
 // beyond wsu:Id and xml:id.
-func resolveKeyInfo(doc, ki *xdm.Node, idAttrs []xdm.QName) (*x509.Certificate, crypto.PublicKey, KeyInfoSpec, error) {
+func resolveKeyInfo(doc, ki *xdm.Node, idAttrs []xdm.QName, strict bool) (*x509.Certificate, crypto.PublicKey, KeyInfoSpec, error) {
 	if ki == nil {
 		return nil, nil, KeyInfoNone, nil
 	}
@@ -51,12 +51,16 @@ func resolveKeyInfo(doc, ki *xdm.Node, idAttrs []xdm.QName) (*x509.Certificate, 
 		if err != nil {
 			return nil, nil, KeyInfoNone, err
 		}
-		return resolveKeyInfo(doc, target, idAttrs)
+		return resolveKeyInfo(doc, target, idAttrs, strict)
 	}
 	if len(kids) == 1 {
 		switch k := kids[0]; {
 		case k.IsElement(wss.NSWSSE, "SecurityTokenReference"):
-			cert, err := wss.ResolveSecurityTokenReference(doc, k)
+			resolve := wss.ResolveSecurityTokenReference
+			if strict {
+				resolve = wss.ResolveSecurityTokenReferenceStrict
+			}
+			cert, err := resolve(doc, k)
 			return withKey(cert, KeyInfoSecurityTokenReference, err)
 		case k.IsElement(NSDSig, "KeyValue"):
 			pub, err := parseKeyValue(k)
