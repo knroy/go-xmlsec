@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"errors"
 	"io"
@@ -370,5 +371,44 @@ func TestHMACReportedAsNotAllowed(t *testing.T) {
 	xmltree.Text(xmltree.Element(sm, "ds", dsig.NSDSig, "HMACOutputLength"), "160")
 	if _, err := dsig.Verify(doc, sig, dsig.VerifyOptions{}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
 		t.Fatalf("got %v", err)
+	}
+}
+
+// TrustCertificate sees the signer's certificate before any digest is
+// computed: a tampered message whose certificate the hook refuses fails as
+// untrusted, not as a digest mismatch.
+func TestTrustCertificate(t *testing.T) {
+	key := newKey(t, rsaKey)
+	signed := signEnveloped(t, key, xmlsec.SigRSASHA256, xmlsec.DigestSHA256)
+
+	var seen *x509.Certificate
+	accept := func(c *x509.Certificate) error { seen = c; return nil }
+	doc := parse(t, signed)
+	if _, err := dsig.Verify(doc, findSignature(doc), dsig.VerifyOptions{TrustCertificate: accept}); err != nil {
+		t.Fatal(err)
+	}
+	if !seen.Equal(key.Certificate) {
+		t.Fatal("hook did not see the signer's certificate")
+	}
+
+	errNotOurs := errors.New("not a known sender")
+	refuse := func(*x509.Certificate) error { return errNotOurs }
+	tampered := parse(t, []byte(strings.Replace(string(signed), "example.com", "evil.com", 1)))
+	_, err := dsig.Verify(tampered, findSignature(tampered), dsig.VerifyOptions{TrustCertificate: refuse})
+	if !errors.Is(err, xmlsec.ErrUntrusted) || !errors.Is(err, errNotOurs) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestRequireExplicitCanonicalization(t *testing.T) {
+	doc, sig, key := signForImplicit(t, c14n.Inclusive10)
+	_, err := dsig.Verify(doc, sig, dsig.VerifyOptions{Certificate: key.Certificate, RequireExplicitCanonicalization: true})
+	if !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
+		t.Fatalf("implied C14N with RequireExplicitCanonicalization: %v", err)
+	}
+	// A reference that names its canonicalization is unaffected.
+	doc = parse(t, signEnveloped(t, key, xmlsec.SigRSASHA256, xmlsec.DigestSHA256))
+	if _, err := dsig.Verify(doc, findSignature(doc), dsig.VerifyOptions{Certificate: key.Certificate, RequireExplicitCanonicalization: true}); err != nil {
+		t.Fatal(err)
 	}
 }

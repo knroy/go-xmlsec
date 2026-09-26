@@ -36,6 +36,10 @@ var (
 	// ErrLimitExceeded is returned when input exceeds a resource limit.
 	ErrLimitExceeded = errors.New("xmlsec: resource limit exceeded")
 
+	// ErrUntrusted is returned when VerifyOptions.TrustCertificate refuses
+	// the signer's certificate. The caller's reason is wrapped.
+	ErrUntrusted = errors.New("xmlsec: certificate not trusted")
+
 	// ErrAmbiguousID is returned when more than one element carries an ID
 	// being resolved. Duplicate IDs are an XML Signature Wrapping technique.
 	ErrAmbiguousID = errors.New("xmlsec: ambiguous ID")

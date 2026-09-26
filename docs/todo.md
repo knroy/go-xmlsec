@@ -9,8 +9,6 @@
 | Golden files, with `-update` | See [testing.md](testing.md#not-tested-yet). |
 | Raw keys in `ds:KeyInfo` (`KeyValue`, `DEREncodedKeyValue`) | `Verify` works from certificates, so the 25 W3C interop vectors that carry raw keys are refused. A caller that pins a key rather than a certificate cannot express it today. |
 | SAML `ID` attributes | `FindByID` resolves `wsu:Id` and `xml:id` only. SAML is the likeliest second consumer. |
-| Configurable, lower parse limits | Parsing costs up to about 40 times the input in memory (see [security.md](security.md#resource-limits)). The pinned limits cannot be lowered; callers must cap input size themselves. Deciding whether `Parse` should accept stricter limits is open. |
-| A trust hook before reference processing | With no pinned certificate, an attacker's own valid signature forces every reference to be digested before the caller can refuse the certificate ([security.md](security.md#verification-cost-before-the-certificate-is-judged)). A `VerifyOptions` callback run after key resolution and before any digest would close it; it is an API decision. |
 
 ## Acceptance criteria
 

@@ -25,6 +25,10 @@ tree, err := xmlsec.Parse(received)
 doc := tree.Root
 ```
 
+`xmlsec.ParseWithLimits` does the same under tighter limits: set `MaxBytes`,
+`MaxDepth` and `MaxNodes` to what your profile needs. Limits can only be
+tightened, never loosened, and exceeding one is `ErrLimitExceeded`.
+
 ## WS-Security signature
 
 `dsig.Sign` returns a detached `ds:Signature` for you to place, and does not
@@ -97,6 +101,13 @@ cov, err := dsig.Verify(doc, sigElement, dsig.VerifyOptions{
 
 Pass exactly the algorithms your profile permits. An empty list means every
 algorithm this module implements, which is a downgrade surface.
+
+Two more options narrow what is accepted:
+
+| Option | Effect |
+|---|---|
+| `TrustCertificate func(*x509.Certificate) error` | Called with the signer's certificate before any cryptographic or digest work; an error stops verification with `ErrUntrusted`. Use it when you cannot pin one certificate but know which you accept: a refused sender costs nothing to process. |
+| `RequireExplicitCanonicalization` | Refuse a reference that relies on the Canonical XML 1.0 implied by XML-DSig 4.4.3.2, even when that algorithm is in the allow-list. Off by default, because most signers rely on it. |
 
 Then check `Coverage`, every time:
 

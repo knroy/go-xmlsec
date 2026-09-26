@@ -96,10 +96,10 @@ about 40 times the input in memory, before anything is authenticated:
 | 1,000,000-deep nesting | 6.7 MB | refused at depth 1000 | 34 MB |
 | over the byte limit | 65 MB | refused | 318 MB |
 
-The limits are the design document's pinned values and are not
-configurable. A server should therefore cap the size of what it hands to
-`Parse` at what its profile needs: memory scales with input size, so a size
-cap bounds every row above.
+The pinned limits are the design document's values and cannot be loosened.
+A server should tighten them to what its profile needs with
+`xmlsec.ParseWithLimits`: memory scales with `MaxBytes` and `MaxNodes`, so
+tightening them bounds every row above.
 
 Setting `c14n.MaxDepth` is process-global: it also bounds any other `c14n`
 user in the same program.
@@ -121,9 +121,11 @@ is then valid, and every reference is digested before the caller sees
 8 MB element cost 5.1 s of CPU; the same message against a pinned
 certificate is refused at once.
 
-Pin the certificate whenever the sender is known in advance, and set
-`MaxReferences` to what the profile needs (a WS-Security message signing a
-header, a body and a few attachments needs well under 64).
+Pin the certificate whenever the sender is known in advance. When it is not,
+set `VerifyOptions.TrustCertificate`: it sees the signer's certificate
+before any cryptographic or digest work, so refusing an unknown sender costs
+nothing. And set `MaxReferences` to what the profile needs (a WS-Security
+message signing a header, a body and a few attachments needs well under 64).
 
 ## Other properties
 
@@ -160,7 +162,7 @@ test in `tests/security` or beside the package it exercises.
 2. Check `Coverage` against the profile, every time.
 3. Pass single-value allow-lists for the profile.
 4. Parse with `xmlsec.Parse`, and keep the received octets.
-5. Cap the size of input before parsing, and pin the certificate or keep
-   `MaxReferences` low; see the cost sections above.
+5. Tighten the parse limits with `ParseWithLimits`, and pin the certificate
+   or judge it in `TrustCertificate`; see the cost sections above.
 6. Transmit `SignEnveloped` and `EncryptElement` output exactly, never
    re-serialized.

@@ -88,14 +88,16 @@ and encryption in full.
 `Coverage` lists, and nothing more. Before trusting a message:
 
 1. **Pin the certificate** with `VerifyOptions.Certificate` when you know the
-   sender. Otherwise the certificate comes from the message itself, and
-   deciding whether to trust it is up to you: this library makes no trust
-   decisions.
+   sender, or judge it in `VerifyOptions.TrustCertificate`, which runs before
+   any cryptographic work. Otherwise the certificate comes from the message
+   itself, and deciding whether to trust it is up to you: this library makes
+   no trust decisions.
 2. **Check `Coverage`.** Confirm it includes every element and attachment you
    are about to read (`Covers`, `CoversAttachments`, `SignedElements`). A
    valid signature over the wrong element is how XML Signature Wrapping works.
 3. **Pass allow-lists** naming exactly the algorithms your profile permits.
-4. **Parse with `xmlsec.Parse`**, and cap the size of what you hand it.
+4. **Parse with `xmlsec.Parse`**, or `xmlsec.ParseWithLimits` to tighten the
+   limits to what your profile needs.
 
 [docs/security.md](docs/security.md) explains each rule, with the threat model
 and measured costs.
