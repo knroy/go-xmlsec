@@ -131,6 +131,7 @@ outside the document and its attachments. The reasons are in
 | Real-world documents | 122 real Peppol SMP responses, from 62 providers, all verify; kept in a separate corpus module |
 | Security | XXE, external fetches, signature wrapping, key substitution, algorithm confusion, comment truncation and encryption downgrade, each a regression test |
 | Fuzzing | Three targets on the verify and decrypt paths, one hour each, nightly |
+| Canonicalization | done by `go-xml/c14n` v1.4.0, which reports its own differential testing against `xmllint` and `xmlsec1`; a Santuario differential and a real-message corpus are still open there. The byte-identical signatures and the real-world corpus above exercise it independently. |
 
 [docs/testing.md](docs/testing.md) has the detail, including every dataset
 the tests use, and [docs/todo.md](docs/todo.md) what remains before 1.0.
