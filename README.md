@@ -128,6 +128,7 @@ outside the document and its attachments. The reasons are in
 | Interoperability | [`xmlsec1`](https://www.aleksey.com/xmlsec/) 1.3 and [Apache Santuario](https://santuario.apache.org/) 4.0.4 verify our signatures and decrypt our output, and we do the same for theirs, on every commit |
 | Byte equality | the same document signed with the same key produces a `SignatureValue` byte-identical to Santuario's, enveloped and WS-Security |
 | Static analysis | `staticcheck` and `gosec`, clean, on every commit |
+| Real-world documents | 122 real Peppol SMP responses, from 62 providers, all verify; kept in a separate corpus module |
 | Security | XXE, external fetches, signature wrapping, key substitution, algorithm confusion, comment truncation and encryption downgrade, each a regression test |
 | Fuzzing | Three targets on the verify and decrypt paths, one hour each, nightly |
 

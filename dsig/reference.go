@@ -12,6 +12,21 @@ import (
 	"github.com/knroy/go-xmlsec/wss"
 )
 
+// impliesC14N reports whether a reference relies on the implicit Canonical
+// XML 1.0 of XML-DSig 4.4.3.2: a same-document URI and no canonicalization
+// among its transforms, so the chain ends in a node set.
+func impliesC14N(uri string, transforms []TransformSpec) bool {
+	if uri != "" && !strings.HasPrefix(uri, "#") {
+		return false
+	}
+	for _, t := range transforms {
+		if isC14N(t.Algorithm) {
+			return false
+		}
+	}
+	return true
+}
+
 // dereferenced is what a reference actually covered, derived while
 // digesting it rather than inferred from its URI.
 type dereferenced struct {
@@ -24,8 +39,13 @@ type dereferenced struct {
 // the resulting octets into h. sig is the ds:Signature the reference
 // belongs to, which the enveloped-signature transform removes; when the
 // signature is not yet in the document, that removal is a no-op.
+//
+// implicit applies XML-DSig 4.4.3.2: a same-document reference whose
+// transforms end in a node set is converted to octets with Canonical XML
+// 1.0. Verification applies it, because most signers rely on it; signing
+// does not, so this library never produces a signature that depends on it.
 func digestReference(h hash.Hash, doc, sig *xdm.Node, uri string, transforms []TransformSpec,
-	atts xmlsec.AttachmentSet) (dereferenced, error) {
+	atts xmlsec.AttachmentSet, implicit bool) (dereferenced, error) {
 
 	var (
 		out    dereferenced
@@ -57,7 +77,7 @@ func digestReference(h hash.Hash, doc, sig *xdm.Node, uri string, transforms []T
 		return out, fmt.Errorf("%w: reference URI %q", xmlsec.ErrMalformed, uri)
 	}
 
-	if ns != nil && len(transforms) == 0 {
+	if ns != nil && len(transforms) == 0 && !implicit {
 		return out, fmt.Errorf("%w: same-document reference %q has no canonicalization transform", xmlsec.ErrMalformed, uri)
 	}
 	if len(transforms) > MaxTransformsPerReference {
@@ -125,7 +145,11 @@ func digestReference(h hash.Hash, doc, sig *xdm.Node, uri string, transforms []T
 		}
 	}
 	if ns != nil {
-		return out, fmt.Errorf("%w: final transform of %q yields a node set, not octets", xmlsec.ErrMalformed, uri)
+		if !implicit {
+			return out, fmt.Errorf("%w: final transform of %q yields a node set, not octets", xmlsec.ErrMalformed, uri)
+		}
+		_, err := c14n.DigestNodeSet(h, ns, c14n.Options{Algorithm: c14n.Inclusive10})
+		return out, err
 	}
 	h.Write(octets)
 	return out, nil

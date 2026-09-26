@@ -65,7 +65,7 @@ single profile.
 | DOCTYPE | Entry point for XXE and entity expansion. `xmlsec.Parse` never enables it and never supplies an entity resolver; `TestParseRefusesXXE` asserts it for every variant in the assessment below. |
 | Network or filesystem dereferencing | Only `""`, `#id` and `cid:` references resolve. `TestVerifyDereferencesNothingExternal` asserts it with an authentic signature, so the refusal is not merely a side effect of an earlier failure. |
 | RSA PKCS#1 v1.5 key transport (`rsa-1_5`) | The Bleichenbacher padding-oracle class. Not implemented, so not accepted. |
-| KeyInfo forms other than one `X509Certificate` or a direct `SecurityTokenReference` | Issuer-and-serial and thumbprint references are legal but are not emitted, so they are not tested, so they are not accepted. |
+| KeyInfo forms other than a certificate or a direct `SecurityTokenReference` | Accepted: `ds:X509Data` carrying exactly one `ds:X509Certificate`, beside which `X509SubjectName`, `X509IssuerSerial` and `X509SKI` are ignored: they only describe the certificate, and the key is always taken from the certificate itself. Refused: a second certificate, raw keys (`KeyValue`), key references (`KeyInfoReference`, `RetrievalMethod`) and digests (`X509Digest`), which would need a key-selection policy this library does not make. |
 
 ## Resource limits
 

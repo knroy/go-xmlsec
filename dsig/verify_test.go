@@ -5,6 +5,8 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"io"
@@ -221,5 +223,152 @@ func TestKeyInfoNone(t *testing.T) {
 				t.Fatalf("form %d, references %+v", cov.KeyInfoForm, cov.References)
 			}
 		})
+	}
+}
+
+// resignSI re-signs ds:SignedInfo in place with rsaKey, after a test has
+// altered it, so only the property under test decides the outcome.
+func resignSI(t *testing.T, sig *xdm.Node, alg c14n.Algorithm) {
+	t.Helper()
+	si, value := sig.ChildElements()[0], sig.ChildElements()[1]
+	h := sha256.New()
+	if _, err := c14n.Digest(h, si, c14n.Options{Algorithm: alg}); err != nil {
+		t.Fatal(err)
+	}
+	v, err := rsa.SignPKCS1v15(rand.Reader, rsaKey, crypto.SHA256, h.Sum(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	value.Children[0].Value = base64.StdEncoding.EncodeToString(v)
+}
+
+// signForImplicit signs doc with an enveloped reference whose explicit
+// transform is Canonical XML 1.0, then removes that transform: the digest
+// is unchanged, since Canonical XML 1.0 is exactly what is then implied.
+func signForImplicit(t *testing.T, siAlg c14n.Algorithm) (*xdm.Node, *xdm.Node, xmlsec.KeyProvider) {
+	t.Helper()
+	key := newKey(t, rsaKey)
+	tree, err := xmlsec.Parse([]byte(`<r><a>x</a></r>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	signed, err := dsig.SignEnveloped(tree.Root, key, dsig.SignOptions{
+		SignatureAlgorithm:        xmlsec.SigRSASHA256,
+		CanonicalizationAlgorithm: string(siAlg),
+		References: []dsig.Reference{{URI: "", DigestAlgorithm: xmlsec.DigestSHA256, Transforms: []dsig.TransformSpec{
+			{Algorithm: xmlsec.TransformEnvelopedSignature}, {Algorithm: string(c14n.Inclusive10)}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := parse(t, signed)
+	sig := findSignature(doc)
+	transforms := sig.ChildElements()[0].ChildElements()[2].ChildElements()[0]
+	transforms.Children = transforms.Children[:1] // enveloped-signature only
+	resignSI(t, sig, siAlg)
+	return doc, sig, key
+}
+
+// XML-DSig 4.4.3.2: a reference ending in a node set is canonicalized with
+// Canonical XML 1.0. Most SMP software signs this way.
+func TestImplicitCanonicalization(t *testing.T) {
+	doc, sig, key := signForImplicit(t, c14n.Inclusive10)
+	cov, err := dsig.Verify(doc, sig, dsig.VerifyOptions{Certificate: key.Certificate})
+	if err != nil || !cov.WholeDocumentSigned {
+		t.Fatalf("implicit C14N: %v", err)
+	}
+
+	// The implied algorithm is subject to the allow-list like a named one.
+	doc, sig, key = signForImplicit(t, c14n.Exclusive10)
+	_, err = dsig.Verify(doc, sig, dsig.VerifyOptions{
+		Certificate:                       key.Certificate,
+		AllowedCanonicalizationAlgorithms: []string{string(c14n.Exclusive10)},
+	})
+	if !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
+		t.Fatalf("implicit C14N outside the allow-list: %v", err)
+	}
+
+	// A same-document reference with no transforms at all.
+	key = newKey(t, rsaKey)
+	tree, err := xmlsec.Parse([]byte(`<r xmlns:wsu="` + wss.NSWSU + `"><a wsu:Id="a">x</a></r>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := dsig.Sign(tree.Root, key, dsig.SignOptions{
+		SignatureAlgorithm:        xmlsec.SigRSASHA256,
+		CanonicalizationAlgorithm: string(c14n.Exclusive10),
+		References: []dsig.Reference{{URI: "#a", DigestAlgorithm: xmlsec.DigestSHA256,
+			Transforms: []dsig.TransformSpec{{Algorithm: string(c14n.Inclusive10)}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := s.ChildElements()[0].ChildElements()[2]
+	ref.Children = ref.Children[1:] // drop ds:Transforms
+	xmltree.DocumentElement(tree.Root).AppendChild(s)
+	resignSI(t, s, c14n.Exclusive10)
+	if cov, err := dsig.Verify(tree.Root, s, dsig.VerifyOptions{Certificate: key.Certificate}); err != nil || !cov.Covers("a") {
+		t.Fatalf("no transforms: %v", err)
+	}
+}
+
+// ds:X509Data may carry the subject name, issuer-serial or SKI of its one
+// certificate, as most SMP software emits; they are ignored.
+func TestX509DataDescriptiveElements(t *testing.T) {
+	add := func(parent *xdm.Node, local, text string) *xdm.Node {
+		e := xmltree.Element(parent, "ds", dsig.NSDSig, local)
+		xmltree.Text(e, text)
+		return e
+	}
+	keyInfo := func(t *testing.T) (*xdm.Node, *xdm.Node, *xdm.Node) {
+		doc := parse(t, signEnveloped(t, newKey(t, rsaKey), xmlsec.SigRSASHA256, xmlsec.DigestSHA256))
+		sig := findSignature(doc)
+		ki := sig.ChildElements()[2]
+		return doc, sig, ki
+	}
+	cases := []struct {
+		name string
+		mod  func(ki *xdm.Node)
+		want error
+	}{
+		{"subject name and issuer-serial", func(ki *xdm.Node) {
+			x := ki.ChildElements()[0]
+			add(x, "X509SubjectName", "CN=test")
+			is := xmltree.Element(x, "ds", dsig.NSDSig, "X509IssuerSerial")
+			add(is, "X509IssuerName", "CN=test")
+			add(is, "X509SerialNumber", "1")
+		}, nil},
+		{"a second X509Data with an SKI", func(ki *xdm.Node) {
+			add(xmltree.Element(ki, "ds", dsig.NSDSig, "X509Data"), "X509SKI", "AAAA")
+		}, nil},
+		{"two certificates", func(ki *xdm.Node) {
+			x := ki.ChildElements()[0]
+			add(x, "X509Certificate", x.ChildElements()[0].StringValue())
+		}, xmlsec.ErrUnsupportedKeyInfo},
+		{"a CRL", func(ki *xdm.Node) { add(ki.ChildElements()[0], "X509CRL", "AAAA") }, xmlsec.ErrUnsupportedKeyInfo},
+		{"a KeyName beside X509Data", func(ki *xdm.Node) { add(ki, "KeyName", "k") }, xmlsec.ErrUnsupportedKeyInfo},
+		{"no certificate", func(ki *xdm.Node) { ki.Children = nil }, xmlsec.ErrUnsupportedKeyInfo},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			doc, sig, ki := keyInfo(t)
+			c.mod(ki)
+			if _, err := dsig.Verify(doc, sig, dsig.VerifyOptions{}); !errors.Is(err, c.want) && !(c.want == nil && err == nil) {
+				t.Fatalf("got %v, want %v", err, c.want)
+			}
+		})
+	}
+}
+
+// An HMAC SignatureMethod carries HMACOutputLength as a child. It is refused
+// as a disallowed algorithm, not as a malformed element.
+func TestHMACReportedAsNotAllowed(t *testing.T) {
+	doc := parse(t, signEnveloped(t, newKey(t, rsaKey), xmlsec.SigRSASHA256, xmlsec.DigestSHA256))
+	sig := findSignature(doc)
+	sm := sig.ChildElements()[0].ChildElements()[1]
+	sm.Attr("", "Algorithm").Value = "http://www.w3.org/2000/09/xmldsig#hmac-sha1"
+	xmltree.Text(xmltree.Element(sm, "ds", dsig.NSDSig, "HMACOutputLength"), "160")
+	if _, err := dsig.Verify(doc, sig, dsig.VerifyOptions{}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
+		t.Fatalf("got %v", err)
 	}
 }

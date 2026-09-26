@@ -160,6 +160,9 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 	if err := allowed("signature", p.sigAlg, opts.AllowedSignatureAlgorithms, func(s string) bool { _, ok := xmlsec.SignatureHash(s); return ok }); err != nil {
 		return nil, err
 	}
+	if p.sigMethodChildren > 0 {
+		return nil, malformed("ds:SignatureMethod has children")
+	}
 	if err := allowed("canonicalization", string(p.c14n.Algorithm), opts.AllowedCanonicalizationAlgorithms, isC14N); err != nil {
 		return nil, err
 	}
@@ -172,6 +175,13 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 				if err := allowed("canonicalization", t.Algorithm, opts.AllowedCanonicalizationAlgorithms, isC14N); err != nil {
 					return nil, err
 				}
+			}
+		}
+		// The implicit Canonical XML 1.0 is subject to the allow-list like
+		// any named one.
+		if impliesC14N(r.uri, r.transforms) {
+			if err := allowed("implicit canonicalization", string(c14n.Inclusive10), opts.AllowedCanonicalizationAlgorithms, isC14N); err != nil {
+				return nil, err
 			}
 		}
 	}
@@ -213,7 +223,7 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 	for i, r := range p.refs {
 		dh, _ := xmlsec.DigestHash(r.digestAlg)
 		h := dh.New()
-		got, err := digestReference(h, doc, sig, r.uri, r.transforms, opts.Attachments)
+		got, err := digestReference(h, doc, sig, r.uri, r.transforms, opts.Attachments, true)
 		if err != nil {
 			return nil, err
 		}

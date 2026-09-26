@@ -35,6 +35,9 @@ type Reference struct {
 	// Transforms are applied in order. The final transform's output must be
 	// an octet stream: for same-document references the last transform is
 	// a canonicalization; for cid: references it is an SwA transform.
+	// (Verify also accepts a received reference that ends in a node set,
+	// completing it with Canonical XML 1.0 as XML-DSig 4.4.3.2 requires;
+	// Sign never produces one.)
 	Transforms []TransformSpec
 
 	// DigestAlgorithm is a Digest* constant. Required.

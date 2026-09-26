@@ -129,7 +129,7 @@ func sign(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions, parent *xdm.N
 			return nil, fmt.Errorf("%w: digest %q", xmlsec.ErrUnsupportedAlgorithm, r.DigestAlgorithm)
 		}
 		h := dh.New()
-		if _, err := digestReference(h, doc, sig, r.URI, r.Transforms, opts.Attachments); err != nil {
+		if _, err := digestReference(h, doc, sig, r.URI, r.Transforms, opts.Attachments, false); err != nil {
 			return nil, err
 		}
 		ref := xmltree.Element(si, "ds", NSDSig, "Reference")

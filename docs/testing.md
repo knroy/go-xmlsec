@@ -50,6 +50,8 @@ Named `TestConformance_<ID>_<description>` for the requirement they prove.
 | `TestParseRefusesXXE`, `TestParseFetchesNothing`, `TestVerifyDereferencesNothingExternal` | every XXE and external-reference route in the [assessment](security.md#assessment) is refused or inert, with zero requests reaching a local listener |
 | `TestPinnedCertificateIgnoresEmbeddedKey`, `TestAlgorithmConfusion` | an attacker's own key is refused against a pinned certificate; HMAC, SHA-1 and key-type confusion are refused |
 | `TestNilInputs` (`wss`, `xenc`) | a nil or wrong-kind argument is an error, never a panic |
+| `TestImplicitCanonicalization` | a received reference ending in a node set verifies through Canonical XML 1.0, and the implied algorithm is refused when outside the allow-list |
+| `TestX509DataDescriptiveElements` | subject name, issuer-serial and SKI beside one certificate are accepted and ignored; a second certificate, a CRL, a `KeyName` or no certificate are refused |
 | `TestFindByID` | duplicate IDs are refused across `wsu:Id` and `xml:id` |
 | `TestPrefixBoundElsewhere` | a `wsu` or `wsse` prefix bound to another namespace higher up does not corrupt the header |
 | `TestVersionIsReleasedAndDescribed` | the version constant and the changelog agree; see [RELEASE.md](../RELEASE.md) |
@@ -141,6 +143,21 @@ produced by this library, plus the malformed seeds listed under Fuzzing.
 Inputs the fuzzer finds interesting stay in the local Go fuzz cache; any
 failing input is committed under `testdata/fuzz/<Target>/` as a permanent
 regression seed.
+
+**Real-world corpus.** Kept in a separate module, `go-xmlsec-corpus`, so
+that third-party documents never ship inside this library's module. It is
+run against this library through a `replace` directive:
+
+| Source | Files | Outcome |
+|---|---:|---|
+| Peppol SMP responses, fetched 2026-09-26, stored byte-for-byte | 122, from 62 SMP providers and at least 20 distinct producing implementations | **all verify**: whole document signed, key from the certificate |
+| W3C XML Signature 1.1 interop vectors (2012, Oracle), W3C Document License | 25: ECDSA P-256/384/521 and RSA with SHA-256/384/512 | refused by policy: they carry raw keys or key references, not certificates |
+
+Every one of the 147 was also checked independently: each signature and every
+digest matches. The documents exercise CRLF line endings, a UTF-8 byte-order
+mark, character references and non-ASCII text. The corpus found the two
+behaviours recorded in [todo.md](todo.md) as decided departures: implicit
+Canonical XML 1.0 on verification, and descriptive `X509Data` elements.
 
 ## Fuzzing
 

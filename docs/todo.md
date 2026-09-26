@@ -36,7 +36,7 @@ v1 waits for all of them. Numbers refer to the design document.
 | X-2 | `xdm.ElementByID` on duplicate IDs | **Answered** from the v1.4.0 source: it returns the first depth-first match. Not used on the verify path. |
 | X-3 | Gate 1 status upstream | go-xml v1.4.0's changelog now reports `xmllint` and `xmlsec1` differentials; the Santuario differential and real-message corpus are still open there. |
 | X-4 | AS4 canonicalization URI inherited, not stated | unchanged |
-| X-5 | Real-message corpus | unchanged |
+| X-5 | Real-message corpus | **Partly closed.** 122 real Peppol SMP responses from 62 providers, plus 25 W3C XML-DSig 1.1 interop vectors, are verified in a separate module, `go-xmlsec-corpus`, kept out of this library's module. All 122 SMP responses verify. Captured AS4 messages still need a certified access point. |
 | X-6 | Does any peer require `Attachment-Complete`? | unchanged |
 
 ## Where the implementation departs from the design document
@@ -55,4 +55,6 @@ the first tag, since a public API is hard to reshape afterwards.
 | `SignEnveloped` and `EncryptElement` output is `Inclusive10WithComments` of the document | This module has no serializer and should not grow one; canonical form re-parses to the same tree. The XML declaration is dropped. |
 | No `dsig/transform` sub-package or transform registry | The transform set is closed and small; one switch in `dsig/reference.go` is the whole pipeline. |
 | The differential harness is `tests/interop`, not `internal/interop` | The repository keeps harnesses under `tests/`, as go-xml does. |
+| Verification completes a reference ending in a node set with Canonical XML 1.0 | **Decided.** The design document made it an error on both sides. The corpus showed 118 of 122 real SMP responses rely on it, as XML-DSig 4.4.3.2 permits; refusing it made the library unusable as an SMP client. Signing stays strict. |
+| `ds:X509Data` may carry the subject name, issuer-serial or SKI beside its one certificate | **Decided.** Found by the corpus: 107 real SMP responses carry them. They are ignored for key selection. |
 | No `xenc/encrypt.go` and `decrypt.go` split | Split by mechanism instead: key transport, data cipher, cipher reference. |

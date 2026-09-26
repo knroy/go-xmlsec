@@ -49,8 +49,13 @@ Reference forms:
 | `"cid:..."` | `TransformAttachmentContentOnly` | the attachment body octets, exactly as on the wire |
 | `""` | `TransformEnvelopedSignature`, then a canonicalization | the whole document minus the enclosing signature |
 
-A same-document reference with no transforms, or whose last transform leaves
-a node set, is refused: no implicit canonicalization is inserted.
+When signing, a same-document reference with no transforms, or whose last
+transform leaves a node set, is refused: this library never produces a
+signature that relies on an implicit canonicalization. When verifying, such a
+reference is completed with Canonical XML 1.0, as XML Signature section
+4.4.3.2 requires, because most signing software relies on exactly that; the
+implied algorithm is checked against `AllowedCanonicalizationAlgorithms` like
+a named one.
 
 `Attachment-Content-Only` is the identity on `Attachment.Body`. The digest
 covers the octets as transmitted — compressed, if the part is compressed.
