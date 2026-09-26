@@ -56,7 +56,14 @@ func oaepOptions(mgf, digest string, label []byte) (*rsa.OAEPOptions, error) {
 // Except for key agreement, the element carries no ds:KeyInfo; the caller
 // adds one identifying the recipient's key in whatever form its profile
 // requires. opts.CarriedKeyName and opts.RecipientHint are emitted when set.
+//
+// A legacy algorithm (see the package documentation) in any of opts'
+// algorithm fields is refused with xmlsec.ErrUnsupportedAlgorithm: those are
+// implemented for decryption only.
 func GenerateEncryptedKey(opts EncryptOptions) (*EncryptedKey, error) {
+	if err := encryptable(opts.DataAlgorithm, opts.KeyTransportAlgorithm, opts.MGFAlgorithm, opts.DigestAlgorithm); err != nil {
+		return nil, err
+	}
 	size, ok := keySizes[opts.DataAlgorithm]
 	if !ok {
 		return nil, unsupported("data %q", opts.DataAlgorithm)
@@ -119,13 +126,18 @@ func rsaOAEPWrap(m *xdm.Node, key []byte, opts EncryptOptions) ([]byte, error) {
 }
 
 // DecryptEncryptedKey unwraps a session key from an xenc:EncryptedKey
-// transported by RSA-OAEP. For AES key wrap use UnwrapEncryptedKey, and for
-// key agreement DecryptAgreedKey.
+// transported by RSA-OAEP. For AES key wrap use UnwrapEncryptedKey, for key
+// agreement DecryptAgreedKey, and for RSA v1.5 DecryptEncryptedKeyPKCS1v15.
 //
 // The allowed lists restrict the accepted algorithms; an empty list means
 // the default set (see the package documentation). The key transport
 // algorithm is checked first. An absent DigestMethod or MGF means SHA-1 by
-// specification default and is refused. A KeySize under the
+// specification default (section 5.5.2), and is accepted only when
+// allowedDigest names xmlsec.DigestSHA1 or allowedMGF names xmlsec.MGF1SHA1,
+// exactly as an explicit SHA-1 is. The legacy
+// xmlsec.KeyTransportRSAOAEPMGF1P, decrypted only when allowedKeyTransport
+// names it, fixes MGF1 with SHA-1, so it also needs xmlsec.MGF1SHA1 in
+// allowedMGF, and must not carry an xenc11:MGF. A KeySize under the
 // EncryptionMethod must equal the bit length of dec's RSA modulus, the key
 // size of RSA-OAEP key transport (section 3.2).
 func DecryptEncryptedKey(el *xdm.Node, dec crypto.Decrypter,
@@ -144,30 +156,41 @@ func DecryptEncryptedKey(el *xdm.Node, dec crypto.Decrypter,
 	if err := allowed("key transport", kt, allowedKeyTransport, defaultKeyTransport); err != nil {
 		return nil, err
 	}
-	if kt != xmlsec.KeyTransportRSAOAEP {
+	permitted := []xdm.QName{{URI: NSDSig, Local: "DigestMethod"}, {URI: NSXEnc, Local: "OAEPparams"}}
+	switch kt {
+	case xmlsec.KeyTransportRSAOAEP:
+		permitted = append(permitted, xdm.QName{URI: NSXEnc11, Local: "MGF"})
+	case xmlsec.KeyTransportRSAOAEPMGF1P:
+		// Section 5.5.2: xenc11:MGF MUST NOT be provided.
+	case xmlsec.KeyTransportRSA15:
+		return nil, unsupported("key transport %q: use DecryptEncryptedKeyPKCS1v15", kt)
+	default:
 		return nil, unsupported("key transport %q", kt)
 	}
 	pub, ok := dec.Public().(*rsa.PublicKey)
 	if !ok {
 		return nil, unsupported("RSA-OAEP with a %T key", dec.Public())
 	}
-	p, err := methodParams(m, pub.N.BitLen(),
-		xdm.QName{URI: NSDSig, Local: "DigestMethod"}, xdm.QName{URI: NSXEnc11, Local: "MGF"}, xdm.QName{URI: NSXEnc, Local: "OAEPparams"})
+	p, err := methodParams(m, pub.N.BitLen(), permitted...)
 	if err != nil {
 		return nil, err
 	}
-	if p["MGF"] == nil || p["DigestMethod"] == nil {
-		return nil, fmt.Errorf("%w: implicit SHA-1 OAEP digest or MGF", xmlsec.ErrAlgorithmNotAllowed)
+	mgf, mgfKind := xmlsec.MGF1SHA1, "implicit MGF"
+	if k := p["MGF"]; k != nil {
+		mgf, mgfKind = k.AttrValue("Algorithm"), "MGF"
 	}
-	mgf := p["MGF"].AttrValue("Algorithm")
-	if err := allowed("MGF", mgf, allowedMGF, defaultMGF); err != nil {
+	if err := allowed(mgfKind, mgf, allowedMGF, defaultMGF); err != nil {
 		return nil, err
 	}
-	mh, ok := xmlsec.MGFHash(mgf)
+	mh, ok := mgfHash(mgf)
 	if !ok {
 		return nil, unsupported("MGF %q", mgf)
 	}
-	dh, err := digest("OAEP digest", p["DigestMethod"].AttrValue("Algorithm"), allowedDigest)
+	dm, dmKind := xmlsec.DigestSHA1, "implicit OAEP digest"
+	if k := p["DigestMethod"]; k != nil {
+		dm, dmKind = k.AttrValue("Algorithm"), "OAEP digest"
+	}
+	dh, err := digest(dmKind, dm, allowedDigest)
 	if err != nil {
 		return nil, err
 	}

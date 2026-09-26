@@ -166,7 +166,9 @@ func TestCommentCannotTruncateSignedText(t *testing.T) {
 
 // A received EncryptedData whose algorithm has been swapped is refused
 // before any decryption is attempted, under explicit allow-lists and under
-// the default set an empty list means.
+// the default set an empty list means. The legacy decryption-only
+// algorithms are in neither; legacy_test.go shows each is accepted only
+// when named.
 func TestEncryptionAlgorithmSubstitution(t *testing.T) {
 	kp := keyPair(t, rsaKey(t))
 	opts := xenc.EncryptOptions{
@@ -195,10 +197,12 @@ func TestEncryptionAlgorithmSubstitution(t *testing.T) {
 		data           bool
 	}{
 		{"AES-GCM size", xmlsec.EncAES128GCM, xmlsec.EncAES256GCM, true},
-		{"AES-CBC", xmlsec.EncAES128GCM, "http://www.w3.org/2001/04/xmlenc#aes128-cbc", true},
-		{"rsa-oaep-mgf1p", xmlsec.KeyTransportRSAOAEP, "http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p", false},
-		{"RSA PKCS#1 v1.5", xmlsec.KeyTransportRSAOAEP, "http://www.w3.org/2001/04/xmlenc#rsa-1_5", false},
-		{"SHA-1 MGF", xmlsec.MGF1SHA256, "http://www.w3.org/2009/xmlenc11#mgf1sha1", false},
+		{"AES-CBC", xmlsec.EncAES128GCM, xmlsec.EncAES128CBC, true},
+		{"3DES-CBC", xmlsec.EncAES128GCM, xmlsec.EncTripleDESCBC, true},
+		{"rsa-oaep-mgf1p", xmlsec.KeyTransportRSAOAEP, xmlsec.KeyTransportRSAOAEPMGF1P, false},
+		{"RSA PKCS#1 v1.5", xmlsec.KeyTransportRSAOAEP, xmlsec.KeyTransportRSA15, false},
+		{"SHA-1 MGF", xmlsec.MGF1SHA256, xmlsec.MGF1SHA1, false},
+		{"SHA-1 digest", xmlsec.DigestSHA256, xmlsec.DigestSHA1, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if c.data {

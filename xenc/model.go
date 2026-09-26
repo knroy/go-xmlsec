@@ -6,11 +6,27 @@
 // # Allow-lists
 //
 // Every Decrypt and Unwrap function takes allow-lists, checked before any
-// cryptographic work. An empty list means the default set: every algorithm
-// this package implements that is secure, which today is all of them. An
-// algorithm outside the default set, should one be added for a legacy peer,
-// is accepted only when a caller names it in a list. A list can never
-// enable an algorithm this package does not implement.
+// cryptographic work. An empty list means the default set: every secure
+// algorithm this package implements. A list can never enable an algorithm
+// this package does not implement.
+//
+// # Legacy algorithms, decryption only
+//
+// The legacy algorithms XML Encryption 1.1 still requires are implemented
+// for decryption only, for peers that cannot send anything better:
+// xmlsec.EncAES128CBC, EncAES192CBC, EncAES256CBC and EncTripleDESCBC data,
+// xmlsec.KeyTransportRSAOAEPMGF1P and RSA-OAEP with a SHA-1 digest or MGF,
+// xmlsec.KeyTransportRSA15 through DecryptEncryptedKeyPKCS1v15, and
+// xmlsec.KeyWrapTripleDES. None is in a default set, so an empty list
+// refuses them all; each is accepted only when a caller names it. SHA-1 is
+// named as xmlsec.DigestSHA1 and xmlsec.MGF1SHA1 whether the document names
+// it or implies it by leaving out ds:DigestMethod or xenc11:MGF, since the
+// algorithm used is the same. No Encrypt function and GenerateEncryptedKey
+// ever produce one: they return xmlsec.ErrUnsupportedAlgorithm.
+//
+// CBC has no integrity: see DecryptData. Name CBC and GCM in one list only
+// when one peer really sends both, since a key accepted under both lets an
+// attacker take GCM ciphertext to the CBC padding oracle (section 6.1.3).
 package xenc
 
 import (
@@ -64,7 +80,8 @@ const (
 
 // EncryptOptions configures encryption.
 type EncryptOptions struct {
-	// DataAlgorithm is an Enc* constant. Required.
+	// DataAlgorithm is an Enc*GCM constant. Required. The CBC ones are
+	// decryption-only and refused.
 	DataAlgorithm string
 
 	// KeyTransportAlgorithm selects how GenerateEncryptedKey protects the
@@ -73,13 +90,13 @@ type EncryptOptions struct {
 	// EC Recipient, under a key agreed by KeyAgreementAlgorithm.
 	KeyTransportAlgorithm string
 
-	// MGFAlgorithm is an MGF1* constant, required for RSA-OAEP. It is
+	// MGFAlgorithm is MGF1SHA256, 384 or 512, required for RSA-OAEP. It is
 	// emitted as an explicit xenc11:MGF element: omitting it means SHA-1
 	// MGF by specification default.
 	MGFAlgorithm string
 
-	// DigestAlgorithm is a Digest* constant: the OAEP digest for RSA-OAEP,
-	// the ConcatKDF digest for key agreement. Required for both.
+	// DigestAlgorithm is a SHA-2 Digest* constant: the OAEP digest for
+	// RSA-OAEP, the ConcatKDF digest for key agreement. Required for both.
 	DigestAlgorithm string
 
 	// OAEPParams is the optional OAEP label. Normally empty.
@@ -174,8 +191,12 @@ func digest(kind, v string, list []string) (crypto.Hash, error) {
 	if err := allowed(kind, v, list, defaultDigest); err != nil {
 		return 0, err
 	}
-	if v == DigestSHA384XMLEnc {
+	switch v {
+	case DigestSHA384XMLEnc:
 		return crypto.SHA384, nil
+	case xmlsec.DigestSHA1:
+		// Allowed only by name: never in defaultDigest.
+		return crypto.SHA1, nil
 	}
 	h, ok := xmlsec.DigestHash(v)
 	if !ok {

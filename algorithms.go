@@ -81,14 +81,15 @@ const (
 	EncAES256GCM = "http://www.w3.org/2009/xmlenc11#aes256-gcm"
 )
 
-// Key transport algorithm URIs. The legacy rsa-oaep-mgf1p form, which
-// implies SHA-1 MGF, is deliberately absent.
+// Key transport algorithm URIs. The legacy rsa-oaep-mgf1p and rsa-1_5 are
+// with the decryption-only algorithms below.
 const (
 	KeyTransportRSAOAEP = "http://www.w3.org/2009/xmlenc11#rsa-oaep"
 )
 
 // Symmetric key wrap algorithm URIs, RFC 3394 AES key wrap (XML Encryption
-// 1.1 section 5.7.2). The legacy kw-tripledes is deliberately absent.
+// 1.1 section 5.7.2). The legacy kw-tripledes is with the decryption-only
+// algorithms below.
 const (
 	KeyWrapAES128 = "http://www.w3.org/2001/04/xmlenc#kw-aes128"
 	KeyWrapAES192 = "http://www.w3.org/2001/04/xmlenc#kw-aes192"
@@ -157,3 +158,48 @@ func MGFHash(uri string) (crypto.Hash, bool) {
 	h, ok := mgfHashes[uri]
 	return h, ok
 }
+
+// ---- BEGIN legacy XML Encryption algorithms (decryption only) ----
+//
+// XML Encryption 1.1 section 5.1.1 marks these REQUIRED (rsa-1_5 is
+// OPTIONAL there, but section 5.5.1 requires it for TRIPLEDES keys), and
+// section 6.1 describes the chosen-ciphertext attacks against each. The xenc
+// package implements them for decryption only: no Encrypt function and
+// GenerateEncryptedKey ever produces them, and none is in any default
+// allow-list, so a receiver accepts one only when it names it explicitly.
+// Name them only for a peer that cannot send AES-GCM and XML Encryption 1.1
+// RSA-OAEP with SHA-2.
+//
+// The SHA-1 digest and MGF are not added to DigestHash or MGFHash: xenc
+// resolves them itself, so neither becomes usable for signing, verifying or
+// encrypting through those tables.
+const (
+	// Block encryption, sections 5.2.2 and 5.2.3: CBC with the IV prefixed
+	// and the section 5.2.1 padding. Unauthenticated: see section 6.1.1.
+	EncTripleDESCBC = "http://www.w3.org/2001/04/xmlenc#tripledes-cbc"
+	EncAES128CBC    = "http://www.w3.org/2001/04/xmlenc#aes128-cbc"
+	EncAES192CBC    = "http://www.w3.org/2001/04/xmlenc#aes192-cbc"
+	EncAES256CBC    = "http://www.w3.org/2001/04/xmlenc#aes256-cbc"
+
+	// KeyTransportRSAOAEPMGF1P is RSA-OAEP with MGF1-SHA1 fixed, section
+	// 5.5.2; its digest defaults to SHA-1 too.
+	KeyTransportRSAOAEPMGF1P = "http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p"
+
+	// KeyTransportRSA15 is RSAES-PKCS1-v1_5, section 5.5.1, open to
+	// Bleichenbacher's attack (section 6.1.2).
+	KeyTransportRSA15 = "http://www.w3.org/2001/04/xmlenc#rsa-1_5"
+
+	// KeyWrapTripleDES is the CMS Triple DES key wrap of RFC 3217, section
+	// 5.7.1.
+	KeyWrapTripleDES = "http://www.w3.org/2001/04/xmlenc#kw-tripledes"
+
+	// MGF1SHA1 is MGF1 with SHA-1, section 5.5.2: what rsa-oaep-mgf1p fixes
+	// and what an rsa-oaep EncryptionMethod without xenc11:MGF means.
+	MGF1SHA1 = "http://www.w3.org/2009/xmlenc11#mgf1sha1"
+
+	// DigestSHA1, declared with the legacy XML Signature algorithms above, is
+	// also XML Encryption's SHA-1 (section 5.8.1): the RSA-OAEP digest an
+	// EncryptionMethod without ds:DigestMethod means, or a ConcatKDF digest.
+)
+
+// ---- END legacy XML Encryption algorithms ----

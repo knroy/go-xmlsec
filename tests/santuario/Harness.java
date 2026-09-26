@@ -69,6 +69,7 @@ public final class Harness {
                 case "encrypt-ecdh" -> encryptECDH(a[1], a[2], a[3], a[4]);
                 case "encrypt-kw" -> encryptKW(a[1], a[2], a[3], a[4]);
                 case "decrypt-kw" -> decryptKW(a[1], a[2], a[3]);
+                case "encrypt-legacy" -> encryptLegacy(a[1], a[2], a[3], a[4], a[5], a[6]);
                 case "wss4j-verify" -> wss4jVerify(a[1], a[2], new Parts(a, 3));
                 case "wss4j-decrypt" -> wss4jDecrypt(a[1], a[2], a[3], new Parts(a, 4));
                 case "wss4j-process" -> wss4jProcess(a[1], a[2], a[3], a[4]);
@@ -238,13 +239,37 @@ public final class Harness {
         EncryptedKey encrypt(SecretKey sk) throws Exception;
     }
 
+    /**
+     * encrypt-legacy in.xml key localName out.xml dataAlg keyAlg: the legacy
+     * algorithms go-xmlsec decrypts only. dataAlg is an AES-CBC or
+     * tripledes-cbc URI; keyAlg is rsa-1_5 or rsa-oaep-mgf1p (SHA-1 digest,
+     * Santuario's default) with key a certificate, or kw-tripledes with key
+     * a 24-octet KEK file.
+     */
+    static void encryptLegacy(String in, String keyPath, String local, String out, String dataAlg, String keyAlg) throws Exception {
+        Document doc = parse(in);
+        XMLCipher keyCipher = XMLCipher.getInstance(keyAlg);
+        if (keyAlg.equals(XMLCipher.TRIPLEDES_KeyWrap)) {
+            keyCipher.init(XMLCipher.WRAP_MODE, new javax.crypto.spec.SecretKeySpec(Files.readAllBytes(Path.of(keyPath)), "DESede"));
+        } else {
+            keyCipher.init(XMLCipher.WRAP_MODE, cert(keyPath).getPublicKey());
+        }
+        encryptWith(doc, local, out, sk -> keyCipher.encryptKey(doc, sk), dataAlg);
+    }
+
     /** AES-128-GCM over the first element named local, the EncryptedKey in EncryptedData/ds:KeyInfo. */
     static void encryptWith(Document doc, String local, String out, KeyEncryptor enc) throws Exception {
-        KeyGenerator kg = KeyGenerator.getInstance("AES");
-        kg.init(128);
+        encryptWith(doc, local, out, enc, XMLCipher.AES_128_GCM);
+    }
+
+    /** As encryptWith, under dataAlg, with a fresh session key of its kind and size. */
+    static void encryptWith(Document doc, String local, String out, KeyEncryptor enc, String dataAlg) throws Exception {
+        boolean des = dataAlg.equals(XMLCipher.TRIPLEDES);
+        KeyGenerator kg = KeyGenerator.getInstance(des ? "DESede" : "AES");
+        kg.init(des ? 168 : dataAlg.contains("256") ? 256 : dataAlg.contains("192") ? 192 : 128);
         SecretKey sk = kg.generateKey();
         EncryptedKey ek = enc.encrypt(sk);
-        XMLCipher dataCipher = XMLCipher.getInstance(XMLCipher.AES_128_GCM);
+        XMLCipher dataCipher = XMLCipher.getInstance(dataAlg);
         dataCipher.init(XMLCipher.ENCRYPT_MODE, sk);
         EncryptedData ed = dataCipher.getEncryptedData();
         KeyInfo ki = new KeyInfo(doc);

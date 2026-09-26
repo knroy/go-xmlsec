@@ -39,6 +39,9 @@ func gcm(alg string, key []byte) (cipher.AEAD, error) {
 // seal returns IV || ciphertext || tag, the XML Encryption 1.1 AES-GCM
 // layout, with a fresh 96-bit IV.
 func seal(alg string, key, plaintext []byte) ([]byte, error) {
+	if err := encryptable(alg); err != nil {
+		return nil, err
+	}
 	a, err := gcm(alg, key)
 	if err != nil {
 		return nil, err
@@ -52,6 +55,9 @@ func seal(alg string, key, plaintext []byte) ([]byte, error) {
 // failure is the same error: the key usually comes from an unwrap, and its
 // length or validity must not be observable.
 func open(alg string, key, data []byte) ([]byte, error) {
+	if _, ok := cbcSizes[alg]; ok {
+		return cbcOpen(alg, key, data)
+	}
 	a, err := gcm(alg, key)
 	if err != nil {
 		return nil, errDecrypt
@@ -247,6 +253,17 @@ func EncryptContent(doc *xdm.Node, target *xdm.Node, sessionKey []byte, opts Enc
 // For an encrypted element the result is the element's octets, and for
 // Type Content the content's (see EncryptContent); replacing the
 // EncryptedData with them is the caller's step.
+//
+// allowedData restricts the data algorithm; empty means the default set,
+// AES-GCM. The legacy CBC algorithms (xmlsec.EncAES128CBC, EncAES192CBC,
+// EncAES256CBC, EncTripleDESCBC) are decrypted only when named: the IV is
+// the first block, and of the section 5.2.1 padding only the last octet is
+// checked. Every CBC failure (wrong key, bad length, bad padding) is the
+// same error, judged after the whole ciphertext is decrypted. That does not
+// stop the padding-oracle attack of section 6.1.1: CBC is not
+// authenticated, and an attacker who can submit altered ciphertext learns
+// from anything that differs afterwards, such as whether the plaintext
+// parses. Only authentication bound to the key closes it: AES-GCM.
 func DecryptData(el *xdm.Node, sessionKey []byte, allowedData []string) ([]byte, error) {
 	alg, err := dataAlgorithm(el, allowedData)
 	if err != nil {
@@ -309,7 +326,7 @@ func dataAlgorithm(el *xdm.Node, allowedData []string) (string, error) {
 	if err := allowed("data", alg, allowedData, defaultData); err != nil {
 		return "", err
 	}
-	size, ok := keySizes[alg]
+	size, ok := dataKeySize(alg)
 	if !ok {
 		return "", unsupported("data %q", alg)
 	}

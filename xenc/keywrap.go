@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"github.com/knroy/go-xml/xdm"
+	"github.com/knroy/go-xmlsec"
 )
 
 // kwIV is the RFC 3394 default initial value.
@@ -118,7 +119,7 @@ func wrapMethod(el *xdm.Node, allowedKeyWrap []string) (string, error) {
 	if err := allowed("key wrap", alg, allowedKeyWrap, defaultKeyWrap); err != nil {
 		return "", err
 	}
-	size, ok := wrapSizes[alg]
+	size, ok := wrapSize(alg)
 	if !ok {
 		return "", unsupported("key wrap %q", alg)
 	}
@@ -130,13 +131,22 @@ func wrapMethod(el *xdm.Node, allowedKeyWrap []string) (string, error) {
 
 // unwrap opens the CipherValue of el, an EncryptedKey under alg, with kek.
 func unwrap(el *xdm.Node, alg string, kek []byte) ([]byte, error) {
-	b, err := kwCipher(alg, kek)
+	var b cipher.Block
+	var err error
+	if alg == xmlsec.KeyWrapTripleDES {
+		b, err = tripleDES(kek)
+	} else {
+		b, err = kwCipher(alg, kek)
+	}
 	if err != nil {
 		return nil, err
 	}
 	ct, err := cipherValue(el)
 	if err != nil {
 		return nil, err
+	}
+	if alg == xmlsec.KeyWrapTripleDES {
+		return cmsUnwrap(b, ct)
 	}
 	return kwUnwrap(b, ct)
 }
@@ -148,8 +158,11 @@ func unwrap(el *xdm.Node, alg string, kek []byte) ([]byte, error) {
 // For a KEK from key agreement use DecryptAgreedKey.
 //
 // allowedKeyWrap restricts the accepted algorithms; empty means the default
-// set. kek must be the algorithm's size. A failed integrity check is
-// reported without detail.
+// set, AES key wrap. The legacy xmlsec.KeyWrapTripleDES, the RFC 3217 CMS
+// Triple DES key wrap of section 5.7.1 with a 24-octet kek, is unwrapped
+// only when allowedKeyWrap names it; its integrity check is a truncated
+// SHA-1 of the key. kek must be the algorithm's size. A failed integrity
+// check is reported without detail.
 func UnwrapEncryptedKey(el *xdm.Node, kek []byte, allowedKeyWrap []string) ([]byte, error) {
 	alg, err := wrapMethod(el, allowedKeyWrap)
 	if err != nil {

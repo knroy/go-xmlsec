@@ -245,5 +245,6 @@ func DecryptAgreedKey(el *xdm.Node, priv *ecdh.PrivateKey,
 	if err != nil {
 		return nil, fmt.Errorf("%w: originator key: %v", xmlsec.ErrUnsupportedKeyInfo, err)
 	}
-	return unwrap(el, alg, concatKDF(h, z, info, wrapSizes[alg]))
+	size, _ := wrapSize(alg)
+	return unwrap(el, alg, concatKDF(h, z, info, size))
 }
