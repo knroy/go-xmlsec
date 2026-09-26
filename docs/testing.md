@@ -15,7 +15,7 @@ golden-file key.
 
 | Layer | Where | Runs |
 |---|---|---|
-| Unit and conformance | `*_test.go` beside each package, named after the source file they test | every push, Linux, macOS and Windows, under `-race` |
+| Unit and conformance | `*_test.go` beside each package, named after the source file they test; `internal/swa` holds the SwA MIME header and content canonicalization | every push, Linux, macOS and Windows, under `-race` |
 | Differential against `xmlsec1`, Apache Santuario and WSS4J | `tests/interop`, build tag `interop`, run by `tests/interop.sh` | every push, Linux |
 | Security regressions | `tests/security`: XXE, external fetches, key substitution, algorithm confusion, comment truncation, encryption downgrade | every push, all three systems; a local HTTP listener proves nothing is fetched |
 | Fuzzing | `FuzzVerify`, `FuzzDecryptEncryptedKey`, `FuzzDecryptData` | nightly, one hour per target |
@@ -87,6 +87,8 @@ package, does not implement XML Encryption 1.1 `rsa-oaep`.
 | `TestSignatureValueMatchesSantuarioDetached` | byte equality, and both ways | SOAP 1.2 WS-Security header, two `#id` references |
 | `TestWSS4JProcessesOurSecurityHeader` | WSS4J | a WS-Security header built by this library: timestamp, binary security token, signature over body and timestamp; WSS4J must report both as signed, with Basic Security Profile enforcement on |
 | `TestWSS4JDecryptsOurEncryption` | WSS4J | an encrypted body with the `EncryptedKey` in the header, naming the recipient's token and the `EncryptedData`; WSS4J must decrypt it to the original |
+| `TestWSS4JVerifiesOurAttachmentSignatures`, `TestWeVerifyWSS4JAttachmentSignatures` | WSS4J, both ways | Content- and Complete-Signature transforms over XML, text and binary parts; a tampered part must be refused |
+| `TestWSS4JDecryptsOurAttachmentEncryption`, `TestWeDecryptWSS4JAttachmentEncryption` | WSS4J, both ways | Attachment-Content-Only and Attachment-Complete encryption, AES-128-GCM under RSA-OAEP |
 | `TestXmlsec1DecryptsOurEncryption`, `TestSantuarioDecryptsOurEncryption` | ours → each | AES-128-GCM element, RSA-OAEP with explicit SHA-256 MGF and digest |
 | `TestWeDecryptXmlsec1Encryption`, `TestWeDecryptSantuarioEncryption` | each → ours | the same |
 
@@ -197,7 +199,7 @@ references and non-ASCII text.
 
 | Golden | Shape |
 |---|---|
-| `signed-envelope-two-attachments.xml` | SOAP 1.2, binary security token, one signature over the messaging header, the body and two `cid:` attachments (Attachment-Content-Only), exclusive C14N, RSA-SHA256, SecurityTokenReference |
+| `signed-envelope-two-attachments.xml` | SOAP 1.2, binary security token, one signature over the messaging header, the body and two `cid:` attachments (Attachment-Content-Signature, one `text/plain` and one `application/gzip`), exclusive C14N, RSA-SHA256, SecurityTokenReference |
 | `signed-encrypted-envelope.masked.xml`, `signed-encrypted-payload.xml` | the same envelope signed, then its body payload encrypted (AES-128-GCM, RSA-OAEP with explicit SHA-256 MGF). Every `CipherValue` is masked, because the IV, session key and OAEP padding are random; the plaintext has its own golden, and the decrypted envelope must verify |
 | `enveloped-metadata.xml` | enveloped, inclusive C14N, X509Data |
 | `enveloped-invoice.xml` | the README quick-start document, exclusive C14N |

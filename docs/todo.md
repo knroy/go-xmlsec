@@ -4,7 +4,6 @@
 
 | Item | Notes |
 |---|---|
-| `Attachment-Complete` transform, signing and encryption | Refused with `ErrUnsupportedAlgorithm`. Its MIME header canonicalization is easy to get subtly wrong, and no peer has been seen to require it (open item X-6). |
 | Gate 2 against phase4 | Needs the captured-message corpus (X-5), and the consumer that builds whole AS4 messages: Gate 2 compares a message, not a signature. The signature-level equivalent, byte equality with Santuario, is in place (`tests/interop`). |
 
 ## Acceptance criteria
@@ -52,7 +51,7 @@ running fuzz results.
 | X-3 | Gate 1 status upstream | go-xml v1.4.0 reports `xmllint` and `xmlsec1` canonicalization differentials; a Santuario differential and a real-message corpus are still open there. This module adds indirect evidence: signatures byte-identical to Santuario's, and 147 independently produced signatures whose digests go-xml's canonicalization reproduces. |
 | X-4 | AS4 canonicalization URI inherited, not stated | unchanged |
 | X-5 | Real-message corpus | **Partly closed.** 122 real Peppol SMP responses from 62 providers all verify; they live in the private `go-xmlsec-corpus` repository, because they carry no license grant and may contain personal data. The 25 W3C XML-DSig 1.1 interop vectors are in this repository, `tests/w3c`, under the W3C Document License. Captured AS4 messages still need a certified access point. |
-| X-6 | Does any peer require `Attachment-Complete`? | unchanged |
+| X-6 | Does any peer require `Attachment-Complete`? | **Moot.** Implemented, for signing and encryption, and tested both ways against WSS4J. |
 
 ## Where the implementation departs from the design document
 
@@ -65,7 +64,7 @@ before the first tag, since a public API is hard to reshape afterwards.
 | `SignOptions.SecurityTokenID` added | `Sign` otherwise has no way to know which token the `SecurityTokenReference` should point at. It is checked to carry the signing certificate. |
 | `Sign` refuses inclusive `ds:SignedInfo` canonicalization | The signature is detached when `SignedInfo` is canonicalized; under inclusive canonicalization the result depends on where the caller later places it, so it would never verify. |
 | `EncryptAttachment`: the transform argument becomes `EncryptedData/@Type`, and the `CipherReference` carries `Attachment-Ciphertext-Transform` | That is what the SwA profile specifies and what phase4 and WSS4J emit. The design document put the content transform on the `CipherReference`. |
-| `Attachment-Content-Only` is the identity even for XML bodies | As designed. **To confirm**: the SwA profile, as WSS4J implements it, canonicalizes attachment content whose MIME type is XML with exclusive C14N. Irrelevant for compressed payloads; an interop failure waiting for an uncompressed XML attachment. |
+| Attachments are signed with the SwA signature transforms, not `#Attachment-Content-Only` | **Decided.** The design document signed with `#Attachment-Content-Only`, which the SwA profile defines as an `EncryptedData` Type, not a signature transform; WSS4J refuses it, so every attachment signature would have been rejected by a WS-Security peer. Signing and verification use `#Attachment-Content-Signature-Transform` (or Complete), which canonicalizes XML content with Exclusive C14N and text with CRLF line endings, as the profile and WSS4J do. |
 | `VerifiedReference.Raw` is canonical, not the original octets | `xdm` keeps no source offsets. `Raw` is the reference in its SignedInfo's canonicalization, which is what a receipt built on exclusive C14N contains. |
 | `SignEnveloped` and `EncryptElement` output is `Inclusive10WithComments` of the document | This module has no serializer and should not grow one; canonical form re-parses to the same tree. The XML declaration is dropped. |
 | No `dsig/transform` sub-package or transform registry | The transform set is closed and small; one switch in `dsig/reference.go` is the whole pipeline. |

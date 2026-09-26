@@ -412,3 +412,39 @@ func TestRequireExplicitCanonicalization(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// The SwA signature transforms canonicalize an XML attachment with
+// Exclusive C14N, so a caller who does not allow it is refused, even when
+// everything else in the signature is inclusive.
+func TestAttachmentCanonicalizationAllowList(t *testing.T) {
+	key := newKey(t, rsaKey)
+	atts := attachments(t, "payload")
+	tree, err := xmlsec.Parse([]byte(`<r><a>x</a></r>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	signed, err := dsig.SignEnveloped(tree.Root, key, dsig.SignOptions{
+		SignatureAlgorithm:        xmlsec.SigRSASHA256,
+		CanonicalizationAlgorithm: string(c14n.Inclusive10),
+		References: []dsig.Reference{
+			{URI: "", DigestAlgorithm: xmlsec.DigestSHA256, Transforms: []dsig.TransformSpec{
+				{Algorithm: xmlsec.TransformEnvelopedSignature}, {Algorithm: string(c14n.Inclusive10)}}},
+			{URI: "cid:att-1@example.com", DigestAlgorithm: xmlsec.DigestSHA256, Transforms: []dsig.TransformSpec{
+				{Algorithm: xmlsec.TransformAttachmentContentSignature}}},
+		},
+		Attachments: atts,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := parse(t, signed)
+	opts := dsig.VerifyOptions{Certificate: key.Certificate, Attachments: atts,
+		AllowedCanonicalizationAlgorithms: []string{string(c14n.Inclusive10)}}
+	if _, err := dsig.Verify(doc, findSignature(doc), opts); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
+		t.Fatalf("inclusive-only allow-list: %v", err)
+	}
+	opts.AllowedCanonicalizationAlgorithms = append(opts.AllowedCanonicalizationAlgorithms, string(c14n.Exclusive10))
+	if cov, err := dsig.Verify(doc, findSignature(doc), opts); err != nil || !cov.CoversAttachments("att-1@example.com") {
+		t.Fatalf("with Exclusive C14N allowed: %v", err)
+	}
+}

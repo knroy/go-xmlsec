@@ -130,7 +130,7 @@ func signAS4(t *testing.T, key xmlsec.KeyProvider) (signed []byte, msgID, bodyID
 			{URI: "#" + msgID, Transforms: excC14N, DigestAlgorithm: xmlsec.DigestSHA256},
 			{URI: "#" + bodyID, Transforms: excC14N, DigestAlgorithm: xmlsec.DigestSHA256},
 			{URI: "cid:att-1@example.com", DigestAlgorithm: xmlsec.DigestSHA256,
-				Transforms: []dsig.TransformSpec{{Algorithm: xmlsec.TransformAttachmentContentOnly}}},
+				Transforms: []dsig.TransformSpec{{Algorithm: xmlsec.TransformAttachmentContentSignature}}},
 		},
 		KeyInfo:         dsig.KeyInfoSecurityTokenReference,
 		SecurityTokenID: tok,

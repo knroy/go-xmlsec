@@ -169,14 +169,9 @@ func TestWSS4JVerifiesOurAttachmentSignatures(t *testing.T) {
 		})
 	}
 
-	t.Run("Attachment-Content-Only", func(t *testing.T) {
-		soap := tempFile(t, "soap.xml", swaSigned(t, kp, xmlsec.TransformAttachmentContentOnly))
-		out, err := santuario(t, append([]string{"wss4j-verify", soap, kp.certPEM}, swaFiles(t, swaParts)...)...)
-		if err == nil {
-			t.Fatalf("WSS4J accepted Attachment-Content-Only as a signature transform:\n%s", out)
-		}
-		t.Logf("WSS4J refuses it, as expected:\n%s", out)
-	})
+	// WSS4J refuses #Attachment-Content-Only as a signature transform: it is
+	// an EncryptedData Type. That is why this library no longer signs or
+	// verifies with it; TestSignErrors covers the refusal.
 }
 
 // This library verifies attachment signatures WSS4J makes with both SwA

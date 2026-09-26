@@ -33,12 +33,10 @@ const (
 	TransformAttachmentCompleteSignature = "http://docs.oasis-open.org/wss/oasis-wss-SwAProfile-1.1#Attachment-Complete-Signature-Transform"
 
 	// SwA xenc:EncryptedData Type URIs, section 5.5.2: the attachment
-	// content alone, or the content with its MIME headers.
-	//
-	// As a ds:Transform, which the profile does not define it to be,
-	// TransformAttachmentContentOnly is accepted as the identity on the
-	// attachment body; WS-Security peers do not accept it there. Use
-	// TransformAttachmentContentSignature in signatures.
+	// content alone, or the content with its MIME headers. They are not
+	// signature transforms, and a ds:Transform naming either is refused:
+	// sign attachments with TransformAttachmentContentSignature or
+	// TransformAttachmentCompleteSignature.
 	TransformAttachmentContentOnly = "http://docs.oasis-open.org/wss/oasis-wss-SwAProfile-1.1#Attachment-Content-Only"
 	TransformAttachmentComplete    = "http://docs.oasis-open.org/wss/oasis-wss-SwAProfile-1.1#Attachment-Complete"
 )

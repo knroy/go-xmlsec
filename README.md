@@ -113,9 +113,9 @@ default produces a signature that looks valid and that no peer accepts.
 | Signature | RSA PKCS#1 v1.5 and ECDSA, each with SHA-256, SHA-384, SHA-512 |
 | Digest | SHA-256, SHA-384, SHA-512 |
 | Canonicalization | Canonical XML 1.0 and 1.1, Exclusive Canonical XML 1.0, with or without comments, from `go-xml/c14n` |
-| Transforms | enveloped signature, base64, SwA `Attachment-Content-Only` |
+| Transforms | enveloped signature, base64, SwA `Attachment-Content-Signature` and `Attachment-Complete-Signature` |
 | Key transport | RSA-OAEP (XML Encryption 1.1), MGF1 with SHA-256, SHA-384, SHA-512 |
-| Data encryption | AES-128-GCM, AES-192-GCM, AES-256-GCM |
+| Data encryption | AES-128-GCM, AES-192-GCM, AES-256-GCM; attachments as SwA `Attachment-Content-Only` or `Attachment-Complete` |
 
 Refused on purpose, whoever asks: SHA-1 in any role, `rsa-oaep-mgf1p`,
 `rsa-1_5`, XSLT and XPath transforms, DOCTYPE, and dereferencing any URI

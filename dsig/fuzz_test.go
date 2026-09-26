@@ -53,7 +53,7 @@ func fuzzSigned(key xmlsec.KeyProvider) (detached, enveloped []byte) {
 			{URI: "#" + msgID, Transforms: excC14N, DigestAlgorithm: xmlsec.DigestSHA256},
 			{URI: "#" + bodyID, Transforms: excC14N, DigestAlgorithm: xmlsec.DigestSHA256},
 			{URI: "cid:att-1@example.com", DigestAlgorithm: xmlsec.DigestSHA256,
-				Transforms: []dsig.TransformSpec{{Algorithm: xmlsec.TransformAttachmentContentOnly}}},
+				Transforms: []dsig.TransformSpec{{Algorithm: xmlsec.TransformAttachmentContentSignature}}},
 		},
 		KeyInfo:         dsig.KeyInfoSecurityTokenReference,
 		SecurityTokenID: tok,

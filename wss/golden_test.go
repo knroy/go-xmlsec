@@ -164,8 +164,13 @@ const goldenEnvelope = `<S:Envelope xmlns:S="http://www.w3.org/2003/05/soap-enve
 func goldenAttachments(t *testing.T) xmlsec.AttachmentSet {
 	t.Helper()
 	s, err := xmlsec.NewAttachmentSet(
-		&xmlsec.Attachment{ID: "att-1@example.com", Body: []byte("first attachment\n")},
-		&xmlsec.Attachment{ID: "att-2@example.com", Body: []byte{0x1f, 0x8b, 0x08, 0x00, 0xff, 0x00, 0x0d, 0x0a}},
+		// Real parts always carry a Content-Type, and it decides the SwA
+		// content canonicalization: text gets CRLF line endings, a gzip
+		// payload is digested as its raw octets.
+		&xmlsec.Attachment{ID: "att-1@example.com", Body: []byte("first attachment\n"),
+			MIMEHeaders: map[string][]string{"Content-Type": {"text/plain; charset=utf-8"}}},
+		&xmlsec.Attachment{ID: "att-2@example.com", Body: []byte{0x1f, 0x8b, 0x08, 0x00, 0xff, 0x00, 0x0a, 0x0d},
+			MIMEHeaders: map[string][]string{"Content-Type": {"application/gzip"}}},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -205,7 +210,7 @@ func signGoldenEnvelope(t *testing.T) signedEnvelope {
 		t.Fatal(err)
 	}
 	exc := []dsig.TransformSpec{{Algorithm: string(c14n.Exclusive10)}}
-	aco := []dsig.TransformSpec{{Algorithm: xmlsec.TransformAttachmentContentOnly}}
+	aco := []dsig.TransformSpec{{Algorithm: xmlsec.TransformAttachmentContentSignature}}
 	sig, err := dsig.Sign(s.doc, s.key, dsig.SignOptions{
 		SignatureAlgorithm:        xmlsec.SigRSASHA256,
 		CanonicalizationAlgorithm: string(c14n.Exclusive10),

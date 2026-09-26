@@ -95,11 +95,11 @@ func TestSignErrors(t *testing.T) {
 			o.KeyInfo, o.SecurityTokenID = dsig.KeyInfoSecurityTokenReference, tokID
 		}, nil},
 		{"cid: without attachments", key, func(o *dsig.SignOptions) {
-			o.References = ref("cid:att-1@example.com", xmlsec.TransformAttachmentContentOnly)
+			o.References = ref("cid:att-1@example.com", xmlsec.TransformAttachmentContentSignature)
 			o.Attachments = nil
 		}, xmlsec.ErrAttachmentNotFound},
 		{"cid: not in the set", key, func(o *dsig.SignOptions) {
-			o.References = ref("cid:other@example.com", xmlsec.TransformAttachmentContentOnly)
+			o.References = ref("cid:other@example.com", xmlsec.TransformAttachmentContentSignature)
 		}, xmlsec.ErrAttachmentNotFound},
 		{"http URI", key, func(o *dsig.SignOptions) { o.References = ref("http://example.com/", covExc) }, xmlsec.ErrMalformed},
 		{"relative URI", key, func(o *dsig.SignOptions) { o.References = ref("other.xml", covExc) }, xmlsec.ErrMalformed},
@@ -120,11 +120,11 @@ func TestSignErrors(t *testing.T) {
 		{"base64 of non-base64 octets", key, func(o *dsig.SignOptions) {
 			o.References = ref("cid:att-1@example.com", xmlsec.TransformBase64)
 		}, xmlsec.ErrMalformed},
-		{"Attachment-Content-Only on an element", key, func(o *dsig.SignOptions) {
-			o.References = ref(body, xmlsec.TransformAttachmentContentOnly)
-		}, xmlsec.ErrMalformed},
-		{"Attachment-Content-Only after canonicalization", key, func(o *dsig.SignOptions) {
-			o.References = ref(body, covExc, xmlsec.TransformAttachmentContentOnly)
+		{"Attachment-Content-Only EncryptedData Type as a transform", key, func(o *dsig.SignOptions) {
+			o.References = ref("cid:att-1@example.com", xmlsec.TransformAttachmentContentOnly)
+		}, xmlsec.ErrUnsupportedAlgorithm},
+		{"Attachment-Content-Signature on an element", key, func(o *dsig.SignOptions) {
+			o.References = ref(body, xmlsec.TransformAttachmentContentSignature)
 		}, xmlsec.ErrMalformed},
 		{"Attachment-Complete EncryptedData Type as a transform", key, func(o *dsig.SignOptions) {
 			o.References = ref("cid:att-1@example.com", xmlsec.TransformAttachmentComplete)
@@ -133,7 +133,7 @@ func TestSignErrors(t *testing.T) {
 			o.References = ref(body, xmlsec.TransformAttachmentCompleteSignature)
 		}, xmlsec.ErrMalformed},
 		{"Attachment-Content-Signature not first", key, func(o *dsig.SignOptions) {
-			o.References = ref("cid:att-1@example.com", xmlsec.TransformAttachmentContentOnly, xmlsec.TransformAttachmentContentSignature)
+			o.References = ref("cid:att-1@example.com", xmlsec.TransformBase64, xmlsec.TransformAttachmentContentSignature)
 		}, xmlsec.ErrMalformed},
 		{"Attachment-Complete-Signature over a malformed header", key, func(o *dsig.SignOptions) {
 			o.References = ref("cid:att-1@example.com", xmlsec.TransformAttachmentCompleteSignature)
@@ -296,7 +296,7 @@ func TestSignCanonicalizationFailure(t *testing.T) {
 	}{
 		{"last transform", "", []string{xmlsec.TransformEnvelopedSignature, incl}},
 		{"intermediate transform", "", []string{xmlsec.TransformEnvelopedSignature, incl, incl}},
-		{"SignedInfo", "cid:att-1@example.com", []string{xmlsec.TransformAttachmentContentOnly}},
+		{"SignedInfo", "cid:att-1@example.com", []string{xmlsec.TransformAttachmentContentSignature}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -327,7 +327,7 @@ func TestSignEmptyTokenID(t *testing.T) {
 		SignatureAlgorithm:        xmlsec.SigRSASHA256,
 		CanonicalizationAlgorithm: covExc,
 		References: []dsig.Reference{{URI: "cid:att-1@example.com", DigestAlgorithm: xmlsec.DigestSHA256,
-			Transforms: []dsig.TransformSpec{{Algorithm: xmlsec.TransformAttachmentContentOnly}}}},
+			Transforms: []dsig.TransformSpec{{Algorithm: xmlsec.TransformAttachmentContentSignature}}}},
 		KeyInfo:     dsig.KeyInfoSecurityTokenReference,
 		Attachments: attachments(t, "x"),
 	})

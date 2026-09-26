@@ -50,7 +50,8 @@ Reference forms:
 | URI | Transforms | Covers |
 |---|---|---|
 | `"#id"` | a canonicalization, last | the element with that `wsu:Id` or `xml:id`, or an attribute named in `IDAttributes` |
-| `"cid:..."` | `TransformAttachmentContentOnly` | the attachment body octets, exactly as on the wire |
+| `"cid:..."` | `TransformAttachmentContentSignature` | the attachment content, canonicalized: Exclusive C14N for XML types, CRLF line endings for other text, the octets as they are otherwise |
+| `"cid:..."` | `TransformAttachmentCompleteSignature` | as above, preceded by the canonical Content-Description, -Disposition, -ID, -Location and -Type headers |
 | `""` | `TransformEnvelopedSignature`, then a canonicalization | the whole document minus the enclosing signature |
 
 When signing, a same-document reference with no transforms, or whose last
@@ -61,9 +62,17 @@ reference is completed with Canonical XML 1.0, as XML Signature section
 implied algorithm is checked against `AllowedCanonicalizationAlgorithms` like
 a named one.
 
-`Attachment-Content-Only` is the identity on `Attachment.Body`. The digest
-covers the octets as transmitted — compressed, if the part is compressed.
-Never decompress before verifying.
+Fill `Attachment.MIMEHeaders` with the part's headers as your MIME parser
+returns them: Content-Type selects the content canonicalization, and a part
+without one is treated as `text/plain`, so its line endings are normalized.
+The digest covers the octets after transfer decoding and before any
+decompression; never decompress before verifying. XML attachments are parsed
+with `xmlsec.Parse` for canonicalization, under the same limits, and need
+Exclusive C14N in `AllowedCanonicalizationAlgorithms`.
+
+`TransformAttachmentContentOnly` and `TransformAttachmentComplete` are the
+SwA profile's `EncryptedData` Type URIs, not signature transforms. A
+`ds:Transform` naming either is refused: no WS-Security peer accepts it.
 
 ## SAML, XAdES and other ID attributes
 
@@ -181,6 +190,13 @@ ciphertext, ed, err := xenc.EncryptAttachment(att, ek.SessionKey, xmlsec.Transfo
 // place ek.Element and ed in the security header.
 ```
 
+Pass `xmlsec.TransformAttachmentComplete` instead to encrypt the listed MIME
+headers with the body. Then keep Content-ID on the part and drop the other
+listed headers.
+
+```go
+```
+
 The MGF is emitted explicitly. Omitting it means SHA-1 by specification
 default, so `DecryptEncryptedKey` refuses an `EncryptedKey` without one.
 
@@ -210,7 +226,9 @@ Receiving:
 ```go
 key, err := xenc.DecryptEncryptedKey(ekElement, decrypter,
     []string{xmlsec.KeyTransportRSAOAEP}, []string{xmlsec.MGF1SHA256}, []string{xmlsec.DigestSHA256})
-plain, err := xenc.DecryptAttachment(edElement, mimeBody, key, []string{xmlsec.EncAES128GCM})
+att, err := xenc.DecryptAttachment(edElement, mimeBody, key, []string{xmlsec.EncAES128GCM})
+// Replace the part's body with att.Body, and its headers of the same names
+// with att.MIMEHeaders.
 ```
 
 `xenc.EncryptElement` encrypts an element in place of itself and returns the

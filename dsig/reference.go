@@ -148,13 +148,12 @@ func digestReference(h hash.Hash, doc, sig *xdm.Node, uri string, transforms []T
 			}
 			octets = b
 
-		case alg == xmlsec.TransformAttachmentContentOnly:
-			// The identity on the body octets. No canonicalization of any
-			// kind, even when the body is XML. The SwA profile defines this
-			// URI as an EncryptedData Type, not a signature transform.
-			if out.attachment == nil || ns != nil {
-				return out, fmt.Errorf("%w: %s applies only to a cid: reference", xmlsec.ErrMalformed, alg)
-			}
+		case alg == xmlsec.TransformAttachmentContentOnly, alg == xmlsec.TransformAttachmentComplete:
+			// SwA profile 5.5.2: EncryptedData Type URIs, not signature
+			// transforms. WS-Security peers refuse them in a signature, so
+			// neither is produced nor accepted as one.
+			return out, fmt.Errorf("%w: %s is an EncryptedData Type, not a signature transform; use %s or %s",
+				xmlsec.ErrUnsupportedAlgorithm, alg, xmlsec.TransformAttachmentContentSignature, xmlsec.TransformAttachmentCompleteSignature)
 
 		case alg == xmlsec.TransformXSLT, alg == xmlsec.TransformXPath, alg == xmlsec.TransformXPathFilter2:
 			return out, fmt.Errorf("%w: %s", xmlsec.ErrTransformRefused, alg)

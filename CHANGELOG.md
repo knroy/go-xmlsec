@@ -35,6 +35,7 @@ First implementation. Not yet tagged.
 | `SignOptions.IDAttributes`, `VerifyOptions.IDAttributes`, `wss.FindByIDAttributes` | Opt-in extra ID attributes for `"#id"` references, with `dsig.IDAttrSAML` (`ID`) and `dsig.IDAttrDSig` (`Id`), so SAML assertions and XAdES documents can be signed and verified. Duplicate detection spans every counted attribute; the default is unchanged. Santuario interoperates, byte-identical. | *this commit* |
 | W3C XML Signature 1.1 interop vectors, `tests/w3c` | 25 third-party vectors in a nested module, so they stay out of the library's module download, with the W3C Document License and notice beside them. Run in CI on all three systems. | *this commit* |
 | Raw public keys in `ds:KeyInfo` | `ds:KeyValue` (RSA, and XML Signature 1.1 `ECKeyValue` on P-256/384/521) and `dsig11:DEREncodedKeyValue`, verified and emitted (`KeyInfoKeyValue`, `KeyInfoDEREncodedKeyValue`). `VerifyOptions.PublicKey` pins a raw key; `Coverage.PublicKey` reports the key used, and `Coverage.Certificate` is nil for a raw key. Raw RSA keys under 2048 bits are refused. 10 of the 25 W3C interop vectors now verify. | *this commit* |
+| SwA signature transforms and Attachment-Complete encryption | `TransformAttachmentContentSignature` and `TransformAttachmentCompleteSignature`, with the SwA profile's MIME header and content canonicalization (section 5.4), and Attachment-Complete encryption. Interoperable with WSS4J in both directions for both. | *this commit* |
 | Versioning, CI and release workflow | `internal/version.Version` as the source of truth, checked against this file on every CI run and against the tag on release. CI on Linux, macOS and Windows; hygiene checks for `peppol` imports and strings. | [`2281ef3`][2281ef3] |
 
 ### Fixed
@@ -50,6 +51,8 @@ First implementation. Not yet tagged.
 
 | Change | Why | Commit |
 |---|---|---|
+| **Breaking:** `#Attachment-Content-Only` and `#Attachment-Complete` are refused as signature transforms | They are the SwA profile's `EncryptedData` Type URIs. WSS4J refuses them in a signature, so attachment signatures made with them were rejected by every WS-Security peer. Sign attachments with `TransformAttachmentContentSignature`. | *this commit* |
+| **Breaking:** `xenc.DecryptAttachment` returns `*xmlsec.Attachment` | Attachment-Complete decryption restores the MIME headers along with the body. | *this commit* |
 | Verification completes a reference that ends in a node set with Canonical XML 1.0 | XML-DSig 4.4.3.2 requires it, and a corpus of 122 real Peppol SMP responses showed 118 rely on it: before this, 60 of 62 SMP providers' signatures were refused. The implied algorithm is checked against the caller's allow-list. Signing still never relies on it. | *this commit* |
 | `ds:X509Data` may carry `X509SubjectName`, `X509IssuerSerial` and `X509SKI` beside its one certificate | 107 of the same responses carry them. They are ignored; the key always comes from the certificate. With both changes, all 122 SMP responses verify. | *this commit* |
 | An HMAC signature method is reported as `ErrAlgorithmNotAllowed` | It was reported as malformed, because its `HMACOutputLength` child was checked before the allow-list. | *this commit* |

@@ -226,6 +226,15 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 				}
 			}
 		}
+		// The SwA signature transforms canonicalize an XML attachment with
+		// Exclusive C14N (SwA profile 5.4.2), so they need it allowed.
+		for _, t := range r.transforms {
+			if t.Algorithm == xmlsec.TransformAttachmentContentSignature || t.Algorithm == xmlsec.TransformAttachmentCompleteSignature {
+				if err := allowed("attachment canonicalization", string(c14n.Exclusive10), opts.AllowedCanonicalizationAlgorithms, isC14N); err != nil {
+					return nil, err
+				}
+			}
+		}
 		// The implicit Canonical XML 1.0 is subject to the allow-list like
 		// any named one.
 		if impliesC14N(r.uri, r.transforms) {
