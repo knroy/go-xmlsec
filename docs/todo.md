@@ -55,20 +55,19 @@ running fuzz results.
 
 ## Where the implementation departs from the design document
 
-Each is deliberate. Those not marked **Decided** await the maintainer's review
-before the first tag, since a public API is hard to reshape afterwards.
+Each is deliberate, and each is decided, with its reason or evidence below.
 
 | Departure | Why |
 |---|---|
 | Minimum Go 1.26, not 1.25 | **Decided.** `rsa.EncryptOAEPWithOptions` is the only standard-library route to an MGF1 hash that differs from the OAEP digest. |
-| `SignOptions.SecurityTokenID` added | `Sign` otherwise has no way to know which token the `SecurityTokenReference` should point at. It is checked to carry the signing certificate. |
-| `Sign` refuses inclusive `ds:SignedInfo` canonicalization | The signature is detached when `SignedInfo` is canonicalized; under inclusive canonicalization the result depends on where the caller later places it, so it would never verify. |
-| `EncryptAttachment`: the transform argument becomes `EncryptedData/@Type`, and the `CipherReference` carries `Attachment-Ciphertext-Transform` | That is what the SwA profile specifies and what phase4 and WSS4J emit. The design document put the content transform on the `CipherReference`. |
+| `SignOptions.SecurityTokenID` added | **Decided.** The design document's API had no way to name the binary security token a `SecurityTokenReference` points at. Searching the document for a token carrying the signing certificate would be implicit and ambiguous when a message holds two; naming it is explicit, and `Sign` checks the named token carries the signing certificate. |
+| `Sign` refuses inclusive `ds:SignedInfo` canonicalization | **Decided.** `Sign` returns a detached signature, so `SignedInfo` is canonicalized before it has a place; under inclusive canonicalization the result depends on the namespaces around wherever the caller puts it, so the signature would verify only by chance. Refusing turns a silent interoperability failure into an immediate error. `SignEnveloped`, which places the signature first, supports inclusive. A placement option can be added later without breaking callers. |
+| `EncryptAttachment`: the transform argument becomes `EncryptedData/@Type`, and the `CipherReference` carries `Attachment-Ciphertext-Transform` | **Decided, by evidence.** The design document put the content transform on the `CipherReference`; the SwA profile puts it in the Type. WSS4J decrypts our attachment encryption and we decrypt WSS4J's, for both Content-Only and Complete (`TestWSS4JDecryptsOurAttachmentEncryption`, `TestWeDecryptWSS4JAttachmentEncryption`). |
 | Attachments are signed with the SwA signature transforms, not `#Attachment-Content-Only` | **Decided.** The design document signed with `#Attachment-Content-Only`, which the SwA profile defines as an `EncryptedData` Type, not a signature transform; WSS4J refuses it, so every attachment signature would have been rejected by a WS-Security peer. Signing and verification use `#Attachment-Content-Signature-Transform` (or Complete), which canonicalizes XML content with Exclusive C14N and text with CRLF line endings, as the profile and WSS4J do. |
-| `VerifiedReference.Raw` is canonical, not the original octets | `xdm` keeps no source offsets. `Raw` is the reference in its SignedInfo's canonicalization, which is what a receipt built on exclusive C14N contains. |
-| `SignEnveloped` and `EncryptElement` output is `Inclusive10WithComments` of the document | This module has no serializer and should not grow one; canonical form re-parses to the same tree. The XML declaration is dropped. |
-| No `dsig/transform` sub-package or transform registry | The transform set is closed and small; one switch in `dsig/reference.go` is the whole pipeline. |
-| The differential harness is `tests/interop`, not `internal/interop` | The repository keeps harnesses under `tests/`, as go-xml does. |
+| `VerifiedReference.Raw` is canonical, not the original octets | **Decided.** `xdm` keeps no source offsets. `Raw` is the reference in its SignedInfo's canonicalization, which is what a receipt built on exclusive C14N contains. |
+| `SignEnveloped` and `EncryptElement` output is `Inclusive10WithComments` of the document | **Decided.** This module has no serializer and should not grow one; canonical form re-parses to the same tree. The XML declaration is dropped. |
+| No `dsig/transform` sub-package or transform registry | **Decided.** The transform set is closed and small; one switch in `dsig/reference.go` is the whole pipeline. |
+| The differential harness is `tests/interop`, not `internal/interop` | **Decided.** The repository keeps harnesses under `tests/`, as go-xml does. |
 | Verification completes a reference ending in a node set with Canonical XML 1.0 | **Decided.** The design document made it an error on both sides. The corpus showed 118 of 122 real SMP responses rely on it, as XML-DSig 4.4.3.2 permits; refusing it made the library unusable as an SMP client. Signing stays strict. |
 | `ds:X509Data` may carry the subject name, issuer-serial or SKI beside its one certificate | **Decided.** Found by the corpus: 107 real SMP responses carry them. They are ignored for key selection. |
-| No `xenc/encrypt.go` and `decrypt.go` split | Split by mechanism instead: key transport, data cipher, cipher reference. |
+| No `xenc/encrypt.go` and `decrypt.go` split | **Decided.** Split by mechanism instead: key transport, data cipher, cipher reference. |
