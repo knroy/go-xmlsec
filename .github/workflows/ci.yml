@@ -35,6 +35,18 @@ jobs:
         shell: bash
         run: CGO_ENABLED=0 go build ./...
       - run: go test -race -cover ./...
+      # Every statement is covered, and stays so. An unreachable branch is
+      # deleted, not excused; see docs/testing.md.
+      - name: 100% statement coverage
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          go test -coverprofile=cover.out ./...
+          total=$(go tool cover -func=cover.out | awk '/^total:/ {print $3}')
+          echo "total coverage: $total"
+          if [ "$total" != "100.0%" ]; then
+            go tool cover -func=cover.out | grep -v '100.0%$'
+            echo "::error::statement coverage is $total, not 100.0%"; exit 1
+          fi
 
   interop:
     # The xmlsec1 differential: signatures and encryption in both directions.

@@ -379,12 +379,21 @@ func TestAlgorithms(t *testing.T) {
 
 func TestUnverifiable(t *testing.T) {
 	signed := string(signEnveloped(t, newKey(t, rsaKey), xmlsec.SigRSASHA256, xmlsec.DigestSHA256))
+	as4, _, _ := signAS4(t, newKey(t, rsaKey))
+	if !strings.Contains(string(as4), `<ds:SignatureMethod `) {
+		t.Fatal("fixture: no ds:SignatureMethod to rewrite")
+	}
 	cases := map[string]struct {
 		doc   string
 		cause error
 	}{
 		"xml 1.1":         {`<?xml version="1.1"?>` + signed, c14n.ErrXML11},
 		"relative ns URI": {strings.Replace(signed, `xmlns:smp=`, `xmlns:rel="relative/uri" xmlns:smp=`, 1), c14n.ErrRelativeNamespaceURI},
+		// Declared on ds:SignatureMethod, a sibling of the references: in
+		// SignedInfo's canonical form, never in scope for any Reference, so
+		// SignedInfo's canonicalization catches it rather than Coverage.Raw's.
+		"relative ns URI outside every Reference": {strings.Replace(string(as4), `<ds:SignatureMethod `,
+			`<ds:SignatureMethod xmlns:rel="relative/uri" rel:x="1" `, 1), c14n.ErrRelativeNamespaceURI},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -35,9 +35,11 @@ First implementation. Not yet tagged.
 
 | Change | Why | Commit |
 |---|---|---|
-| Unreachable error branches deleted | `crypto/rand.Read` never returns an error since Go 1.24; a detached element's own namespace declaration cannot conflict, so `wss` declares it directly; a hand-written `indexOf` is `slices.Index`. Coverage 99.3–100% per package. | *this commit* |
+| Unreachable error branches deleted | `crypto/rand.Read` never returns an error since Go 1.24; a detached element's own namespace declaration cannot conflict, so `wss` declares it directly; a hand-written `indexOf` is `slices.Index`. | [`169fc0c`][169fc0c] |
+| 100% statement coverage, enforced in CI | `aes.NewCipher` now runs before the algorithm's size check, so both are reachable. `dsig.Verify` canonicalizes each `ds:Reference` for `Coverage.Raw` before `ds:SignedInfo`, so each failure point has an input that reaches it. | *this commit* |
 | Minimum Go is 1.26, not 1.25 | `rsa.EncryptOAEPWithOptions`, the only standard-library route to an OAEP digest and MGF1 hash that differ, arrived in Go 1.26. | [`6debe01`][6debe01] |
 
 [9756c04]: https://github.com/knroy/go-xmlsec/commit/9756c04
 [6debe01]: https://github.com/knroy/go-xmlsec/commit/6debe01
 [2281ef3]: https://github.com/knroy/go-xmlsec/commit/2281ef3
+[169fc0c]: https://github.com/knroy/go-xmlsec/commit/169fc0c

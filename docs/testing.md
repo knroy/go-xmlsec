@@ -94,18 +94,22 @@ input.
 
 ## Coverage
 
-At the time of writing: root 100%, `dsig` 99.7%, `wss` 99.3%, `xenc` 99.5%,
-`internal/xmltree` 100%.
+**100% of statements in every package, enforced by CI.**
 
-An unreachable branch is deleted rather than tested around. Three error
-checks remain uncovered, each on a call that cannot fail given what precedes
-it, kept because ignoring an error is the worse habit:
+The rule that keeps it honest: an unreachable branch is deleted or
+restructured so that it becomes reachable, never excused and never reached
+by faking the standard library. What that meant in practice:
 
-| Line | Call | Why it cannot fail |
-|---|---|---|
-| `dsig/verify.go` | `c14n.Bytes` of a `ds:Reference` for `Coverage.Raw` | its `ds:SignedInfo` was just canonicalized with the same options |
-| `wss/bst.go` | `asn1.Marshal` of the PkiPath | a sequence of already-encoded certificates |
-| `xenc/datacipher.go` | `aes.NewCipher` | the key length was checked against the algorithm just before |
+| Was unreachable | Now |
+|---|---|
+| `crypto/rand.Read` errors | deleted: it cannot fail since Go 1.24 |
+| namespace conflicts on a newly built, detached element | deleted: its own declaration cannot conflict |
+| `aes.NewCipher` after the key length was checked | the order is swapped: `NewCipher` refuses a length AES does not have, the size check refuses a valid AES key of the wrong size for the algorithm, and both are tested |
+| canonicalizing a `ds:Reference` for `Coverage.Raw` after `ds:SignedInfo` | `Raw` is taken first, so a document with no canonical form fails there; `SignedInfo` keeps its own failure case, a relative namespace declared on `ds:SignatureMethod` and so in no `Reference`'s scope (`TestUnverifiable`) |
+
+One error is discarded, with a comment: `asn1.Marshal` of the PkiPath in
+`wss/bst.go`, a sequence of `RawValue`s that are emitted verbatim and cannot
+fail to encode.
 
 ## Not tested yet
 

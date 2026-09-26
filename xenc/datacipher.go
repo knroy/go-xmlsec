@@ -21,12 +21,14 @@ func gcm(alg string, key []byte) (cipher.AEAD, error) {
 	if !ok {
 		return nil, fmt.Errorf("%w: data %q", xmlsec.ErrUnsupportedAlgorithm, alg)
 	}
-	if len(key) != size {
-		return nil, fmt.Errorf("xenc: session key is %d bytes, %s needs %d", len(key), alg, size)
-	}
+	// NewCipher refuses any length AES does not have; the size check then
+	// refuses a valid AES key of the wrong size for alg.
 	b, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
+	}
+	if len(key) != size {
+		return nil, fmt.Errorf("xenc: session key is %d bytes, %s needs %d", len(key), alg, size)
 	}
 	return cipher.NewGCM(b)
 }

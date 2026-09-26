@@ -17,7 +17,7 @@ Read this before depending on it.
 
 | Evidence | Status |
 |---|---|
-| Unit and conformance tests | 63 test and fuzz functions, run on Linux, macOS and Windows in CI; statement coverage 99.3–100% per package |
+| Unit and conformance tests | 63 test and fuzz functions, run on Linux, macOS and Windows in CI; 100% statement coverage, enforced by CI |
 | Negative corpus: modified element, modified attachment, relocated element, duplicated ID, algorithm outside allow-list, truncated signature | Yes, each a named test |
 | Differential against `xmlsec1` 1.3 | **Yes**, in CI: it verifies our enveloped and detached signatures (RSA, ECDSA; inclusive, exclusive) and decrypts our AES-GCM / RSA-OAEP encryption, and we do the same for its output |
 | Differential against Apache Santuario | **Not yet built** |

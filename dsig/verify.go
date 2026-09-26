@@ -170,6 +170,17 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 		}
 	}
 
+	// Each Reference's canonical form, for Coverage.Raw. Taken before
+	// SignedInfo is, so a document with no canonical form fails here first;
+	// SignedInfo can still fail on its own, on a relative namespace only it
+	// uses under exclusive canonicalization.
+	raw := make([][]byte, len(p.refs))
+	for i, r := range p.refs {
+		if raw[i], err = c14n.Bytes(r.el, p.c14n); err != nil {
+			return nil, err
+		}
+	}
+
 	cert, form, err := resolveKeyInfo(doc, p.keyInfo)
 	if err != nil {
 		return nil, err
@@ -193,7 +204,7 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 	}
 
 	cov := &Coverage{Certificate: cert, KeyInfoForm: form}
-	for _, r := range p.refs {
+	for i, r := range p.refs {
 		dh, _ := xmlsec.DigestHash(r.digestAlg)
 		h := dh.New()
 		got, err := digestReference(h, doc, sig, r.uri, r.transforms, opts.Attachments)
@@ -212,13 +223,9 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 		case got.attachment != nil:
 			cov.SignedAttachmentIDs = append(cov.SignedAttachmentIDs, got.attachment.ID)
 		}
-		raw, err := c14n.Bytes(r.el, p.c14n)
-		if err != nil {
-			return nil, err
-		}
 		cov.References = append(cov.References, VerifiedReference{
 			URI: r.uri, Type: r.typ, DigestAlgorithm: r.digestAlg,
-			DigestValue: r.digest, Transforms: r.transforms, Raw: raw,
+			DigestValue: r.digest, Transforms: r.transforms, Raw: raw[i],
 		})
 	}
 	return cov, nil

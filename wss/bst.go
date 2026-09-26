@@ -30,10 +30,9 @@ func (h *Header) AddBinarySecurityToken(cert *x509.Certificate, chain []*x509.Ce
 			path = append(path, asn1.RawValue{FullBytes: c.Raw})
 		}
 		slices.Reverse(path)
-		var err error
-		if der, err = asn1.Marshal(path); err != nil {
-			return "", err
-		}
+		// Marshal cannot fail on a sequence of RawValues: each is emitted
+		// verbatim from FullBytes.
+		der, _ = asn1.Marshal(path)
 	default:
 		return "", fmt.Errorf("%w: BST ValueType %q", xmlsec.ErrUnsupportedAlgorithm, valueType)
 	}
