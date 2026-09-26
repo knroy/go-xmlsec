@@ -281,7 +281,9 @@ func TestWSS4JDecryptsOurEncryption(t *testing.T) {
 	if err := ek.SetKeyInfo(str); err != nil {
 		t.Fatal(err)
 	}
-	ek.AddDataReference(opts.DataID)
+	if err := ek.AddDataReference(opts.DataID); err != nil {
+		t.Fatal(err)
+	}
 	if err := hdr.Append(ek.Element); err != nil {
 		t.Fatal(err)
 	}

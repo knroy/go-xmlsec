@@ -62,6 +62,21 @@ const (
 	KeyTransportRSAOAEP = "http://www.w3.org/2009/xmlenc11#rsa-oaep"
 )
 
+// Symmetric key wrap algorithm URIs, RFC 3394 AES key wrap (XML Encryption
+// 1.1 section 5.7.2). The legacy kw-tripledes is deliberately absent.
+const (
+	KeyWrapAES128 = "http://www.w3.org/2001/04/xmlenc#kw-aes128"
+	KeyWrapAES192 = "http://www.w3.org/2001/04/xmlenc#kw-aes192"
+	KeyWrapAES256 = "http://www.w3.org/2001/04/xmlenc#kw-aes256"
+)
+
+// Key agreement and key derivation algorithm URIs (XML Encryption 1.1
+// sections 5.6.4 and 5.4.1).
+const (
+	KeyAgreementECDHES     = "http://www.w3.org/2009/xmlenc11#ECDH-ES"
+	KeyDerivationConcatKDF = "http://www.w3.org/2009/xmlenc11#ConcatKDF"
+)
+
 // Mask generation function URIs, for RSA-OAEP.
 const (
 	MGF1SHA256 = "http://www.w3.org/2009/xmlenc11#mgf1sha256"

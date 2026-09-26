@@ -2,6 +2,7 @@ package xenc_test
 
 import (
 	"bytes"
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -10,11 +11,13 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"errors"
+	"io"
 	"math/big"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/knroy/go-xml/c14n"
 	"github.com/knroy/go-xml/xdm"
 	"github.com/knroy/go-xmlsec"
 	"github.com/knroy/go-xmlsec/internal/xmltree"
@@ -187,8 +190,9 @@ func TestEncryptedKeyComposition(t *testing.T) {
 	if err := ek.SetKeyInfo(str); err != nil {
 		t.Fatal(err)
 	}
-	ek.AddDataReference("ED-1")
-	ek.AddDataReference("ED-2")
+	if ek.AddDataReference("ED-1") != nil || ek.AddDataReference("ED-2") != nil {
+		t.Fatal("AddDataReference")
+	}
 
 	var order []string
 	for _, k := range ek.Element.ChildElements() {
@@ -233,5 +237,83 @@ func TestDataID(t *testing.T) {
 	out, err := xenc.EncryptElement(tree.Root, xmltree.DocumentElement(tree.Root).ChildElements()[0], key, opts)
 	if err != nil || !strings.Contains(string(out), `Id="ED-9"`) {
 		t.Fatalf("element: %v\n%s", err, out)
+	}
+}
+
+// ecDecrypter is a crypto.Decrypter whose public key is not RSA.
+type ecDecrypter struct{ pub any }
+
+func (d ecDecrypter) Public() crypto.PublicKey { return d.pub }
+func (d ecDecrypter) Decrypt(io.Reader, []byte, crypto.DecrypterOpts) ([]byte, error) {
+	return nil, errors.New("unreachable")
+}
+
+func TestDecryptEncryptedKeyMethod(t *testing.T) {
+	ek, err := xenc.GenerateEncryptedKey(as4Opts(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := c14n.Bytes(ek.Element, c14n.Options{Algorithm: c14n.Exclusive10})
+	good := string(b)
+	const dm = `<ds:DigestMethod xmlns:ds="` + xenc.NSDSig + `" Algorithm="` + xmlsec.DigestSHA256 + `"></ds:DigestMethod>`
+	const mgf = `<xenc11:MGF xmlns:xenc11="` + xenc.NSXEnc11 + `" Algorithm="` + xmlsec.MGF1SHA256 + `"></xenc11:MGF>`
+	if !strings.Contains(good, dm) || !strings.Contains(good, mgf) {
+		t.Fatalf("method:\n%s", good)
+	}
+	edit := func(old, new string) *xdm.Node { return covParse(t, strings.Replace(good, old, new, 1)) }
+
+	// Section 3.2: KeySize is always permitted and, for RSA-OAEP, must be
+	// the modulus size of the decrypting key.
+	for _, ks := range []string{"2048", " 2048\n"} {
+		if key, err := xenc.DecryptEncryptedKey(edit(dm, `<xenc:KeySize>`+ks+`</xenc:KeySize>`+dm), recipientKey, nil, nil, nil); err != nil || !bytes.Equal(key, ek.SessionKey) {
+			t.Fatalf("KeySize %q: %v", ks, err)
+		}
+	}
+	// XML Encryption's own SHA-384 URI is accepted as the OAEP digest.
+	opts := as4Opts(t)
+	opts.DigestAlgorithm = xmlsec.DigestSHA384
+	ek384, err := xenc.GenerateEncryptedKey(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ = c14n.Bytes(ek384.Element, c14n.Options{Algorithm: c14n.Exclusive10})
+	alias := covParse(t, strings.Replace(string(b), xmlsec.DigestSHA384, xenc.DigestSHA384XMLEnc, 1))
+	for _, list := range [][]string{nil, {xenc.DigestSHA384XMLEnc}} {
+		if key, err := xenc.DecryptEncryptedKey(alias, recipientKey, nil, nil, list); err != nil || !bytes.Equal(key, ek384.SessionKey) {
+			t.Fatalf("xmlenc#sha384 %v: %v", list, err)
+		}
+	}
+	if _, err := xenc.DecryptEncryptedKey(alias, recipientKey, nil, nil, []string{xmlsec.DigestSHA384}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
+		t.Fatalf("aliases are distinct allow-list entries: %v", err)
+	}
+
+	for _, c := range []struct {
+		name  string
+		el    *xdm.Node
+		dec   crypto.Decrypter
+		lists [3][]string
+		want  error
+	}{
+		{"KeySize of the session key", edit(dm, `<xenc:KeySize>128</xenc:KeySize>`+dm), recipientKey, [3][]string{}, xmlsec.ErrMalformed},
+		{"DigestMethod twice", edit(dm, dm+dm), recipientKey, [3][]string{}, xmlsec.ErrMalformed},
+		{"MGF twice", edit(mgf, mgf+mgf), recipientKey, [3][]string{}, xmlsec.ErrMalformed},
+		{"unknown child", edit(dm, `<x:Y xmlns:x="urn:x"/>`+dm), recipientKey, [3][]string{}, xmlsec.ErrMalformed},
+		// rsa-1_5 has no MGF; it is refused as the algorithm it is, not as
+		// an implicit SHA-1.
+		{"rsa-1_5", edit(xmlsec.KeyTransportRSAOAEP, "http://www.w3.org/2001/04/xmlenc#rsa-1_5"), recipientKey, [3][]string{}, xmlsec.ErrAlgorithmNotAllowed},
+		{"non-RSA key", covParse(t, good), ecDecrypter{pub: "x"}, [3][]string{}, xmlsec.ErrUnsupportedAlgorithm},
+		{"allow-listed unimplemented MGF", edit(xmlsec.MGF1SHA256, "urn:x"), recipientKey, [3][]string{1: {"urn:x"}}, xmlsec.ErrUnsupportedAlgorithm},
+		{"allow-listed unimplemented digest", edit(xmlsec.DigestSHA256, "urn:x"), recipientKey, [3][]string{2: {"urn:x"}}, xmlsec.ErrUnsupportedAlgorithm},
+		{"SHA-1 digest", edit(xmlsec.DigestSHA256, "http://www.w3.org/2000/09/xmldsig#sha1"), recipientKey, [3][]string{}, xmlsec.ErrAlgorithmNotAllowed},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			key, err := xenc.DecryptEncryptedKey(c.el, c.dec, c.lists[0], c.lists[1], c.lists[2])
+			if !errors.Is(err, c.want) || key != nil {
+				t.Fatalf("got %v, want %v", err, c.want)
+			}
+			if c.name == "rsa-1_5" && !strings.Contains(err.Error(), "key transport") {
+				t.Fatalf("reported as %v", err)
+			}
+		})
 	}
 }

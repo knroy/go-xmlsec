@@ -7,6 +7,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/knroy/go-xml/xdm"
 	"github.com/knroy/go-xmlsec"
 	"github.com/knroy/go-xmlsec/xenc"
 )
@@ -143,6 +144,83 @@ func TestEncryptAttachmentComplete(t *testing.T) {
 	att.MIMEHeaders["CONTENT-TYPE"] = []string{"text/plain"}
 	if _, _, err := xenc.EncryptAttachment(att, key, xmlsec.TransformAttachmentComplete, as4Opts(t)); !errors.Is(err, xmlsec.ErrMalformed) {
 		t.Fatalf("duplicate header: %v", err)
+	}
+}
+
+// RFC 2392 and section 3.3.1: the cid: URI percent-encodes the Content-ID
+// so that decoding it names the same part. "@" and the unreserved
+// characters stay; "+", which WSS4J would decode as a space, does not.
+func TestCipherReferenceCIDEncoding(t *testing.T) {
+	key := bytes.Repeat([]byte{1}, 16)
+	for id, uri := range map[string]string{
+		"a@x":                 "cid:a@x",
+		"part-1.x_y~z@host":   "cid:part-1.x_y~z@host",
+		"50%off @x":           "cid:50%25off%20@x",
+		"a+b/c?d#e@x":         "cid:a%2Bb%2Fc%3Fd%23e@x",
+		"café@x":              "cid:caf%C3%A9@x",
+		"<angle>&\"quote\"@x": "cid:%3Cangle%3E%26%22quote%22@x",
+	} {
+		att := &xmlsec.Attachment{ID: id, Body: []byte("b")}
+		ct, ed, err := xenc.EncryptAttachment(att, key, xmlsec.TransformAttachmentContentOnly, as4Opts(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ed = reparse(t, ed)
+		cr := firstNamed(ed, "CipherReference")
+		if cr.AttrValue("URI") != uri {
+			t.Errorf("%q: URI %q, want %q", id, cr.AttrValue("URI"), uri)
+		}
+		got, err := xenc.DecryptAttachment(ed, ct, key, nil)
+		if err != nil || got.ID != id {
+			t.Errorf("%q: decrypted ID %q, %v", id, got.ID, err)
+		}
+		set, _ := xmlsec.NewAttachmentSet(att)
+		if found, err := set.Lookup(uri); err != nil || found != att {
+			t.Errorf("%q: Lookup %v", id, err)
+		}
+	}
+}
+
+// Section 3.3.1 transforms on an attachment CipherReference: none, or the
+// SwA Attachment-Ciphertext-Transform alone.
+func TestDecryptAttachmentTransforms(t *testing.T) {
+	key := bytes.Repeat([]byte{1}, 16)
+	ct := sealGCM(key, "body")
+	el := func(transforms string) *xdm.Node {
+		return covParse(t, covED(`Type="`+xmlsec.TransformAttachmentContentOnly+`"`, covEM(xmlsec.EncAES128GCM)+
+			`<xenc:CipherData><xenc:CipherReference URI="cid:a">`+transforms+`</xenc:CipherReference></xenc:CipherData>`))
+	}
+	tr := func(algs ...string) string {
+		s := `<xenc:Transforms>`
+		for _, a := range algs {
+			s += `<ds:Transform xmlns:ds="` + xenc.NSDSig + `" Algorithm="` + a + `"/>`
+		}
+		return s + `</xenc:Transforms>`
+	}
+	for _, ok := range []string{``, tr(xenc.TransformAttachmentCiphertext)} {
+		if got, err := xenc.DecryptAttachment(el(ok), ct, key, nil); err != nil || string(got.Body) != "body" {
+			t.Fatalf("%s: %v", ok, err)
+		}
+	}
+	for name, c := range map[string]struct {
+		transforms string
+		want       error
+	}{
+		"XSLT":           {tr(xmlsec.TransformXSLT), xmlsec.ErrTransformRefused},
+		"XPath":          {`<xenc:Transforms><ds:Transform xmlns:ds="` + xenc.NSDSig + `" Algorithm="` + xmlsec.TransformXPath + `"><ds:XPath>1</ds:XPath></ds:Transform></xenc:Transforms>`, xmlsec.ErrTransformRefused},
+		"XPath after":    {tr(xenc.TransformAttachmentCiphertext, xmlsec.TransformXPathFilter2), xmlsec.ErrTransformRefused},
+		"base64":         {tr(xmlsec.TransformBase64), xmlsec.ErrUnsupportedAlgorithm},
+		"twice":          {tr(xenc.TransformAttachmentCiphertext, xenc.TransformAttachmentCiphertext), xmlsec.ErrUnsupportedAlgorithm},
+		"signature form": {tr(xmlsec.TransformAttachmentContentSignature), xmlsec.ErrUnsupportedAlgorithm},
+		"ds:Transforms":  {`<ds:Transforms xmlns:ds="` + xenc.NSDSig + `"/>`, xmlsec.ErrMalformed},
+		"two Transforms": {tr() + tr(), xmlsec.ErrMalformed},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := xenc.DecryptAttachment(el(c.transforms), ct, key, nil)
+			if !errors.Is(err, c.want) || got != nil {
+				t.Fatalf("got %v, want %v", err, c.want)
+			}
+		})
 	}
 }
 

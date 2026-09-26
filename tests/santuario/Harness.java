@@ -66,6 +66,9 @@ public final class Harness {
                 case "sign-detached" -> signDetached(a[1], a[2], a[3], a[4], java.util.Arrays.copyOfRange(a, 5, a.length));
                 case "encrypt" -> encrypt(a[1], a[2], a[3], a[4]);
                 case "decrypt" -> decrypt(a[1], a[2], a[3]);
+                case "encrypt-ecdh" -> encryptECDH(a[1], a[2], a[3], a[4]);
+                case "encrypt-kw" -> encryptKW(a[1], a[2], a[3], a[4]);
+                case "decrypt-kw" -> decryptKW(a[1], a[2], a[3]);
                 case "wss4j-verify" -> wss4jVerify(a[1], a[2], new Parts(a, 3));
                 case "wss4j-decrypt" -> wss4jDecrypt(a[1], a[2], a[3], new Parts(a, 4));
                 case "wss4j-process" -> wss4jProcess(a[1], a[2], a[3], a[4]);
@@ -190,23 +193,75 @@ public final class Harness {
      */
     static void encrypt(String in, String certPath, String local, String out) throws Exception {
         Document doc = parse(in);
+        XMLCipher keyCipher = XMLCipher.getInstance(XMLCipher.RSA_OAEP_11, null, SHA256);
+        keyCipher.init(XMLCipher.WRAP_MODE, cert(certPath).getPublicKey());
+        encryptWith(doc, local, out, sk -> keyCipher.encryptKey(doc, sk, EncryptionConstants.MGF1_SHA256, null));
+    }
+
+    /**
+     * encrypt-ecdh in.xml cert.pem localName out.xml: AES-128-GCM over the
+     * first element with that local name, the session key wrapped by
+     * kw-aes128 under a KEK agreed by ECDH-ES with the certificate's EC key
+     * and derived by ConcatKDF with SHA-256, the EncryptedKey carried in
+     * EncryptedData/ds:KeyInfo.
+     */
+    static void encryptECDH(String in, String certPath, String local, String out) throws Exception {
+        Document doc = parse(in);
+        java.security.PublicKey pub = cert(certPath).getPublicKey();
+        org.apache.xml.security.encryption.params.ConcatKDFParams kdf =
+            org.apache.xml.security.encryption.params.ConcatKDFParams.createBuilder(128, SHA256)
+                .algorithmID("0000").partyUInfo("").partyVInfo("").build();
+        org.apache.xml.security.encryption.params.KeyAgreementParameters kap =
+            org.apache.xml.security.encryption.XMLCipherUtil.constructAgreementParameters(
+                EncryptionConstants.ALGO_ID_KEYAGREEMENT_ECDH_ES,
+                org.apache.xml.security.encryption.params.KeyAgreementParameters.ActorType.ORIGINATOR,
+                kdf, null, pub);
+        XMLCipher keyCipher = XMLCipher.getInstance(XMLCipher.AES_128_KeyWrap);
+        keyCipher.init(XMLCipher.WRAP_MODE, pub);
+        encryptWith(doc, local, out, sk -> keyCipher.encryptKey(doc, sk, kap, null));
+    }
+
+    /**
+     * encrypt-kw in.xml kek.bin localName out.xml: as encrypt-ecdh, the
+     * session key wrapped by kw-aes128 or kw-aes256, by the size of the
+     * shared KEK in kek.bin.
+     */
+    static void encryptKW(String in, String kekPath, String local, String out) throws Exception {
+        Document doc = parse(in);
+        byte[] kek = Files.readAllBytes(Path.of(kekPath));
+        XMLCipher keyCipher = XMLCipher.getInstance(kek.length == 16 ? XMLCipher.AES_128_KeyWrap : XMLCipher.AES_256_KeyWrap);
+        keyCipher.init(XMLCipher.WRAP_MODE, new javax.crypto.spec.SecretKeySpec(kek, "AES"));
+        encryptWith(doc, local, out, sk -> keyCipher.encryptKey(doc, sk));
+    }
+
+    interface KeyEncryptor {
+        EncryptedKey encrypt(SecretKey sk) throws Exception;
+    }
+
+    /** AES-128-GCM over the first element named local, the EncryptedKey in EncryptedData/ds:KeyInfo. */
+    static void encryptWith(Document doc, String local, String out, KeyEncryptor enc) throws Exception {
         KeyGenerator kg = KeyGenerator.getInstance("AES");
         kg.init(128);
         SecretKey sk = kg.generateKey();
-
-        XMLCipher keyCipher = XMLCipher.getInstance(XMLCipher.RSA_OAEP_11, null, SHA256);
-        keyCipher.init(XMLCipher.WRAP_MODE, cert(certPath).getPublicKey());
-        EncryptedKey ek = keyCipher.encryptKey(doc, sk, EncryptionConstants.MGF1_SHA256, null);
-
+        EncryptedKey ek = enc.encrypt(sk);
         XMLCipher dataCipher = XMLCipher.getInstance(XMLCipher.AES_128_GCM);
         dataCipher.init(XMLCipher.ENCRYPT_MODE, sk);
         EncryptedData ed = dataCipher.getEncryptedData();
         KeyInfo ki = new KeyInfo(doc);
         ki.add(ek);
         ed.setKeyInfo(ki);
-
         NodeList l = doc.getElementsByTagNameNS("*", local);
         dataCipher.doFinal(doc, (Element) l.item(0), false);
+        write(doc, out);
+    }
+
+    /** decrypt-kw in.xml kek.bin out.xml: the first EncryptedData, its key wrapped under the shared KEK. */
+    static void decryptKW(String in, String kekPath, String out) throws Exception {
+        Document doc = parse(in);
+        XMLCipher c = XMLCipher.getInstance();
+        c.init(XMLCipher.DECRYPT_MODE, null);
+        c.setKEK(new javax.crypto.spec.SecretKeySpec(Files.readAllBytes(Path.of(kekPath)), "AES"));
+        c.doFinal(doc, first(doc, EncryptionConstants.EncryptionSpecNS, "EncryptedData"));
         write(doc, out);
     }
 

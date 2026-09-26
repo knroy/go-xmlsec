@@ -38,7 +38,9 @@ import (
 // CipherReference names. This split exists because this library does not
 // own MIME.
 //
-// The CipherReference always carries TransformAttachmentCiphertext. The
+// The CipherReference always carries TransformAttachmentCiphertext, and
+// names the attachment by "cid:" and its ID percent-encoded per RFC 2392,
+// as DecryptAttachment and AttachmentSet.Lookup decode it. The
 // EncryptedData MimeType is the attachment's Content-Type, when it has one.
 func EncryptAttachment(att *xmlsec.Attachment, sessionKey []byte, transform string, opts EncryptOptions) ([]byte, *xdm.Node, error) {
 	if att == nil {
@@ -62,24 +64,63 @@ func EncryptAttachment(att *xmlsec.Attachment, sessionKey []byte, transform stri
 	default:
 		return nil, nil, fmt.Errorf("%w: attachment transform %q", xmlsec.ErrUnsupportedAlgorithm, transform)
 	}
+	ed, err := newEncryptedData(transform, opts)
+	if err != nil {
+		return nil, nil, err
+	}
 	ct, err := seal(opts.DataAlgorithm, sessionKey, plaintext)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	ed := newRoot("EncryptedData")
 	if mt := contentType(att); mt != "" {
 		xmltree.SetAttr(ed, "", "", "MimeType", mt)
 	}
-	xmltree.SetAttr(ed, "", "", "Type", transform)
-	setDataID(ed, opts)
-	encryptionMethod(ed, opts.DataAlgorithm)
 	cr := element(element(ed, "CipherData"), "CipherReference")
-	xmltree.SetAttr(cr, "", "", "URI", "cid:"+att.ID)
-	tr := xmltree.Element(element(cr, "Transforms"), "ds", NSDSig, "Transform")
-	tr.AddNamespace("ds", NSDSig)
+	xmltree.SetAttr(cr, "", "", "URI", "cid:"+cidEscape(att.ID))
+	tr := nsElement(element(cr, "Transforms"), "ds", NSDSig, "Transform")
 	xmltree.SetAttr(tr, "", "", "Algorithm", TransformAttachmentCiphertext)
 	return ct, ed, nil
+}
+
+// cidEscape percent-encodes a Content-ID for a cid: URL (RFC 2392), the
+// URI encoding XML Encryption shares with XML Signature (section 3.3.1).
+// Everything but the unreserved characters of RFC 3986 and the "@" of the
+// addr-spec is encoded, "+" included: WSS4J decodes cid: URIs as form data,
+// where "+" means a space.
+func cidEscape(id string) string {
+	var b strings.Builder
+	for _, c := range []byte(id) {
+		switch {
+		case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', '0' <= c && c <= '9', strings.IndexByte("-._~@", c) >= 0:
+			b.WriteByte(c)
+		default:
+			fmt.Fprintf(&b, "%%%02X", c)
+		}
+	}
+	return b.String()
+}
+
+// transforms returns the Algorithm of each ds:Transform in a
+// CipherReference's xenc:Transforms, refusing XSLT and XPath with
+// xmlsec.ErrTransformRefused.
+func transforms(cr *xdm.Node) ([]string, error) {
+	var algs []string
+	for i, k := range cr.ChildElements() {
+		if i > 0 || !k.IsElement(NSXEnc, "Transforms") {
+			return nil, malformed("xenc:CipherReference may hold only one xenc:Transforms")
+		}
+		for _, t := range k.ChildElements() {
+			alg := t.AttrValue("Algorithm")
+			switch {
+			case alg == xmlsec.TransformXSLT || alg == xmlsec.TransformXPath || alg == xmlsec.TransformXPathFilter2:
+				return nil, fmt.Errorf("%w: %s", xmlsec.ErrTransformRefused, alg)
+			case !t.IsElement(NSDSig, "Transform") || len(t.ChildElements()) > 0:
+				return nil, malformed("xenc:Transforms must hold ds:Transform elements without parameters")
+			}
+			algs = append(algs, alg)
+		}
+	}
+	return algs, nil
 }
 
 // contentType returns the attachment's Content-Type header, matched
@@ -97,7 +138,10 @@ func contentType(att *xmlsec.Attachment) string {
 // a CipherReference. ciphertext is the attachment's raw MIME body.
 //
 // It returns the attachment as it was before encryption, identified by the
-// CipherReference's cid: URI. What replaces what in the received MIME part
+// CipherReference's cid: URI. The CipherReference may carry no transform or
+// exactly TransformAttachmentCiphertext; XSLT and XPath are
+// xmlsec.ErrTransformRefused, any other transform
+// xmlsec.ErrUnsupportedAlgorithm. What replaces what in the received MIME part
 // depends on the EncryptedData Type (SwA profile section 5.5.3):
 //
 //   - Attachment-Content-Only: Body replaces the part's body, and
@@ -127,6 +171,13 @@ func DecryptAttachment(el *xdm.Node, ciphertext []byte, sessionKey []byte, allow
 	id, err := url.PathUnescape(strings.TrimPrefix(kids[0].AttrValue("URI"), "cid:"))
 	if err != nil {
 		return nil, malformed("CipherReference URI: %v", err)
+	}
+	algs, err := transforms(kids[0])
+	if err != nil {
+		return nil, err
+	}
+	if len(algs) > 1 || len(algs) == 1 && algs[0] != TransformAttachmentCiphertext {
+		return nil, unsupported("attachment CipherReference transforms %q: only %s is supported", algs, TransformAttachmentCiphertext)
 	}
 	pt, err := open(alg, sessionKey, ciphertext)
 	if err != nil {

@@ -165,7 +165,8 @@ func TestCommentCannotTruncateSignedText(t *testing.T) {
 }
 
 // A received EncryptedData whose algorithm has been swapped is refused
-// before any decryption is attempted.
+// before any decryption is attempted, under explicit allow-lists and under
+// the default set an empty list means.
 func TestEncryptionAlgorithmSubstitution(t *testing.T) {
 	kp := keyPair(t, rsaKey(t))
 	opts := xenc.EncryptOptions{
@@ -209,15 +210,22 @@ func TestEncryptionAlgorithmSubstitution(t *testing.T) {
 				if _, err := xenc.DecryptData(ed, ek.SessionKey, []string{xmlsec.EncAES128GCM}); err == nil {
 					t.Fatal("decrypted")
 				}
+				if _, err := xenc.DecryptData(ed, ek.SessionKey, nil); err == nil {
+					t.Fatal("decrypted under the default set")
+				}
 				return
 			}
 			doc, err := xmlsec.Parse([]byte(strings.Replace(string(ekXML), c.from, c.to, 1)))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := xenc.DecryptEncryptedKey(xmltree.DocumentElement(doc.Root), kp.Signer.(crypto.Decrypter),
+			el := xmltree.DocumentElement(doc.Root)
+			if _, err := xenc.DecryptEncryptedKey(el, kp.Signer.(crypto.Decrypter),
 				[]string{xmlsec.KeyTransportRSAOAEP}, []string{xmlsec.MGF1SHA256}, []string{xmlsec.DigestSHA256}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
 				t.Fatalf("got %v", err)
+			}
+			if _, err := xenc.DecryptEncryptedKey(el, kp.Signer.(crypto.Decrypter), nil, nil, nil); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
+				t.Fatalf("default set: got %v", err)
 			}
 		})
 	}

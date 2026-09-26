@@ -246,7 +246,9 @@ func TestWSS4JDecryptsOurAttachmentEncryption(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				ek.AddDataReference(opts.DataID)
+				if err := ek.AddDataReference(opts.DataID); err != nil {
+					t.Fatal(err)
+				}
 				eds = append(eds, ed)
 				files = append(files, swaPart{[][2]string{
 					{"Content-ID", "<" + p.id() + ">"},

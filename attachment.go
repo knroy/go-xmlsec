@@ -16,7 +16,9 @@ import (
 // construction: this library does not copy it.
 type Attachment struct {
 	// ID is the Content-ID with angle brackets removed. The cid: URI for
-	// this attachment is "cid:" + ID.
+	// this attachment is "cid:" + ID with every character that a URL may
+	// not carry percent-encoded (RFC 2392): "cid:a@x" for ID "a@x", but
+	// "cid:50%25%20off@x" for ID "50% off@x". Lookup decodes it again.
 	ID string
 
 	// MIMEHeaders are the part's headers, each value as a MIME parser

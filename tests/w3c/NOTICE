@@ -6,6 +6,20 @@ the W3C XML Signature 1.1 Interop Test Report, Oracle test vectors:
   Status: W3C Working Group Note, 13 November 2012
   Vectors: https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/
 
+The files in testdata/xmlenc11/ are from the W3C XML Encryption 1.1 Interop
+Test Report, Oracle test vectors, fetched 2026-09-26:
+
+  XML Encryption 1.1 Interop Test Report
+  https://www.w3.org/TR/2012/NOTE-xmlenc-core1-interop-20121113/
+  Status: W3C Working Group Note, 13 November 2012
+  Vectors: https://www.w3.org/TR/2012/NOTE-xmlenc-core1-interop-20121113/files/oracle/
+
+The .xml and .p12 files there are copied unmodified. Each .key.pem is the
+private key of the .p12 of the same name (password "passwd"), extracted
+with OpenSSL and re-encoded as unencrypted PKCS #8, because the Go standard
+library does not read PKCS #12. They are published test keys and protect
+nothing.
+
 Copyright © 2012 World Wide Web Consortium (MIT, ERCIM, Keio).
 https://www.w3.org/copyright/document-license-2023/
 

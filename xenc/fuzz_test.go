@@ -2,6 +2,9 @@ package xenc_test
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/x509"
 	"strings"
 	"testing"
@@ -55,7 +58,13 @@ func FuzzDecryptEncryptedKey(f *testing.F) {
 	f.Add([]byte(strings.Replace(valid, "<xenc11:MGF", "<xenc:OAEPparams>%%%</xenc:OAEPparams><xenc11:MGF", 1)))
 	f.Add([]byte(strings.Replace(valid, "<xenc11:MGF", "<x:Unknown xmlns:x=\"urn:x\"/><xenc11:MGF", 1)))
 	f.Add([]byte(`<xenc:EncryptedKey xmlns:xenc="http://www.w3.org/2001/04/xmlenc#"/>`))
+	f.Add(fuzzBytes(must(xenc.GenerateEncryptedKey(xenc.EncryptOptions{DataAlgorithm: xmlsec.EncAES128GCM,
+		KeyTransportAlgorithm: xmlsec.KeyWrapAES128, KeyEncryptionKey: fuzzKEK})).Element))
+	f.Add(fuzzBytes(must(xenc.GenerateEncryptedKey(xenc.EncryptOptions{DataAlgorithm: xmlsec.EncAES128GCM,
+		KeyTransportAlgorithm: xmlsec.KeyWrapAES128, KeyAgreementAlgorithm: xmlsec.KeyAgreementECDHES,
+		DigestAlgorithm: xmlsec.DigestSHA256, Recipient: &x509.Certificate{PublicKey: &fuzzEC.PublicKey}})).Element))
 
+	priv := must(fuzzEC.ECDH())
 	f.Fuzz(func(t *testing.T, doc []byte) {
 		tree, err := xmlsec.Parse(doc)
 		if err != nil {
@@ -68,8 +77,16 @@ func FuzzDecryptEncryptedKey(f *testing.F) {
 		xenc.DecryptEncryptedKey(el, recipientKey, nil, nil, nil)
 		xenc.DecryptEncryptedKey(el, recipientKey, []string{xmlsec.KeyTransportRSAOAEP},
 			[]string{xmlsec.MGF1SHA256}, []string{xmlsec.DigestSHA256})
+		xenc.UnwrapEncryptedKey(el, fuzzKEK, nil)
+		xenc.DecryptAgreedKey(el, priv, nil, nil, nil)
 	})
 }
+
+// Key material for the key wrap and key agreement seeds.
+var (
+	fuzzKEK = bytes.Repeat([]byte{5}, 16)
+	fuzzEC  = must(ecdsa.GenerateKey(elliptic.P256(), rand.Reader))
+)
 
 func FuzzDecryptData(f *testing.F) {
 	key := bytes.Repeat([]byte{7}, 16)
@@ -104,6 +121,14 @@ func FuzzDecryptData(f *testing.F) {
 	f.Add([]byte(`<xenc:EncryptedData xmlns:xenc="http://www.w3.org/2001/04/xmlenc#"><xenc:EncryptionMethod/>`+
 		`<xenc:CipherData><xenc:CipherValue/><xenc:CipherReference URI="cid:"/></xenc:CipherData></xenc:EncryptedData>`), []byte{})
 
+	// A same-document CipherReference, and a key found by ReferenceList.
+	cv := s[strings.Index(s, "<xenc:CipherValue>")+len("<xenc:CipherValue>") : i]
+	f.Add([]byte(`<r xmlns:xenc="http://www.w3.org/2001/04/xmlenc#"><v Id="cv">`+cv+`</v>`+
+		`<xenc:EncryptedKey><xenc:ReferenceList><xenc:DataReference URI="#ed"/></xenc:ReferenceList></xenc:EncryptedKey>`+
+		`<xenc:EncryptedData Id="ed"><xenc:EncryptionMethod Algorithm="`+xmlsec.EncAES128GCM+`"/>`+
+		`<xenc:CipherData><xenc:CipherReference URI="#cv"><xenc:Transforms><ds:Transform xmlns:ds="http://www.w3.org/2000/09/xmldsig#" Algorithm="`+
+		xmlsec.TransformBase64+`"/></xenc:Transforms></xenc:CipherReference></xenc:CipherData></xenc:EncryptedData></r>`), []byte(nil))
+
 	keys := [][]byte{key, bytes.Repeat([]byte{7}, 32), nil}
 	f.Fuzz(func(t *testing.T, doc, ciphertext []byte) {
 		tree, err := xmlsec.Parse(doc)
@@ -119,6 +144,7 @@ func FuzzDecryptData(f *testing.F) {
 			xenc.DecryptAttachment(el, ciphertext, k, nil)
 		}
 		xenc.DecryptData(el, key, []string{xmlsec.EncAES128GCM})
+		xenc.FindEncryptedKey(el)
 	})
 }
 
