@@ -51,6 +51,11 @@ var (
 	// wsse:SecurityTokenReference form this library does not accept.
 	ErrUnsupportedKeyInfo = errors.New("xmlsec: unsupported key info")
 
+	// ErrMessageExpired is returned when a wsu:Timestamp is not fresh: it
+	// has expired, was created in the future, or is older than the caller
+	// allows. It is the WS-Security wsse:MessageExpired fault.
+	ErrMessageExpired = errors.New("xmlsec: message expired")
+
 	// ErrAttachmentNotFound is returned when a cid: URI matches no attachment.
 	ErrAttachmentNotFound = errors.New("xmlsec: attachment not found")
 

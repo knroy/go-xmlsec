@@ -12,7 +12,10 @@ import (
 	"github.com/knroy/go-xmlsec/internal/xmltree"
 )
 
-// AddBinarySecurityToken appends a wsse:BinarySecurityToken carrying cert.
+// AddBinarySecurityToken adds a wsse:BinarySecurityToken carrying cert,
+// ahead of the existing content like Prepend: after a leading wsu:Timestamp,
+// before everything else. Add a token before the step that references it,
+// and Prepend keeps it ahead of that step.
 //
 // valueType is xmlsec.BSTValueTypeX509v3 for a single certificate, or
 // xmlsec.BSTValueTypeX509PKIPath for cert plus chain (leaf first, excluding
@@ -49,7 +52,7 @@ func (h *Header) AddBinarySecurityToken(cert *x509.Certificate, chain []*x509.Ce
 	xmltree.SetAttr(bst, "", "", "EncodingType", xmlsec.BSTEncodingBase64)
 	xmltree.SetAttr(bst, "", "", "ValueType", valueType)
 	xmltree.Text(bst, base64.StdEncoding.EncodeToString(der))
-	h.el.AppendChild(bst)
+	h.insert(h.front(), bst)
 	return id, nil
 }
 

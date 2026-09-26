@@ -227,7 +227,7 @@ func signGoldenEnvelope(t *testing.T) signedEnvelope {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.hdr.Append(sig); err != nil {
+	if err := s.hdr.Prepend(sig); err != nil {
 		t.Fatal(err)
 	}
 	return s
@@ -277,9 +277,11 @@ var (
 // The signed envelope, then encrypted: the body payload becomes an
 // xenc:EncryptedData, AES-128-GCM, and the header gains an xenc:EncryptedKey,
 // RSA-OAEP with explicit SHA-256 MGF and digest, naming the recipient's
-// token and the EncryptedData. Ciphertext is random, so the golden is the
-// envelope with every CipherValue masked, plus the decrypted plaintext; and
-// the decrypted envelope must verify.
+// token and the EncryptedData. The EncryptedKey is prepended, after the
+// token it names and ahead of the signature, so the header reads [token,
+// EncryptedKey, Signature]: decrypt, then verify. Ciphertext is random, so
+// the golden is the envelope with every CipherValue masked, plus the
+// decrypted plaintext; and the decrypted envelope must verify.
 func TestGoldenSignedEncryptedEnvelope(t *testing.T) {
 	s := signGoldenEnvelope(t)
 	opts := xenc.EncryptOptions{
@@ -303,7 +305,7 @@ func TestGoldenSignedEncryptedEnvelope(t *testing.T) {
 		t.Fatal(err)
 	}
 	ek.AddDataReference(opts.DataID)
-	if err := s.hdr.Append(ek.Element); err != nil {
+	if err := s.hdr.Prepend(ek.Element); err != nil {
 		t.Fatal(err)
 	}
 	out, err := xenc.EncryptElement(s.doc, s.body.ChildElements()[0], ek.SessionKey, opts)

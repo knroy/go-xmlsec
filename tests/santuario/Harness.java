@@ -68,6 +68,7 @@ public final class Harness {
                 case "decrypt" -> decrypt(a[1], a[2], a[3]);
                 case "wss4j-verify" -> wss4jVerify(a[1], a[2], new Parts(a, 3));
                 case "wss4j-decrypt" -> wss4jDecrypt(a[1], a[2], a[3], new Parts(a, 4));
+                case "wss4j-process" -> wss4jProcess(a[1], a[2], a[3], a[4]);
                 case "wss4j-sign-attachments" -> wss4jSignAttachments(a[1], a[2], a[3], a[4], a[5], new Parts(a, 6));
                 case "wss4j-encrypt-attachments" -> wss4jEncryptAttachments(a[1], a[2], a[3], a[4], a[5], new Parts(a, 6));
                 default -> throw new IllegalArgumentException("unknown command " + a[0]);
@@ -288,6 +289,54 @@ public final class Harness {
             System.out.println("action " + r.get(org.apache.wss4j.dom.engine.WSSecurityEngineResult.TAG_ACTION));
         }
         parts.print();
+        XMLUtils.outputDOM(doc, System.out);
+        System.out.println();
+    }
+
+    /**
+     * wss4j-process soap.xml key.pem cert.pem signer.pem: processes the
+     * wsse:Security header with WSS4J holding both the recipient's private
+     * key, for decryption, and the signer's certificate as the only trusted
+     * one, for verification, with Basic Security Profile enforcement on.
+     * WSS4J processes the header in document order, so a header that is not
+     * in processing order fails. Prints each action, "signed #id" for each
+     * element a signature covered, "decrypted #id" for each EncryptedData
+     * decrypted, then the processed document.
+     */
+    static void wss4jProcess(String soapPath, String keyPath, String certPath, String signerPath) throws Exception {
+        org.apache.wss4j.dom.engine.WSSConfig.init();
+        Document doc = parse(soapPath);
+
+        java.security.KeyStore trust = java.security.KeyStore.getInstance("PKCS12");
+        trust.load(null, null);
+        trust.setCertificateEntry("sender", cert(signerPath));
+        org.apache.wss4j.common.crypto.Merlin sigCrypto = new org.apache.wss4j.common.crypto.Merlin();
+        sigCrypto.setKeyStore(trust);
+        sigCrypto.setTrustStore(trust);
+
+        org.apache.wss4j.dom.handler.RequestData data = new org.apache.wss4j.dom.handler.RequestData();
+        data.setWssConfig(org.apache.wss4j.dom.engine.WSSConfig.getNewInstance());
+        data.setDecCrypto(keyStore(keyPath, certPath));
+        data.setSigVerCrypto(sigCrypto);
+        data.setCallbackHandler(Harness::password);
+
+        org.apache.wss4j.dom.handler.WSHandlerResult result =
+            new org.apache.wss4j.dom.engine.WSSecurityEngine().processSecurityHeader(doc, data);
+        if (result == null || result.getResults().isEmpty()) {
+            throw new IllegalStateException("no wsse:Security header processed");
+        }
+        for (org.apache.wss4j.dom.engine.WSSecurityEngineResult r : result.getResults()) {
+            int action = (Integer) r.get(org.apache.wss4j.dom.engine.WSSecurityEngineResult.TAG_ACTION);
+            System.out.println("action " + action);
+            @SuppressWarnings("unchecked")
+            java.util.List<org.apache.wss4j.dom.WSDataRef> refs = (java.util.List<org.apache.wss4j.dom.WSDataRef>)
+                r.get(org.apache.wss4j.dom.engine.WSSecurityEngineResult.TAG_DATA_REF_URIS);
+            if (refs != null) {
+                for (org.apache.wss4j.dom.WSDataRef ref : refs) {
+                    System.out.println((action == org.apache.wss4j.dom.WSConstants.SIGN ? "signed " : "decrypted ") + ref.getWsuId());
+                }
+            }
+        }
         XMLUtils.outputDOM(doc, System.out);
         System.out.println();
     }
