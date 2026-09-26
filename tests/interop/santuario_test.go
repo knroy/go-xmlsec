@@ -262,3 +262,30 @@ func TestWeDecryptSantuarioEncryption(t *testing.T) {
 		t.Fatalf("plaintext %s", plain)
 	}
 }
+
+// Santuario verifies a signature whose ds:SignedInfo uses inclusive
+// canonicalization and was computed in place, inside a SOAP header whose
+// ancestors declare namespaces (SignOptions.Parent).
+func TestSantuarioVerifiesOurInPlaceInclusiveSignature(t *testing.T) {
+	kp := newKeypair(t, rsaKey(t))
+	incl := string(c14n.Inclusive10)
+	doc := parse(t, []byte(soapWithHeader))
+	sig, err := dsig.Sign(doc, kp.provider, dsig.SignOptions{
+		SignatureAlgorithm:        xmlsec.SigRSASHA256,
+		CanonicalizationAlgorithm: incl,
+		References: []dsig.Reference{{URI: "#body", DigestAlgorithm: xmlsec.DigestSHA256,
+			Transforms: []dsig.TransformSpec{{Algorithm: incl}}}},
+		Parent: find(doc, wss.NSWSSE, "Security"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sig.Parent == nil {
+		t.Fatal("signature not placed")
+	}
+	signed, err := c14n.Bytes(doc, c14n.Options{Algorithm: c14n.Inclusive10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustSantuario(t, "verify", tempFile(t, "signed.xml", signed), kp.certPEM)
+}

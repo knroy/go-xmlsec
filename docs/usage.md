@@ -32,10 +32,14 @@ tightened, never loosened, and exceeding one is `ErrLimitExceeded`.
 ## WS-Security signature
 
 `dsig.Sign` returns a detached `ds:Signature` for you to place, and does not
-modify the document. Its `ds:SignedInfo` canonicalization must be exclusive:
-it is canonicalized before you place the signature, and only exclusive
-canonicalization is independent of where it ends up. `Sign` refuses an
-inclusive one.
+modify the document. A detached signature's `ds:SignedInfo` is canonicalized
+before you place it, and only exclusive canonicalization is independent of
+where it ends up, so a detached signature needs exclusive canonicalization.
+To use any other, set `SignOptions.Parent` to the element the signature
+belongs in: `Sign` then appends it there first and computes it in place,
+leaves it there, and leaves the document unchanged if it fails. (The WS-I
+Basic Security Profile requires exclusive canonicalization for WS-Security
+anyway.)
 
 1. Give every signed element an ID: `wss.AssignID(doc, el)`.
 2. Create the header and the token: `wss.NewHeader`, then

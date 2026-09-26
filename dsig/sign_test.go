@@ -335,3 +335,76 @@ func TestSignEmptyTokenID(t *testing.T) {
 		t.Fatal("empty token ID accepted")
 	}
 }
+
+// With SignOptions.Parent, Sign computes the signature where it will stand,
+// so inclusive canonicalization of ds:SignedInfo is valid even though the
+// ancestors declare namespaces a detached computation would not see.
+func TestSignInPlace(t *testing.T) {
+	key := newKey(t, rsaKey)
+	incl := string(c14n.Inclusive10)
+	src := `<S:Envelope xmlns:S="` + wss.NSSOAP12 + `" xmlns:extra="urn:extra" xmlns:wsu="` + wss.NSWSU + `">` +
+		`<S:Header><Sec/></S:Header><S:Body wsu:Id="body"><x>1</x></S:Body></S:Envelope>`
+	doc := parse(t, []byte(src))
+	sec := xmltree.DocumentElement(doc).ChildElements()[0].ChildElements()[0]
+	opts := dsig.SignOptions{
+		SignatureAlgorithm:        xmlsec.SigRSASHA256,
+		CanonicalizationAlgorithm: incl,
+		References: []dsig.Reference{{URI: "#body", DigestAlgorithm: xmlsec.DigestSHA256,
+			Transforms: []dsig.TransformSpec{{Algorithm: incl}}}},
+		KeyInfo: dsig.KeyInfoX509Data,
+		Parent:  sec,
+	}
+	sig, err := dsig.Sign(doc, key, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sig.Parent != sec {
+		t.Fatal("signature not placed under Parent")
+	}
+	verifyOpts := dsig.VerifyOptions{Certificate: key.Certificate, AllowedCanonicalizationAlgorithms: []string{incl}}
+	if cov, err := dsig.Verify(doc, sig, verifyOpts); err != nil || !cov.Covers("body") {
+		t.Fatalf("in memory: %v", err)
+	}
+	// And as a receiver sees it, after serialization.
+	out, err := c14n.Bytes(doc, c14n.Options{Algorithm: c14n.Inclusive10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	re := parse(t, out)
+	if _, err := dsig.Verify(re, findSignature(re), verifyOpts); err != nil {
+		t.Fatalf("after reparse: %v", err)
+	}
+}
+
+func TestSignInPlaceRefusals(t *testing.T) {
+	key := newKey(t, rsaKey)
+	base := func(doc, parent *xdm.Node, uri string) dsig.SignOptions {
+		return dsig.SignOptions{
+			SignatureAlgorithm:        xmlsec.SigRSASHA256,
+			CanonicalizationAlgorithm: string(c14n.Inclusive10),
+			References: []dsig.Reference{{URI: uri, DigestAlgorithm: xmlsec.DigestSHA256,
+				Transforms: []dsig.TransformSpec{{Algorithm: string(c14n.Inclusive10)}}}},
+			Parent: parent,
+		}
+	}
+	doc := parse(t, []byte(`<r><a/></r>`))
+	other := parse(t, []byte(`<o/>`))
+	root := xmltree.DocumentElement(doc)
+	for name, c := range map[string]struct{ doc, parent *xdm.Node }{
+		"parent in another document": {doc, xmltree.DocumentElement(other)},
+		"parent not an element":      {doc, doc},
+		"no document":                {nil, root},
+	} {
+		if _, err := dsig.Sign(c.doc, key, base(c.doc, c.parent, "")); !errors.Is(err, xmlsec.ErrMalformed) {
+			t.Errorf("%s: got %v", name, err)
+		}
+	}
+	// A failure after placing the signature leaves the document unchanged.
+	before := len(root.Children)
+	if _, err := dsig.Sign(doc, key, base(doc, root, "#nope")); !errors.Is(err, xmlsec.ErrIDNotFound) {
+		t.Fatalf("got %v", err)
+	}
+	if len(root.Children) != before {
+		t.Fatal("a failed Sign left a signature in the document")
+	}
+}

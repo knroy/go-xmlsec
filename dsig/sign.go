@@ -47,6 +47,14 @@ type SignOptions struct {
 	// a cid: URI.
 	Attachments xmlsec.AttachmentSet
 
+	// Parent, if set, is the element inside doc that Sign appends the
+	// signature to before digesting references and canonicalizing
+	// ds:SignedInfo, so the signature is computed where it will stand. Any
+	// canonicalization algorithm may then be used. Without it Sign returns a
+	// detached signature, which only exclusive canonicalization keeps valid
+	// wherever the caller places it.
+	Parent *xdm.Node
+
 	// IDAttributes names attributes that "#id" references resolve against
 	// in addition to wsu:Id and xml:id, such as IDAttrSAML or IDAttrDSig.
 	// Empty means only those two. An id value carried by more than one
@@ -55,20 +63,36 @@ type SignOptions struct {
 	IDAttributes []xdm.QName
 }
 
-// Sign creates a ds:Signature over the references in opts and returns it
-// detached, for the caller to place: inside wsse:Security for WS-Security.
-// The document is not modified.
+// Sign creates a ds:Signature over the references in opts.
 //
-// The CanonicalizationAlgorithm must be exclusive. ds:SignedInfo is
-// canonicalized here, before the caller places the signature, and only
-// exclusive canonicalization is independent of where it ends up. Use
-// SignEnveloped for inclusive canonicalization.
+// With opts.Parent set, the signature is appended to that element first and
+// computed in place, and any canonicalization algorithm may be used; the
+// signature is left there, and on failure the document is left unchanged.
+//
+// Without it, the signature is returned detached for the caller to place,
+// for example inside wsse:Security, and the document is not modified. Then
+// the CanonicalizationAlgorithm must be exclusive: ds:SignedInfo is
+// canonicalized before it is placed, and only exclusive canonicalization is
+// independent of where it ends up.
 func Sign(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions) (*xdm.Node, error) {
-	if !c14n.Algorithm(opts.CanonicalizationAlgorithm).Exclusive() {
-		return nil, fmt.Errorf("%w: Sign needs an exclusive SignedInfo canonicalization, got %q; use SignEnveloped",
-			xmlsec.ErrUnsupportedAlgorithm, opts.CanonicalizationAlgorithm)
+	if opts.Parent == nil {
+		if !c14n.Algorithm(opts.CanonicalizationAlgorithm).Exclusive() {
+			return nil, fmt.Errorf("%w: a detached signature needs an exclusive SignedInfo canonicalization, got %q; set SignOptions.Parent to compute it in place",
+				xmlsec.ErrUnsupportedAlgorithm, opts.CanonicalizationAlgorithm)
+		}
+		return sign(doc, key, opts, nil)
 	}
-	return sign(doc, key, opts, nil)
+	p := opts.Parent
+	if doc == nil || p.Kind != xdm.KindElement || p.Root() != doc.Root() {
+		return nil, fmt.Errorf("%w: SignOptions.Parent must be an element inside doc", xmlsec.ErrMalformed)
+	}
+	n := len(p.Children)
+	sig, err := sign(doc, key, opts, p)
+	if err != nil {
+		p.Children = p.Children[:n]
+		return nil, err
+	}
+	return sig, nil
 }
 
 // SignEnveloped creates an enveloped signature, appended as the last child
