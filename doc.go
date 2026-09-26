@@ -1,0 +1,47 @@
+// Package xmlsec implements XML Signature, XML Encryption and the
+// WS-Security profile of the two, over the go-xml node model.
+//
+// It has no knowledge of AS4, ebMS3 or any other messaging profile. Callers
+// supply documents, node selections, keys and attachments; this package
+// supplies octets and verdicts.
+//
+// Every algorithm is named explicitly at every call site. There are no
+// defaults, because document families differ in the canonicalization they
+// require and a default would silently produce a valid-looking signature
+// that no peer accepts.
+//
+// # Canonicalization
+//
+// Canonicalization is not implemented here. It belongs to
+// github.com/knroy/go-xml/c14n, whose Algorithm constants are used directly:
+//
+//	c14n.Exclusive10    // WS-Security, AS4
+//	c14n.Inclusive10    // enveloped document signatures such as SMP
+//
+// # Threat model
+//
+// dsig.Verify establishes that a signature was made by the key in a given
+// certificate over exactly the nodes it reports in its Coverage. It makes
+// NO trust decision about that certificate: whether the certificate is
+// trusted is the caller's question. A caller that treats a nil error from
+// Verify as "this message is authentic" has a vulnerability.
+//
+// A valid signature over the wrong elements is the basis of XML Signature
+// Wrapping. The caller must check Coverage against what its profile
+// requires. Same-document ID resolution refuses duplicate IDs for the same
+// reason.
+//
+// Documents to be verified must be parsed with Parse, whose options are
+// fixed: the parse is part of the signature, so two different parse
+// configurations can make one set of octets verify one way and not another.
+//
+// # Deliberate refusals
+//
+//   - SHA-1, in every role, including the rsa-oaep-mgf1p key transport.
+//   - The XSLT transform: it executes attacker-supplied code during
+//     verification of an unauthenticated message.
+//   - The XPath and XPath Filter 2.0 transforms: they evaluate
+//     attacker-supplied expressions during verification.
+//   - Trust decisions about certificates.
+//   - Network or filesystem dereferencing of any URI.
+package xmlsec
