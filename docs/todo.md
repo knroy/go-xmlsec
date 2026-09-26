@@ -25,7 +25,7 @@ v1 waits for all of them. Numbers refer to the design document.
 | 12 | Gate 2 on every go-xml bump | not built |
 | 16 | one hour per fuzz target, clean | three targets, nightly at one hour each; first local runs of about a minute each were clean |
 | 18 | `staticcheck`, `gosec` clean | not in CI |
-| 19 | 85% statement coverage | **met**: 96.6–100% per package |
+| 19 | 85% statement coverage | **met**: 99.3–100% per package |
 | 20 | README states the evidence with figures | done; one independent implementation so far |
 
 ## Open items

@@ -17,9 +17,8 @@ func (h *Header) AddTimestamp(now time.Time, ttl time.Duration) (string, error) 
 	}
 	// Built detached and attached last, as in AddBinarySecurityToken.
 	ts := xmltree.Element(nil, "wsu", NSWSU, "Timestamp")
-	if err := setWSUID(ts, id); err != nil {
-		return "", err
-	}
+	ts.AddNamespace("wsu", NSWSU)
+	xmltree.SetAttr(ts, "wsu", NSWSU, "Id", id)
 	now = now.UTC()
 	xmltree.Text(xmltree.Element(ts, "wsu", NSWSU, "Created"), now.Format(timestampLayout))
 	if ttl != 0 {

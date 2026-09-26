@@ -45,9 +45,8 @@ func (h *Header) AddBinarySecurityToken(cert *x509.Certificate, chain []*x509.Ce
 	// Built detached and attached last: its own xmlns:wsu cannot conflict
 	// with an ancestor's, and a failure leaves the header untouched.
 	bst := xmltree.Element(nil, "wsse", NSWSSE, "BinarySecurityToken")
-	if err := setWSUID(bst, id); err != nil {
-		return "", err
-	}
+	bst.AddNamespace("wsu", NSWSU)
+	xmltree.SetAttr(bst, "wsu", NSWSU, "Id", id)
 	xmltree.SetAttr(bst, "", "", "EncodingType", xmlsec.BSTEncodingBase64)
 	xmltree.SetAttr(bst, "", "", "ValueType", valueType)
 	xmltree.Text(bst, base64.StdEncoding.EncodeToString(der))

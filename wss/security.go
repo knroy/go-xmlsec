@@ -57,9 +57,7 @@ func NewHeader(doc *xdm.Node, soapNS string, actor string, mustUnderstand bool) 
 	// Built detached and attached last, so its own xmlns:wsse cannot
 	// conflict with an ancestor's.
 	sec := xmltree.Element(nil, "wsse", NSWSSE, "Security")
-	if err := xmltree.Declare(sec, "wsse", NSWSSE); err != nil {
-		return nil, err
-	}
+	sec.AddNamespace("wsse", NSWSSE)
 	if mustUnderstand {
 		v := "1"
 		if soapNS == NSSOAP12 {

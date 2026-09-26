@@ -67,9 +67,7 @@ func GenerateEncryptedKey(opts EncryptOptions) (*EncryptedKey, error) {
 	key := opts.SessionKey
 	if key == nil {
 		key = make([]byte, size)
-		if _, err := rand.Read(key); err != nil {
-			return nil, err
-		}
+		rand.Read(key)
 	} else if len(key) != size {
 		return nil, fmt.Errorf("xenc: session key is %d bytes, %s needs %d", len(key), opts.DataAlgorithm, size)
 	}

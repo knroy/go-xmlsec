@@ -22,9 +22,7 @@ func NewSecurityTokenReference(doc *xdm.Node, tokenID, valueType string) (*xdm.N
 		return nil, fmt.Errorf("wss: empty token ID")
 	}
 	str := xmltree.Element(nil, "wsse", NSWSSE, "SecurityTokenReference")
-	if err := xmltree.Declare(str, "wsse", NSWSSE); err != nil {
-		return nil, err
-	}
+	str.AddNamespace("wsse", NSWSSE)
 	ref := xmltree.Element(str, "wsse", NSWSSE, "Reference")
 	xmltree.SetAttr(ref, "", "", "URI", "#"+tokenID)
 	if valueType != "" {

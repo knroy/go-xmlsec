@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/knroy/go-xml/c14n"
 	"github.com/knroy/go-xml/xdm"
@@ -38,9 +39,7 @@ func seal(alg string, key, plaintext []byte) ([]byte, error) {
 		return nil, err
 	}
 	iv := make([]byte, a.NonceSize())
-	if _, err := rand.Read(iv); err != nil {
-		return nil, err
-	}
+	rand.Read(iv)
 	return a.Seal(iv, iv, plaintext, nil), nil
 }
 
@@ -86,22 +85,13 @@ func EncryptElement(doc *xdm.Node, target *xdm.Node, sessionKey []byte, opts Enc
 	encryptionMethod(ed, opts.DataAlgorithm)
 	xmltree.Text(element(element(ed, "CipherData"), "CipherValue"), base64.StdEncoding.EncodeToString(ct))
 
-	i := indexOf(parent.Children, target)
+	i := slices.Index(parent.Children, target)
 	parent.AppendChild(ed)
 	parent.Children = parent.Children[:len(parent.Children)-1]
 	parent.Children[i] = ed
 	defer func() { parent.Children[i] = target }()
 
 	return c14n.Bytes(doc.Root(), c14n.Options{Algorithm: c14n.Inclusive10WithComments})
-}
-
-func indexOf(s []*xdm.Node, n *xdm.Node) int {
-	for i, c := range s {
-		if c == n {
-			return i
-		}
-	}
-	return -1
 }
 
 // DecryptData decrypts an xenc:EncryptedData whose ciphertext is inline in

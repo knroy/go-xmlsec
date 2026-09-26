@@ -35,6 +35,7 @@ First implementation. Not yet tagged.
 
 | Change | Why | Commit |
 |---|---|---|
+| Unreachable error branches deleted | `crypto/rand.Read` never returns an error since Go 1.24; a detached element's own namespace declaration cannot conflict, so `wss` declares it directly; a hand-written `indexOf` is `slices.Index`. Coverage 99.3–100% per package. | *this commit* |
 | Minimum Go is 1.26, not 1.25 | `rsa.EncryptOAEPWithOptions`, the only standard-library route to an OAEP digest and MGF1 hash that differ, arrived in Go 1.26. | [`6debe01`][6debe01] |
 
 [9756c04]: https://github.com/knroy/go-xmlsec/commit/9756c04

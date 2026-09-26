@@ -94,10 +94,18 @@ input.
 
 ## Coverage
 
-At the time of writing: root 100%, `dsig` 99.7%, `wss` 96.6%, `xenc` 98.0%,
-`internal/xmltree` 100%. The remaining lines are unreachable by construction:
-a `crypto/rand` failure, `asn1.Marshal` of raw values, an AES key length
-already checked, a namespace declaration on an element that has no parent.
+At the time of writing: root 100%, `dsig` 99.7%, `wss` 99.3%, `xenc` 99.5%,
+`internal/xmltree` 100%.
+
+An unreachable branch is deleted rather than tested around. Three error
+checks remain uncovered, each on a call that cannot fail given what precedes
+it, kept because ignoring an error is the worse habit:
+
+| Line | Call | Why it cannot fail |
+|---|---|---|
+| `dsig/verify.go` | `c14n.Bytes` of a `ds:Reference` for `Coverage.Raw` | its `ds:SignedInfo` was just canonicalized with the same options |
+| `wss/bst.go` | `asn1.Marshal` of the PkiPath | a sequence of already-encoded certificates |
+| `xenc/datacipher.go` | `aes.NewCipher` | the key length was checked against the algorithm just before |
 
 ## Not tested yet
 
