@@ -2,6 +2,8 @@ package xenc_test
 
 import (
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
 	"errors"
 	"testing"
 
@@ -19,7 +21,7 @@ func TestEncryptAttachmentErrors(t *testing.T) {
 		key       []byte
 		want      error // nil: any error
 	}{
-		{"Attachment-Complete", xmlsec.TransformAttachmentComplete, xmlsec.EncAES128GCM, key, xmlsec.ErrUnsupportedAlgorithm},
+		{"Attachment-Complete-Signature-Transform", xmlsec.TransformAttachmentCompleteSignature, xmlsec.EncAES128GCM, key, xmlsec.ErrUnsupportedAlgorithm},
 		{"no transform", "", xmlsec.EncAES128GCM, key, xmlsec.ErrUnsupportedAlgorithm},
 		{"unknown data algorithm", xmlsec.TransformAttachmentContentOnly, "urn:x", key, xmlsec.ErrUnsupportedAlgorithm},
 		{"wrong session key length", xmlsec.TransformAttachmentContentOnly, xmlsec.EncAES256GCM, key, nil},
@@ -58,7 +60,7 @@ func TestEncryptAttachmentMimeType(t *testing.T) {
 				t.Fatal("MimeType emitted without a Content-Type")
 			}
 			pt, err := xenc.DecryptAttachment(reparse(t, ed), ct, key, nil)
-			if err != nil || !bytes.Equal(pt, att.Body) {
+			if err != nil || !bytes.Equal(pt.Body, att.Body) || pt.MIMEHeaders != nil {
 				t.Fatalf("round trip %q, %v", pt, err)
 			}
 		})
@@ -83,7 +85,7 @@ func TestDecryptAttachmentErrors(t *testing.T) {
 		{"unknown algorithm", covED(typ, covEM("urn:x")+ref("cid:a")), make([]byte, 40), key, xmlsec.ErrAlgorithmNotAllowed},
 		{"no Type", covED(``, em+ref("cid:a")), make([]byte, 40), key, xmlsec.ErrUnsupportedAlgorithm},
 		{"Element Type", covED(`Type="`+xenc.TypeElement+`"`, em+ref("cid:a")), make([]byte, 40), key, xmlsec.ErrUnsupportedAlgorithm},
-		{"Attachment-Complete Type", covED(`Type="`+xmlsec.TransformAttachmentComplete+`"`, em+ref("cid:a")), make([]byte, 40), key, xmlsec.ErrUnsupportedAlgorithm},
+		{"undecodable cid", covED(typ, em+ref("cid:%zz")), make([]byte, 40), key, xmlsec.ErrMalformed},
 		{"no CipherData", covED(typ, em), make([]byte, 40), key, xmlsec.ErrMalformed},
 		{"CipherValue instead of CipherReference", covED(typ, em+`<xenc:CipherData><xenc:CipherValue>AAAA</xenc:CipherValue></xenc:CipherData>`), make([]byte, 40), key, xmlsec.ErrMalformed},
 		{"CipherReference without URI", covED(typ, em+`<xenc:CipherData><xenc:CipherReference/></xenc:CipherData>`), make([]byte, 40), key, xmlsec.ErrMalformed},
@@ -100,6 +102,94 @@ func TestDecryptAttachmentErrors(t *testing.T) {
 			}
 			if pt != nil {
 				t.Fatal("plaintext returned with an error")
+			}
+		})
+	}
+}
+
+// Attachment-Complete encrypts the listed headers with the body, as a MIME
+// part WSS4J reads: each "Name: value" unfolded, in the profile's order,
+// then an empty line. Unlisted headers stay outside.
+func TestEncryptAttachmentComplete(t *testing.T) {
+	key := bytes.Repeat([]byte{1}, 16)
+	att := &xmlsec.Attachment{ID: "a@x", Body: []byte("<doc/>\r\n"), MIMEHeaders: map[string][]string{
+		"content-type":              {"text/xml; charset=UTF-8"},
+		"Content-Description":       {"an\r\n attachment"},
+		"Content-Id":                {"<a@x>"},
+		"Content-Transfer-Encoding": {"binary"},
+	}}
+	ct, ed, err := xenc.EncryptAttachment(att, key, xmlsec.TransformAttachmentComplete, as4Opts(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ed = reparse(t, ed)
+	if ed.AttrValue("Type") != xmlsec.TransformAttachmentComplete || ed.AttrValue("MimeType") != "text/xml; charset=UTF-8" {
+		t.Fatalf("attributes %q %q", ed.AttrValue("Type"), ed.AttrValue("MimeType"))
+	}
+	want := "Content-Description: an attachment\r\nContent-ID: <a@x>\r\nContent-Type: text/xml; charset=UTF-8\r\n\r\n<doc/>\r\n"
+	if got := openGCM(t, key, ct); got != want {
+		t.Fatalf("plaintext %q, want %q", got, want)
+	}
+
+	got, err := xenc.DecryptAttachment(ed, ct, key, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != "a@x" || !bytes.Equal(got.Body, att.Body) || len(got.MIMEHeaders) != 3 ||
+		got.MIMEHeaders["Content-ID"][0] != "<a@x>" || got.MIMEHeaders["Content-Type"][0] != "text/xml; charset=UTF-8" {
+		t.Fatalf("decrypted %+v", got)
+	}
+
+	att.MIMEHeaders["CONTENT-TYPE"] = []string{"text/plain"}
+	if _, _, err := xenc.EncryptAttachment(att, key, xmlsec.TransformAttachmentComplete, as4Opts(t)); !errors.Is(err, xmlsec.ErrMalformed) {
+		t.Fatalf("duplicate header: %v", err)
+	}
+}
+
+// openGCM opens IV || ciphertext || tag without the library.
+func openGCM(t *testing.T, key, ct []byte) string {
+	t.Helper()
+	b, _ := aes.NewCipher(key)
+	a, _ := cipher.NewGCM(b)
+	pt, err := a.Open(nil, ct[:12], ct[12:], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pt)
+}
+
+// sealGCM builds IV || ciphertext || tag without the library, so a test can
+// encrypt a plaintext EncryptAttachment would never produce.
+func sealGCM(key []byte, pt string) []byte {
+	b, _ := aes.NewCipher(key)
+	a, _ := cipher.NewGCM(b)
+	iv := make([]byte, 12)
+	return a.Seal(iv, iv, []byte(pt), nil)
+}
+
+func TestDecryptAttachmentComplete(t *testing.T) {
+	key := bytes.Repeat([]byte{1}, 16)
+	el := covParse(t, covED(`Type="`+xmlsec.TransformAttachmentComplete+`"`,
+		covEM(xmlsec.EncAES128GCM)+`<xenc:CipherData><xenc:CipherReference URI="cid:a%40x"/></xenc:CipherData>`))
+
+	got, err := xenc.DecryptAttachment(el, sealGCM(key, "\r\nbody"), key, nil)
+	if err != nil || got.ID != "a@x" || string(got.Body) != "body" || len(got.MIMEHeaders) != 0 {
+		t.Fatalf("no headers: %+v, %v", got, err)
+	}
+	got, err = xenc.DecryptAttachment(el, sealGCM(key, "Content-Type:text/plain\r\nContent-Description: a\r\n b\r\n\r\n\r\nbody"), key, nil)
+	if err != nil || string(got.Body) != "\r\nbody" || got.MIMEHeaders["Content-Description"][0] != "a b" {
+		t.Fatalf("folded header: %+v, %v", got, err)
+	}
+
+	for name, pt := range map[string]string{
+		"no empty line":   "Content-Type: text/plain\r\nbody",
+		"unlisted header": "Content-Type: text/plain\r\nContent-Transfer-Encoding: binary\r\n\r\nbody",
+		"header twice":    "Content-Type: text/plain\r\ncontent-type: text/xml\r\n\r\nbody",
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := xenc.DecryptAttachment(el, sealGCM(key, pt), key, nil)
+			if !errors.Is(err, xmlsec.ErrMalformed) || got != nil {
+				t.Fatalf("got %+v, %v", got, err)
 			}
 		})
 	}

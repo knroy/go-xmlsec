@@ -74,3 +74,52 @@ func TestWithCommentsTransforms(t *testing.T) {
 		})
 	}
 }
+
+// The SwA signature transforms digest the canonical form of the attachment
+// (SwA profile 5.4): a change canonicalization absorbs verifies, a change it
+// does not is a digest mismatch, and only Attachment-Complete covers the
+// headers.
+func TestSwASignatureTransforms(t *testing.T) {
+	key := newKey(t, rsaKey)
+	set := func(desc, body string) xmlsec.AttachmentSet {
+		s, err := xmlsec.NewAttachmentSet(&xmlsec.Attachment{ID: "att-1@example.com", Body: []byte(body),
+			MIMEHeaders: map[string][]string{
+				"Content-ID":          {"<att-1@example.com>"},
+				"Content-Type":        {"application/xml; charset=UTF-8"},
+				"Content-Description": {desc},
+			}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	ref := func(alg string) dsig.Reference {
+		return dsig.Reference{URI: "cid:att-1@example.com", DigestAlgorithm: xmlsec.DigestSHA256,
+			Transforms: []dsig.TransformSpec{{Algorithm: alg}}}
+	}
+	for _, alg := range []string{xmlsec.TransformAttachmentContentSignature, xmlsec.TransformAttachmentCompleteSignature} {
+		t.Run(alg, func(t *testing.T) {
+			signed := covSignAndPlace(t, key, dsig.KeyInfoX509Data, set("invoice", `<a b="1"><c/></a>`), func(string) []dsig.Reference {
+				return []dsig.Reference{ref(alg)}
+			})
+			verify := func(atts xmlsec.AttachmentSet) error {
+				doc := parse(t, signed)
+				cov, err := dsig.Verify(doc, findSignature(doc), dsig.VerifyOptions{Attachments: atts})
+				if err == nil && !cov.CoversAttachments("att-1@example.com") {
+					t.Fatalf("coverage %+v", cov)
+				}
+				return err
+			}
+			if err := verify(set("invoice", "<?xml version='1.0'?>\n<a  b='1'><c></c><!-- x --></a>\n")); err != nil {
+				t.Fatalf("canonically equal body: %v", err)
+			}
+			if err := verify(set("invoice", `<a b="2"><c/></a>`)); !errors.Is(err, xmlsec.ErrDigestMismatch) {
+				t.Fatalf("changed body: %v", err)
+			}
+			err := verify(set("receipt", `<a b="1"><c/></a>`))
+			if complete := alg == xmlsec.TransformAttachmentCompleteSignature; complete != errors.Is(err, xmlsec.ErrDigestMismatch) || !complete && err != nil {
+				t.Fatalf("changed Content-Description: %v", err)
+			}
+		})
+	}
+}

@@ -89,6 +89,12 @@ func FuzzDecryptData(f *testing.F) {
 	attachment := fuzzBytes(ed)
 	f.Add(attachment, ct)
 	f.Add(attachment, ct[:len(ct)-17]) // shorter than IV plus tag
+	att.MIMEHeaders["Content-ID"] = []string{"<a@x>"}
+	ct, ed, err = xenc.EncryptAttachment(att, key, xmlsec.TransformAttachmentComplete, opts)
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(fuzzBytes(ed), ct)
 
 	s := string(element)
 	i := strings.Index(s, "</xenc:CipherValue>")

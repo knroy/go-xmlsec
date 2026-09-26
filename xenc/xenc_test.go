@@ -88,9 +88,10 @@ func TestConformance_AP_06_AES128GCM(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pt, err := xenc.DecryptAttachment(ed, ct, key, []string{xmlsec.EncAES128GCM})
-	if err != nil || !bytes.Equal(pt, att.Body) {
-		t.Fatalf("decrypt: %q, %v", pt, err)
+	got, err := xenc.DecryptAttachment(ed, ct, key, []string{xmlsec.EncAES128GCM})
+	if err != nil || !bytes.Equal(got.Body, att.Body) || got.ID != att.ID ||
+		len(got.MIMEHeaders) != 1 || got.MIMEHeaders["Content-Type"][0] != "application/gzip" {
+		t.Fatalf("decrypt: %+v, %v", got, err)
 	}
 
 	ct[len(ct)-1] ^= 1

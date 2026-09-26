@@ -10,16 +10,20 @@ import (
 // or an xenc:CipherReference.
 //
 // Body holds the exact octets as they appear on the wire, after any
-// compression and before any decompression. Digests are computed over these
-// bytes. Callers must not mutate Body after construction: this library does
-// not copy it.
+// transfer encoding is undone, after any compression and before any
+// decompression. Digests are computed over these bytes, canonicalized as the
+// reference's transform requires. Callers must not mutate Body after
+// construction: this library does not copy it.
 type Attachment struct {
 	// ID is the Content-ID with angle brackets removed. The cid: URI for
 	// this attachment is "cid:" + ID.
 	ID string
 
-	// MIMEHeaders are the part's headers as they appear on the wire, used
-	// only by the Attachment-Complete transform.
+	// MIMEHeaders are the part's headers, each value as a MIME parser
+	// returns it: without the name, the colon and the whitespace after it.
+	// Names match case-insensitively. Content-Type selects the content
+	// canonicalization of the SwA signature transforms, and the headers the
+	// SwA profile lists are what Attachment-Complete signs and encrypts.
 	MIMEHeaders map[string][]string
 
 	Body []byte

@@ -66,8 +66,10 @@ public final class Harness {
                 case "sign-detached" -> signDetached(a[1], a[2], a[3], a[4], java.util.Arrays.copyOfRange(a, 5, a.length));
                 case "encrypt" -> encrypt(a[1], a[2], a[3], a[4]);
                 case "decrypt" -> decrypt(a[1], a[2], a[3]);
-                case "wss4j-verify" -> wss4jVerify(a[1], a[2]);
-                case "wss4j-decrypt" -> wss4jDecrypt(a[1], a[2], a[3]);
+                case "wss4j-verify" -> wss4jVerify(a[1], a[2], new Parts(a, 3));
+                case "wss4j-decrypt" -> wss4jDecrypt(a[1], a[2], a[3], new Parts(a, 4));
+                case "wss4j-sign-attachments" -> wss4jSignAttachments(a[1], a[2], a[3], a[4], a[5], new Parts(a, 6));
+                case "wss4j-encrypt-attachments" -> wss4jEncryptAttachments(a[1], a[2], a[3], a[4], a[5], new Parts(a, 6));
                 default -> throw new IllegalArgumentException("unknown command " + a[0]);
             }
         } catch (Exception e) {
@@ -218,13 +220,14 @@ public final class Harness {
     }
 
     /**
-     * wss4j-verify soap.xml cert.pem: processes the wsse:Security header with
-     * WSS4J, the WS-Security engine of phase4 and most Java stacks, with Basic
-     * Security Profile enforcement left on and the certificate as the only
-     * trusted one. Prints each action performed and the wsu:Id of every
-     * element a signature covered.
+     * wss4j-verify soap.xml cert.pem [part...]: processes the wsse:Security
+     * header with WSS4J, the WS-Security engine of phase4 and most Java
+     * stacks, with Basic Security Profile enforcement left on and the
+     * certificate as the only trusted one. Prints each action performed and
+     * the wsu:Id or cid: URI of everything a signature covered. Each part is
+     * a MIME part file (see Parts) that cid: references resolve to.
      */
-    static void wss4jVerify(String soapPath, String certPath) throws Exception {
+    static void wss4jVerify(String soapPath, String certPath, Parts parts) throws Exception {
         org.apache.wss4j.dom.engine.WSSConfig.init();
         Document doc = parse(soapPath);
 
@@ -238,6 +241,7 @@ public final class Harness {
         org.apache.wss4j.dom.handler.RequestData data = new org.apache.wss4j.dom.handler.RequestData();
         data.setWssConfig(org.apache.wss4j.dom.engine.WSSConfig.getNewInstance());
         data.setSigVerCrypto(crypto);
+        data.setAttachmentCallbackHandler(parts);
 
         org.apache.wss4j.dom.handler.WSHandlerResult result =
             new org.apache.wss4j.dom.engine.WSSecurityEngine().processSecurityHeader(doc, data);
@@ -259,31 +263,21 @@ public final class Harness {
     }
 
     /**
-     * wss4j-decrypt soap.xml key.pem cert.pem: processes the wsse:Security
-     * header with WSS4J holding the recipient's private key, which decrypts
-     * every EncryptedData its EncryptedKey's ReferenceList names, then prints
-     * the actions performed and the decrypted document.
+     * wss4j-decrypt soap.xml key.pem cert.pem [part...]: processes the
+     * wsse:Security header with WSS4J holding the recipient's private key,
+     * which decrypts every EncryptedData its EncryptedKey's ReferenceList
+     * names, then prints the actions performed, each decrypted attachment
+     * (see Parts.print) and the decrypted document.
      */
-    static void wss4jDecrypt(String soapPath, String keyPath, String certPath) throws Exception {
+    static void wss4jDecrypt(String soapPath, String keyPath, String certPath, Parts parts) throws Exception {
         org.apache.wss4j.dom.engine.WSSConfig.init();
         Document doc = parse(soapPath);
 
-        char[] pass = "changeit".toCharArray();
-        java.security.KeyStore ks = java.security.KeyStore.getInstance("PKCS12");
-        ks.load(null, null);
-        ks.setKeyEntry("recipient", key(keyPath), pass, new java.security.cert.Certificate[] {cert(certPath)});
-        org.apache.wss4j.common.crypto.Merlin crypto = new org.apache.wss4j.common.crypto.Merlin();
-        crypto.setKeyStore(ks);
-        crypto.setTrustStore(ks);
-
         org.apache.wss4j.dom.handler.RequestData data = new org.apache.wss4j.dom.handler.RequestData();
         data.setWssConfig(org.apache.wss4j.dom.engine.WSSConfig.getNewInstance());
-        data.setDecCrypto(crypto);
-        data.setCallbackHandler(callbacks -> {
-            for (javax.security.auth.callback.Callback c : callbacks) {
-                ((org.apache.wss4j.common.ext.WSPasswordCallback) c).setPassword(new String(pass));
-            }
-        });
+        data.setDecCrypto(keyStore(keyPath, certPath));
+        data.setCallbackHandler(Harness::password);
+        data.setAttachmentCallbackHandler(parts);
 
         org.apache.wss4j.dom.handler.WSHandlerResult result =
             new org.apache.wss4j.dom.engine.WSSecurityEngine().processSecurityHeader(doc, data);
@@ -293,7 +287,170 @@ public final class Harness {
         for (org.apache.wss4j.dom.engine.WSSecurityEngineResult r : result.getResults()) {
             System.out.println("action " + r.get(org.apache.wss4j.dom.engine.WSSecurityEngineResult.TAG_ACTION));
         }
+        parts.print();
         XMLUtils.outputDOM(doc, System.out);
         System.out.println();
+    }
+
+    static final char[] PASS = "changeit".toCharArray();
+
+    /** A WSS4J Crypto holding one private key and its certificate, alias "key". */
+    static org.apache.wss4j.common.crypto.Merlin keyStore(String keyPath, String certPath) throws Exception {
+        java.security.KeyStore ks = java.security.KeyStore.getInstance("PKCS12");
+        ks.load(null, null);
+        ks.setKeyEntry("key", key(keyPath), PASS, new java.security.cert.Certificate[] {cert(certPath)});
+        org.apache.wss4j.common.crypto.Merlin crypto = new org.apache.wss4j.common.crypto.Merlin();
+        crypto.setKeyStore(ks);
+        crypto.setTrustStore(ks);
+        return crypto;
+    }
+
+    static void password(javax.security.auth.callback.Callback[] callbacks) {
+        for (javax.security.auth.callback.Callback c : callbacks) {
+            ((org.apache.wss4j.common.ext.WSPasswordCallback) c).setPassword(new String(PASS));
+        }
+    }
+
+    /**
+     * wss4j-sign-attachments soap.xml key.pem cert.pem Element|Content
+     * out.xml part...: WSS4J signs every part, and nothing else, with
+     * RSA-SHA256, SHA-256 digests and a binary security token. Element
+     * selects Attachment-Complete-Signature-Transform, Content
+     * Attachment-Content-Signature-Transform.
+     */
+    static void wss4jSignAttachments(String soapPath, String keyPath, String certPath, String modifier, String out, Parts parts)
+            throws Exception {
+        org.apache.wss4j.dom.engine.WSSConfig.init();
+        Document doc = parse(soapPath);
+        org.apache.wss4j.dom.message.WSSecHeader hdr = new org.apache.wss4j.dom.message.WSSecHeader(doc);
+        hdr.insertSecurityHeader();
+        org.apache.wss4j.dom.message.WSSecSignature b = new org.apache.wss4j.dom.message.WSSecSignature(hdr);
+        b.setUserInfo("key", new String(PASS));
+        b.setKeyIdentifierType(org.apache.wss4j.dom.WSConstants.BST_DIRECT_REFERENCE);
+        b.setSignatureAlgorithm(XMLSignature.ALGO_ID_SIGNATURE_RSA_SHA256);
+        b.setDigestAlgo(SHA256);
+        b.getParts().add(new org.apache.wss4j.common.WSEncryptionPart("cid:Attachments", modifier));
+        b.setAttachmentCallbackHandler(parts);
+        b.build(keyStore(keyPath, certPath));
+        write(doc, out);
+    }
+
+    /**
+     * wss4j-encrypt-attachments soap.xml cert.pem Element|Content out.xml
+     * outdir part...: WSS4J encrypts every part for the certificate's key,
+     * AES-128-GCM under RSA-OAEP (XML Encryption 1.1) with SHA-256 digest and
+     * MGF, the EncryptedKey naming the certificate by issuer and serial.
+     * Element selects the Attachment-Complete type, Content
+     * Attachment-Content-Only. Each encrypted part is written to outdir as a
+     * part file named by its Content-ID.
+     */
+    static void wss4jEncryptAttachments(String soapPath, String certPath, String modifier, String out, String outDir, Parts parts)
+            throws Exception {
+        org.apache.wss4j.dom.engine.WSSConfig.init();
+        Document doc = parse(soapPath);
+        java.security.KeyStore ks = java.security.KeyStore.getInstance("PKCS12");
+        ks.load(null, null);
+        ks.setCertificateEntry("recipient", cert(certPath));
+        org.apache.wss4j.common.crypto.Merlin crypto = new org.apache.wss4j.common.crypto.Merlin();
+        crypto.setKeyStore(ks);
+
+        org.apache.wss4j.dom.message.WSSecHeader hdr = new org.apache.wss4j.dom.message.WSSecHeader(doc);
+        hdr.insertSecurityHeader();
+        org.apache.wss4j.dom.message.WSSecEncrypt b = new org.apache.wss4j.dom.message.WSSecEncrypt(hdr);
+        b.setUserInfo("recipient");
+        b.setKeyIdentifierType(org.apache.wss4j.dom.WSConstants.ISSUER_SERIAL);
+        b.setSymmetricEncAlgorithm(org.apache.wss4j.dom.WSConstants.AES_128_GCM);
+        b.setKeyEncAlgo(org.apache.wss4j.dom.WSConstants.KEYTRANSPORT_RSAOAEP_XENC11);
+        b.setMGFAlgorithm(org.apache.wss4j.dom.WSConstants.MGF_SHA256);
+        b.setDigestAlgorithm(SHA256);
+        b.getParts().add(new org.apache.wss4j.common.WSEncryptionPart("cid:Attachments", modifier));
+        b.setAttachmentCallbackHandler(parts);
+        SecretKey sk = org.apache.wss4j.common.util.KeyUtils.getKeyGenerator(org.apache.wss4j.dom.WSConstants.AES_128_GCM).generateKey();
+        b.build(crypto, sk);
+        doc.normalizeDocument(); // WSS4J leaves prefixes undeclared; this declares them
+        write(doc, out);
+        for (org.apache.wss4j.common.ext.Attachment r : parts.results) {
+            Files.write(Path.of(outDir, r.getId()), Parts.serialize(r));
+        }
+    }
+
+    /**
+     * The attachments of one invocation, each read from a part file: MIME
+     * headers, "Name: value" and CRLF each, an empty line, then the body. The
+     * Content-ID, without angle brackets, is the attachment ID and the
+     * Content-Type its MIME type, as a SOAP stack such as CXF supplies them to
+     * WSS4J. Attachments WSS4J hands back (verified, decrypted or encrypted)
+     * are kept in results.
+     */
+    static final class Parts implements javax.security.auth.callback.CallbackHandler {
+        final java.util.List<byte[]> files = new java.util.ArrayList<>();
+        final java.util.List<org.apache.wss4j.common.ext.Attachment> results = new java.util.ArrayList<>();
+
+        Parts(String[] a, int from) throws Exception {
+            for (int i = from; i < a.length; i++) {
+                files.add(Files.readAllBytes(Path.of(a[i])));
+            }
+        }
+
+        /** A fresh attachment per request, since WSS4J consumes its stream. */
+        static org.apache.wss4j.common.ext.Attachment attachment(byte[] f) {
+            int end = 0;
+            while (!(f[end] == '\r' && f[end + 1] == '\n' && f[end + 2] == '\r' && f[end + 3] == '\n')) {
+                end++;
+            }
+            org.apache.wss4j.common.ext.Attachment att = new org.apache.wss4j.common.ext.Attachment();
+            for (String line : new String(f, 0, end, java.nio.charset.StandardCharsets.UTF_8).split("\r\n")) {
+                int c = line.indexOf(':');
+                String name = line.substring(0, c), value = line.substring(c + 1).trim();
+                att.addHeader(name, value);
+                if (name.equalsIgnoreCase("Content-ID")) {
+                    att.setId(value.replaceAll("^<|>$", ""));
+                } else if (name.equalsIgnoreCase("Content-Type")) {
+                    att.setMimeType(value);
+                }
+            }
+            att.setSourceStream(new ByteArrayInputStream(java.util.Arrays.copyOfRange(f, end + 4, f.length)));
+            return att;
+        }
+
+        @Override
+        public void handle(javax.security.auth.callback.Callback[] callbacks)
+                throws javax.security.auth.callback.UnsupportedCallbackException {
+            for (javax.security.auth.callback.Callback c : callbacks) {
+                if (c instanceof org.apache.wss4j.common.ext.AttachmentRequestCallback r) {
+                    java.util.List<org.apache.wss4j.common.ext.Attachment> l = new java.util.ArrayList<>();
+                    for (byte[] f : files) {
+                        org.apache.wss4j.common.ext.Attachment att = attachment(f);
+                        if ("Attachments".equals(r.getAttachmentId()) || att.getId().equals(r.getAttachmentId())) {
+                            l.add(att);
+                        }
+                    }
+                    r.setAttachments(l);
+                } else if (c instanceof org.apache.wss4j.common.ext.AttachmentResultCallback r) {
+                    results.add(r.getAttachment());
+                } else {
+                    throw new javax.security.auth.callback.UnsupportedCallbackException(c);
+                }
+            }
+        }
+
+        /** Headers in name order, "Name: value" and CRLF each, an empty line, then the body. */
+        static byte[] serialize(org.apache.wss4j.common.ext.Attachment att) throws Exception {
+            java.io.ByteArrayOutputStream b = new java.io.ByteArrayOutputStream();
+            for (java.util.Map.Entry<String, String> h : new java.util.TreeMap<>(att.getHeaders()).entrySet()) {
+                b.write((h.getKey() + ": " + h.getValue().trim() + "\r\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+            b.write("\r\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            b.write(att.getSourceStream().readAllBytes());
+            return b.toByteArray();
+        }
+
+        /** Prints each result as "attachment <id> <base64 of its part file> <mimeType>". */
+        void print() throws Exception {
+            for (org.apache.wss4j.common.ext.Attachment r : results) {
+                System.out.println("attachment " + r.getId() + " "
+                    + Base64.getEncoder().encodeToString(serialize(r)) + " " + r.getMimeType());
+            }
+        }
     }
 }

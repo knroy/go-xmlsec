@@ -126,9 +126,20 @@ func TestSignErrors(t *testing.T) {
 		{"Attachment-Content-Only after canonicalization", key, func(o *dsig.SignOptions) {
 			o.References = ref(body, covExc, xmlsec.TransformAttachmentContentOnly)
 		}, xmlsec.ErrMalformed},
-		{"Attachment-Complete", key, func(o *dsig.SignOptions) {
+		{"Attachment-Complete EncryptedData Type as a transform", key, func(o *dsig.SignOptions) {
 			o.References = ref("cid:att-1@example.com", xmlsec.TransformAttachmentComplete)
 		}, xmlsec.ErrUnsupportedAlgorithm},
+		{"Attachment-Complete-Signature on an element", key, func(o *dsig.SignOptions) {
+			o.References = ref(body, xmlsec.TransformAttachmentCompleteSignature)
+		}, xmlsec.ErrMalformed},
+		{"Attachment-Content-Signature not first", key, func(o *dsig.SignOptions) {
+			o.References = ref("cid:att-1@example.com", xmlsec.TransformAttachmentContentOnly, xmlsec.TransformAttachmentContentSignature)
+		}, xmlsec.ErrMalformed},
+		{"Attachment-Complete-Signature over a malformed header", key, func(o *dsig.SignOptions) {
+			o.References = ref("cid:att-1@example.com", xmlsec.TransformAttachmentCompleteSignature)
+			o.Attachments, _ = xmlsec.NewAttachmentSet(&xmlsec.Attachment{ID: "att-1@example.com",
+				MIMEHeaders: map[string][]string{"Content-Type": {"text/plain; charset"}}})
+		}, xmlsec.ErrMalformed},
 		{"XPath Filter 2.0", key, func(o *dsig.SignOptions) {
 			o.References = ref(body, xmlsec.TransformXPathFilter2)
 		}, xmlsec.ErrTransformRefused},

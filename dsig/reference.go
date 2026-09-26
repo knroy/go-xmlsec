@@ -9,6 +9,7 @@ import (
 	"github.com/knroy/go-xml/c14n"
 	"github.com/knroy/go-xml/xdm"
 	"github.com/knroy/go-xmlsec"
+	"github.com/knroy/go-xmlsec/internal/swa"
 	"github.com/knroy/go-xmlsec/wss"
 )
 
@@ -131,9 +132,26 @@ func digestReference(h hash.Hash, doc, sig *xdm.Node, uri string, transforms []T
 			}
 			octets = b
 
+		case alg == xmlsec.TransformAttachmentContentSignature, alg == xmlsec.TransformAttachmentCompleteSignature:
+			// SwA profile 5.3 and 5.4.4: the first transform of a cid:
+			// reference, over the attachment itself.
+			if out.attachment == nil || i > 0 {
+				return out, fmt.Errorf("%w: %s must be the first transform of a cid: reference", xmlsec.ErrMalformed, alg)
+			}
+			canon := swa.Content
+			if alg == xmlsec.TransformAttachmentCompleteSignature {
+				canon = swa.Complete
+			}
+			b, err := canon(out.attachment)
+			if err != nil {
+				return out, err
+			}
+			octets = b
+
 		case alg == xmlsec.TransformAttachmentContentOnly:
 			// The identity on the body octets. No canonicalization of any
-			// kind, even when the body is XML.
+			// kind, even when the body is XML. The SwA profile defines this
+			// URI as an EncryptedData Type, not a signature transform.
 			if out.attachment == nil || ns != nil {
 				return out, fmt.Errorf("%w: %s applies only to a cid: reference", xmlsec.ErrMalformed, alg)
 			}
@@ -142,8 +160,6 @@ func digestReference(h hash.Hash, doc, sig *xdm.Node, uri string, transforms []T
 			return out, fmt.Errorf("%w: %s", xmlsec.ErrTransformRefused, alg)
 
 		default:
-			// Attachment-Complete lands here until its MIME header
-			// canonicalization is implemented.
 			return out, fmt.Errorf("%w: transform %s", xmlsec.ErrUnsupportedAlgorithm, alg)
 		}
 	}

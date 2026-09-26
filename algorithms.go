@@ -24,7 +24,21 @@ const (
 	TransformEnvelopedSignature = "http://www.w3.org/2000/09/xmldsig#enveloped-signature"
 	TransformBase64             = "http://www.w3.org/2000/09/xmldsig#base64"
 
-	// SwA transforms, OASIS wss-SwAProfile-v1.1.1.
+	// SwA signature transforms, OASIS wss-SwAProfile-v1.1.1 section 5.3:
+	// the first transform of a cid: ds:Reference. Content-Signature
+	// digests the attachment content canonicalized per section 5.4.2;
+	// Complete-Signature prefixes it with the canonical MIME headers of
+	// section 5.4.1.
+	TransformAttachmentContentSignature  = "http://docs.oasis-open.org/wss/oasis-wss-SwAProfile-1.1#Attachment-Content-Signature-Transform"
+	TransformAttachmentCompleteSignature = "http://docs.oasis-open.org/wss/oasis-wss-SwAProfile-1.1#Attachment-Complete-Signature-Transform"
+
+	// SwA xenc:EncryptedData Type URIs, section 5.5.2: the attachment
+	// content alone, or the content with its MIME headers.
+	//
+	// As a ds:Transform, which the profile does not define it to be,
+	// TransformAttachmentContentOnly is accepted as the identity on the
+	// attachment body; WS-Security peers do not accept it there. Use
+	// TransformAttachmentContentSignature in signatures.
 	TransformAttachmentContentOnly = "http://docs.oasis-open.org/wss/oasis-wss-SwAProfile-1.1#Attachment-Content-Only"
 	TransformAttachmentComplete    = "http://docs.oasis-open.org/wss/oasis-wss-SwAProfile-1.1#Attachment-Complete"
 )
