@@ -48,6 +48,16 @@ type VerifyOptions struct {
 	// Attachments resolves cid: references encountered during verification.
 	Attachments xmlsec.AttachmentSet
 
+	// IDAttributes names attributes that "#id" references resolve against
+	// in addition to wsu:Id and xml:id: IDAttrSAML for a SAML assertion,
+	// IDAttrDSig for XAdES. Empty means only those two. An id value carried
+	// by more than one attribute of the whole set is refused with
+	// xmlsec.ErrAmbiguousID. Name only what the profile defines as an ID:
+	// each attribute added widens the signature wrapping surface, and the
+	// application must locate what it reads by the same attributes, or by
+	// Coverage.SignedElements.
+	IDAttributes []xdm.QName
+
 	// MaxReferences caps the number of ds:Reference elements processed.
 	// Zero means DefaultMaxReferences. Set it to what the profile needs: it
 	// bounds how much work one message can force.
@@ -72,7 +82,8 @@ type VerifyOptions struct {
 // Coverage describes exactly what a verified signature covered.
 type Coverage struct {
 	// SignedElementIDs are the IDs of elements covered by a same-document
-	// reference, in reference order.
+	// reference, in reference order: the id value, whichever attribute
+	// carried it.
 	SignedElementIDs []string
 
 	// SignedElements are the covered elements themselves, in reference
@@ -246,7 +257,7 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 	for i, r := range p.refs {
 		dh, _ := xmlsec.DigestHash(r.digestAlg)
 		h := dh.New()
-		got, err := digestReference(h, doc, sig, r.uri, r.transforms, opts.Attachments, true)
+		got, err := digestReference(h, doc, sig, r.uri, r.transforms, opts.Attachments, true, opts.IDAttributes)
 		if err != nil {
 			return nil, err
 		}

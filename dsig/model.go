@@ -3,6 +3,7 @@ package dsig
 
 import (
 	"github.com/knroy/go-xml/c14n"
+	"github.com/knroy/go-xml/xdm"
 	"github.com/knroy/go-xmlsec"
 )
 
@@ -10,6 +11,20 @@ import (
 const (
 	NSDSig    = "http://www.w3.org/2000/09/xmldsig#"
 	NSExcC14N = "http://www.w3.org/2001/10/xml-exc-c14n#"
+)
+
+// Common ID attributes for SignOptions.IDAttributes and
+// VerifyOptions.IDAttributes. Neither counts unless named there: each one
+// added widens what an attacker can use to duplicate an ID.
+var (
+	// IDAttrSAML is the unqualified ID attribute of SAML 2.0, as on
+	// saml:Assertion and samlp:Response.
+	IDAttrSAML = xdm.QName{Local: "ID"}
+
+	// IDAttrDSig is the unqualified Id attribute that the XML Signature
+	// schema gives its own elements, and that XAdES and many other XML
+	// Signature profiles use on theirs.
+	IDAttrDSig = xdm.QName{Local: "Id"}
 )
 
 // Resource limits.
@@ -22,7 +37,8 @@ const (
 type Reference struct {
 	// URI is the reference target. Supported forms:
 	//   ""            the whole document (only valid with an enveloped transform)
-	//   "#id"         a same-document element by wsu:Id or xml:id
+	//   "#id"         a same-document element by wsu:Id or xml:id, or an
+	//                 attribute named in SignOptions.IDAttributes
 	//   "cid:..."     a MIME attachment, requiring an AttachmentSet
 	URI string
 

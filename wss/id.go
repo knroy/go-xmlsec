@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"slices"
 
 	"github.com/knroy/go-xml/xdm"
 	"github.com/knroy/go-xmlsec"
@@ -14,12 +15,16 @@ import (
 // randReader is replaced by tests that need deterministic IDs.
 var randReader io.Reader = rand.Reader
 
+// isDefaultID reports whether an attribute is wsu:Id or xml:id.
+func isDefaultID(n xdm.QName) bool {
+	return n.URI == NSWSU && n.Local == "Id" || n.URI == NSXML && n.Local == "id"
+}
+
 // ids returns the element's wsu:Id and xml:id values.
 func ids(e *xdm.Node) []string {
 	var out []string
 	for _, a := range e.Attrs {
-		if a.Name.URI == NSWSU && a.Name.Local == "Id" ||
-			a.Name.URI == NSXML && a.Name.Local == "id" {
+		if isDefaultID(a.Name) {
 			out = append(out, a.Value)
 		}
 	}
@@ -34,14 +39,28 @@ func ids(e *xdm.Node) []string {
 // different elements. It never returns the first match. xdm.ElementByID is
 // deliberately not used: it returns the first match.
 func FindByID(doc *xdm.Node, id string) (*xdm.Node, error) {
+	return FindByIDAttributes(doc, id)
+}
+
+// FindByIDAttributes is FindByID with extra attributes that also count as
+// IDs, such as the unqualified ID of a SAML assertion. wsu:Id and xml:id
+// always count; extra adds to them and never replaces them. Names match on
+// namespace URI and local name, prefix ignored; an unprefixed attribute has
+// no namespace, so xdm.QName{Local: "ID"} is the SAML attribute.
+//
+// Every counted attribute forms one set: an id value carried by any two of
+// them, on one element or on two, is xmlsec.ErrAmbiguousID. Each attribute
+// added widens what an attacker can use to duplicate an ID, so add only
+// what the profile defines as an ID.
+func FindByIDAttributes(doc *xdm.Node, id string, extra ...xdm.QName) (*xdm.Node, error) {
 	if doc == nil {
 		return nil, fmt.Errorf("%w: %q: no document", xmlsec.ErrIDNotFound, id)
 	}
 	var found *xdm.Node
 	n := 0
 	xmltree.Walk(doc.Root(), func(e *xdm.Node) {
-		for _, v := range ids(e) {
-			if v == id {
+		for _, a := range e.Attrs {
+			if a.Value == id && (isDefaultID(a.Name) || slices.ContainsFunc(extra, a.Name.Equal)) {
 				found = e
 				n++
 			}

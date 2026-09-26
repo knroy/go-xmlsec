@@ -47,12 +47,22 @@ public final class Harness {
         "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd";
     static final String SHA256 = MessageDigestAlgorithm.ALGO_ID_DIGEST_SHA256;
 
+    /** Unqualified attribute names registered as IDs besides wsu:Id and xml:id. */
+    static final java.util.Set<String> ID_ATTRS = new java.util.HashSet<>();
+
+    /** Leading "--id-attr NAME" options, before the command, add to ID_ATTRS. */
     public static void main(String[] a) throws Exception {
         Init.init();
+        int opt = 0;
+        while (opt + 1 < a.length && a[opt].equals("--id-attr")) {
+            ID_ATTRS.add(a[opt + 1]);
+            opt += 2;
+        }
+        a = java.util.Arrays.copyOfRange(a, opt, a.length);
         try {
             switch (a[0]) {
                 case "verify" -> verify(a[1], a[2]);
-                case "sign-enveloped" -> signEnveloped(a[1], a[2], a[3], a[4], a[5], a[6]);
+                case "sign-enveloped" -> signEnveloped(a[1], a[2], a[3], a[4], a[5], a[6], a.length > 7 ? a[7] : "");
                 case "sign-detached" -> signDetached(a[1], a[2], a[3], a[4], java.util.Arrays.copyOfRange(a, 5, a.length));
                 case "encrypt" -> encrypt(a[1], a[2], a[3], a[4]);
                 case "decrypt" -> decrypt(a[1], a[2], a[3]);
@@ -82,7 +92,8 @@ public final class Harness {
             Attr at = (Attr) attrs.item(i);
             boolean wsu = WSU.equals(at.getNamespaceURI()) && "Id".equals(at.getLocalName());
             boolean xml = "http://www.w3.org/XML/1998/namespace".equals(at.getNamespaceURI()) && "id".equals(at.getLocalName());
-            if (wsu || xml) {
+            boolean extra = at.getNamespaceURI() == null && ID_ATTRS.contains(at.getLocalName());
+            if (wsu || xml || extra) {
                 e.setIdAttributeNode(at, true);
             }
         }
@@ -132,15 +143,18 @@ public final class Harness {
         System.out.println("OK");
     }
 
-    /** sign-enveloped in.xml key.pem cert.pem c14n sigAlg out.xml */
-    static void signEnveloped(String in, String keyPath, String certPath, String c14n, String sigAlg, String out) throws Exception {
+    /**
+     * sign-enveloped in.xml key.pem cert.pem c14n sigAlg out.xml [uri]: the
+     * reference URI is "" unless given, e.g. "#id" for a SAML assertion.
+     */
+    static void signEnveloped(String in, String keyPath, String certPath, String c14n, String sigAlg, String out, String uri) throws Exception {
         Document doc = parse(in);
         XMLSignature sig = new XMLSignature(doc, "", sigAlg, c14n);
         doc.getDocumentElement().appendChild(sig.getElement());
         Transforms t = new Transforms(doc);
         t.addTransform(Transforms.TRANSFORM_ENVELOPED_SIGNATURE);
         t.addTransform(c14n);
-        sig.addDocument("", t, SHA256);
+        sig.addDocument(uri, t, SHA256);
         sig.addKeyInfo(cert(certPath));
         sig.sign(key(keyPath));
         write(doc, out);

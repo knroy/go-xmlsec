@@ -45,6 +45,13 @@ type SignOptions struct {
 	// Attachments resolves cid: references. Required if any reference uses
 	// a cid: URI.
 	Attachments xmlsec.AttachmentSet
+
+	// IDAttributes names attributes that "#id" references resolve against
+	// in addition to wsu:Id and xml:id, such as IDAttrSAML or IDAttrDSig.
+	// Empty means only those two. An id value carried by more than one
+	// attribute of the whole set is refused with xmlsec.ErrAmbiguousID. The
+	// verifier must name the same attributes. SecurityTokenID is unaffected.
+	IDAttributes []xdm.QName
 }
 
 // Sign creates a ds:Signature over the references in opts and returns it
@@ -129,7 +136,7 @@ func sign(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions, parent *xdm.N
 			return nil, fmt.Errorf("%w: digest %q", xmlsec.ErrUnsupportedAlgorithm, r.DigestAlgorithm)
 		}
 		h := dh.New()
-		if _, err := digestReference(h, doc, sig, r.URI, r.Transforms, opts.Attachments, false); err != nil {
+		if _, err := digestReference(h, doc, sig, r.URI, r.Transforms, opts.Attachments, false, opts.IDAttributes); err != nil {
 			return nil, err
 		}
 		ref := xmltree.Element(si, "ds", NSDSig, "Reference")

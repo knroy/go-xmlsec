@@ -44,8 +44,11 @@ type dereferenced struct {
 // transforms end in a node set is converted to octets with Canonical XML
 // 1.0. Verification applies it, because most signers rely on it; signing
 // does not, so this library never produces a signature that depends on it.
+//
+// idAttrs are the ID attributes "#id" resolves against beyond wsu:Id and
+// xml:id.
 func digestReference(h hash.Hash, doc, sig *xdm.Node, uri string, transforms []TransformSpec,
-	atts xmlsec.AttachmentSet, implicit bool) (dereferenced, error) {
+	atts xmlsec.AttachmentSet, implicit bool, idAttrs []xdm.QName) (dereferenced, error) {
 
 	var (
 		out    dereferenced
@@ -57,7 +60,7 @@ func digestReference(h hash.Hash, doc, sig *xdm.Node, uri string, transforms []T
 		ns = c14n.Document(doc)
 		out.whole = true
 	case strings.HasPrefix(uri, "#"):
-		el, err := wss.FindByID(doc, uri[1:])
+		el, err := wss.FindByIDAttributes(doc, uri[1:], idAttrs...)
 		if err != nil {
 			return out, err
 		}
