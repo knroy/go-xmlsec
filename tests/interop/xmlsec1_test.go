@@ -28,18 +28,18 @@ import (
 	"github.com/knroy/go-xmlsec/xenc"
 )
 
-// xmlsec1 returns the path of the xmlsec1 binary. It skips the test when the
-// tool is absent, unless GOXMLSEC_REQUIRE_XMLSEC1 is set, as it is in CI:
-// a differential that skips in the one place it is meant to run is a pass
-// that checked nothing.
-func xmlsec1(t *testing.T) string {
+// tool returns the path of a reference implementation's command. It skips
+// the test when the command is absent, unless GOXMLSEC_REQUIRE_INTEROP is
+// set, as tests/interop.sh and CI set it: a differential that skips in the
+// one place it is meant to run is a pass that checked nothing.
+func tool(t *testing.T, name string) string {
 	t.Helper()
-	p, err := exec.LookPath("xmlsec1")
+	p, err := exec.LookPath(name)
 	if err != nil {
-		if os.Getenv("GOXMLSEC_REQUIRE_XMLSEC1") != "" {
-			t.Fatal("xmlsec1 is required but not on the PATH")
+		if os.Getenv("GOXMLSEC_REQUIRE_INTEROP") != "" {
+			t.Fatalf("%s is required but not on the PATH", name)
 		}
-		t.Skip("xmlsec1 not on the PATH")
+		t.Skipf("%s not on the PATH; run tests/interop.sh", name)
 	}
 	return p
 }
@@ -62,7 +62,7 @@ func run(t *testing.T, args ...string) []byte {
 func runErr(t *testing.T, args ...string) ([]byte, error) {
 	t.Helper()
 	args = append([]string{args[0], "--lax-key-search"}, args[1:]...)
-	cmd := exec.Command(xmlsec1(t), args...)
+	cmd := exec.Command(tool(t, "xmlsec1"), args...)
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	err := cmd.Run()
@@ -358,6 +358,22 @@ var encOpts = xenc.EncryptOptions{
 func TestXmlsec1DecryptsOurEncryption(t *testing.T) {
 	key := rsaKey(t)
 	kp := newKeypair(t, key)
+	withKey := encryptWithKeyInfo(t, kp)
+	out := filepath.Join(t.TempDir(), "out.xml")
+	run(t, "--decrypt", "--privkey-pem", kp.keyPEM, "--output", out, tempFile(t, "enc.xml", withKey))
+	decrypted, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertDecryptedEnvelope(t, decrypted)
+}
+
+// encryptWithKeyInfo encrypts envelope's payload for kp and places the
+// EncryptedKey in EncryptedData/ds:KeyInfo, which is where both reference
+// implementations look for it; this library leaves that composition to the
+// caller.
+func encryptWithKeyInfo(t *testing.T, kp keypair) []byte {
+	t.Helper()
 	opts := encOpts
 	opts.Recipient = kp.provider.Certificate
 	ek, err := xenc.GenerateEncryptedKey(opts)
@@ -384,13 +400,12 @@ func TestXmlsec1DecryptsOurEncryption(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return withKey
+}
 
-	out := filepath.Join(t.TempDir(), "out.xml")
-	run(t, "--decrypt", "--privkey-pem", kp.keyPEM, "--output", out, tempFile(t, "enc.xml", withKey))
-	decrypted, err := os.ReadFile(out)
-	if err != nil {
-		t.Fatal(err)
-	}
+// assertDecryptedEnvelope checks a decrypted document equals envelope.
+func assertDecryptedEnvelope(t *testing.T, decrypted []byte) {
+	t.Helper()
 	want, _ := c14n.Bytes(parse(t, []byte(envelope)), c14n.Options{Algorithm: c14n.Exclusive10})
 	got, _ := c14n.Bytes(parse(t, decrypted), c14n.Options{Algorithm: c14n.Exclusive10})
 	if !bytes.Equal(got, want) {

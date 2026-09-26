@@ -29,7 +29,7 @@ jobs:
         with:
           go-version-file: go.mod
           check-latest: true
-      - run: go test -run '^$' -fuzz '^${{ matrix.target.name }}$' -fuzztime 60m ${{ matrix.target.pkg }}
+      - run: go test -timeout 0 -run '^$' -fuzz '^${{ matrix.target.name }}$' -fuzztime 60m ${{ matrix.target.pkg }}
       - name: Upload the failing input
         if: failure()
         uses: actions/upload-artifact@v4

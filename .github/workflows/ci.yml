@@ -49,15 +49,28 @@ jobs:
           fi
 
   interop:
-    # The xmlsec1 differential: signatures and encryption in both directions.
-    # Run through the same container script as locally, because it needs
-    # xmlsec 1.3 and Ubuntu packages 1.2, which lacks XML Encryption 1.1
-    # rsa-oaep. The script sets GOXMLSEC_REQUIRE_XMLSEC1, so a missing tool
-    # fails rather than skips.
+    # The differential against xmlsec1 1.3 and Apache Santuario: signatures,
+    # signature byte-equality and encryption, in both directions. Run through
+    # the same container script as locally (tests/Dockerfile): it needs xmlsec
+    # 1.3, and Ubuntu packages 1.2, which lacks XML Encryption 1.1 rsa-oaep.
+    # The script sets GOXMLSEC_REQUIRE_INTEROP, so a missing tool fails
+    # rather than skips.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: tests/interop-xmlsec1.sh
+      - run: tests/interop.sh
+
+  lint:
+    # Acceptance criterion 18. Versions are pinned so a linter release cannot
+    # fail the build unannounced; bump them deliberately.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
+      - run: go run github.com/securego/gosec/v2/cmd/gosec@v2.29.0 -quiet ./...
 
   hygiene:
     # The module must know nothing of the profiles that consume it: no import

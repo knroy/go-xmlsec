@@ -5,12 +5,10 @@
 | Item | Notes |
 |---|---|
 | `Attachment-Complete` transform, signing and encryption | Refused with `ErrUnsupportedAlgorithm`. Its MIME header canonicalization is easy to get subtly wrong, and no peer has been seen to require it (open item X-6). |
-| Apache Santuario in the differential | `xmlsec1` is done (`tests/interop`); the harness must reach two independent implementations, or a canonicalization bug we share with `xmlsec1` passes. |
-| Gate 2 against phase4 | Needs the captured-message corpus (X-5), and the consumer that builds whole AS4 messages: Gate 2 compares a message, not a signature. A signature-level byte-equality check against Santuario can come first. |
+| Gate 2 against phase4 | Needs the captured-message corpus (X-5), and the consumer that builds whole AS4 messages: Gate 2 compares a message, not a signature. The signature-level equivalent, byte equality with Santuario, is in place (`tests/interop`). |
 | Golden files, with `-update` | See [testing.md](testing.md#not-tested-yet). |
 | `ds:KeyInfo` on `xenc:EncryptedKey`, and `xenc:ReferenceList` | Not emitted; how a peer identifies the recipient key needs settling against a real profile. The `xmlsec1` differential confirms it matters: `xmlsec1` finds the session key only through `EncryptedData/ds:KeyInfo`, so the harness places the `EncryptedKey` there itself. |
 | SAML `ID` attributes | `FindByID` resolves `wsu:Id` and `xml:id` only. SAML is the likeliest second consumer. |
-| `staticcheck` and `gosec` in CI | Acceptance criterion 18. |
 | Configurable, lower parse limits | Parsing costs up to about 40 times the input in memory (see [security.md](security.md#resource-limits)). The pinned limits cannot be lowered; callers must cap input size themselves. Deciding whether `Parse` should accept stricter limits is open. |
 | A trust hook before reference processing | With no pinned certificate, an attacker's own valid signature forces every reference to be digested before the caller can refuse the certificate ([security.md](security.md#verification-cost-before-the-certificate-is-judged)). A `VerifyOptions` callback run after key resolution and before any digest would close it; it is an API decision. |
 
@@ -20,13 +18,13 @@ v1 waits for all of them. Numbers refer to the design document.
 
 | # | Criterion | Now |
 |---|---|---|
-| 1–2 | `xmlsec1` and Santuario accept our signatures, and we theirs | `xmlsec1` done, both directions, enveloped and detached; Santuario not built |
+| 1–2 | `xmlsec1` and Santuario accept our signatures, and we theirs | **met**: both directions against both, enveloped and detached, with signature byte equality against Santuario |
 | 3 | Coverage matches phase4's over the real-message corpus | no corpus |
 | 4–6 | `xenc` and `wss` output accepted by WSS4J and phase4 | not tested |
 | 7 | Gate 2 | not built |
 | 12 | Gate 2 on every go-xml bump | not built |
 | 16 | one hour per fuzz target, clean | three targets, nightly at one hour each; first local runs of about a minute each were clean |
-| 18 | `staticcheck`, `gosec` clean | not in CI |
+| 18 | `staticcheck`, `gosec` clean | **met**: both clean, pinned, in CI |
 | 19 | 85% statement coverage | **met**: 100%, enforced by CI |
 | 20 | README states the evidence with figures | done; one independent implementation so far |
 

@@ -5,7 +5,7 @@ go test ./...                      # unit and conformance tests
 go test -race -cover ./...         # what CI runs
 go test -run TestConformance ./... # the requirement-mapped tests only
 go test -run TestConformance_AP_09 ./dsig
-tests/interop-xmlsec1.sh           # the xmlsec1 differential, in a container
+tests/interop.sh                   # the xmlsec1 and Santuario differential, in a container
 go test -run '^$' -fuzz '^FuzzVerify$' -fuzztime 60s ./dsig
 ```
 
@@ -15,9 +15,10 @@ read no clock. Keys and certificates are generated per run.
 | Layer | Where | Runs |
 |---|---|---|
 | Unit and conformance | `*_test.go` beside each package, named after the source file they test | every push, Linux, macOS and Windows, under `-race` |
-| Differential against `xmlsec1` | `tests/interop`, build tag `interop` | every push, Linux |
+| Differential against `xmlsec1` and Apache Santuario | `tests/interop`, build tag `interop`, run by `tests/interop.sh` | every push, Linux |
 | Security regressions | `tests/security`: XXE, external fetches, key substitution, algorithm confusion, comment truncation, encryption downgrade | every push, all three systems; a local HTTP listener proves nothing is fetched |
 | Fuzzing | `FuzzVerify`, `FuzzDecryptEncryptedKey`, `FuzzDecryptData` | nightly, one hour per target |
+| Static analysis | `staticcheck` v0.8.1, `gosec` v2.29.0, pinned | every push: both clean, no `#nosec` suppressions |
 | Hygiene | CI | every push: no `peppol` module in the dependency graph, no `peppol` string in Go source outside `internal/` |
 
 ## Conformance tests
@@ -53,37 +54,93 @@ Named `TestConformance_<ID>_<description>` for the requirement they prove.
 | `TestPrefixBoundElsewhere` | a `wsu` or `wsse` prefix bound to another namespace higher up does not corrupt the header |
 | `TestVersionIsReleasedAndDescribed` | the version constant and the changelog agree; see [RELEASE.md](../RELEASE.md) |
 
-## The xmlsec1 differential
+## The differential against xmlsec1 and Santuario
 
-`tests/interop` signs and encrypts with this library and has `xmlsec1` verify
-and decrypt, and the reverse. `tests/interop-xmlsec1.sh` runs it in an Alpine
-container, because it needs xmlsec **1.3**: 1.2, which Debian and Ubuntu
-still package, does not implement XML Encryption 1.1 `rsa-oaep`. CI runs the
-same script.
+`tests/interop` signs and encrypts with this library and has two independent
+implementations verify and decrypt the result, and the reverse:
+
+* **`xmlsec1` 1.3** (libxmlsec1, C, on OpenSSL).
+* **Apache Santuario 4.0.4** (Java), the XML Security library that WSS4J and
+  so most Java WS-Security stacks are built on, driven through a small
+  harness, `tests/santuario/Harness.java`.
+
+`tests/interop.sh` builds `tests/Dockerfile` (Go, `xmlsec1` and Santuario in
+one Alpine image) and runs the tests in it; CI runs the same script. Alpine,
+because the differential needs xmlsec 1.3: 1.2, which Debian and Ubuntu still
+package, does not implement XML Encryption 1.1 `rsa-oaep`.
 
 | Test | Direction | Cases |
 |---|---|---|
-| `TestXmlsec1VerifiesOurEnvelopedSignature` | ours → xmlsec1 | RSA inclusive, RSA exclusive, ECDSA inclusive; X509Data trusted as a root; plus a control: a tampered document must be rejected |
-| `TestWeVerifyXmlsec1EnvelopedSignature` | xmlsec1 → ours | the same three |
-| `TestXmlsec1VerifiesOurDetachedSignature` | ours → xmlsec1 | SOAP 1.2, two `#id` references, exclusive C14N with an InclusiveNamespaces prefix list |
-| `TestWeVerifyXmlsec1DetachedSignature` | xmlsec1 → ours | the same shape |
-| `TestXmlsec1DecryptsOurEncryption` | ours → xmlsec1 | AES-128-GCM element, RSA-OAEP with explicit SHA-256 MGF and digest |
-| `TestWeDecryptXmlsec1Encryption` | xmlsec1 → ours | the same |
+| `TestXmlsec1VerifiesOurEnvelopedSignature`, `TestSantuarioVerifiesOurEnvelopedSignature` | ours → each | RSA inclusive, RSA exclusive, ECDSA inclusive; plus a control: a tampered document must be rejected |
+| `TestWeVerifyXmlsec1EnvelopedSignature`, `TestWeVerifySantuarioEnvelopedSignature` | each → ours | the same three |
+| `TestXmlsec1VerifiesOurDetachedSignature`, `TestWeVerifyXmlsec1DetachedSignature` | both ways | SOAP 1.2, two `#id` references, exclusive C14N with an InclusiveNamespaces prefix list |
+| `TestSignatureValueMatchesSantuarioEnveloped` | byte equality | inclusive and exclusive C14N |
+| `TestSignatureValueMatchesSantuarioDetached` | byte equality, and both ways | SOAP 1.2 WS-Security header, two `#id` references |
+| `TestXmlsec1DecryptsOurEncryption`, `TestSantuarioDecryptsOurEncryption` | ours → each | AES-128-GCM element, RSA-OAEP with explicit SHA-256 MGF and digest |
+| `TestWeDecryptXmlsec1Encryption`, `TestWeDecryptSantuarioEncryption` | each → ours | the same |
 
-What `xmlsec1` needs that a WS-Security peer does not, and what that means:
+**Byte equality.** RSA PKCS#1 v1.5 signing is deterministic, so the same
+document signed with the same key must produce the same `SignatureValue`
+whichever implementation signs it. The byte-equality tests sign one input
+with this library and with Santuario and require every `DigestValue` and the
+`SignatureValue` to be identical. That is a stronger claim than "each
+verifies the other": it proves `ds:SignedInfo` canonicalizes to the same
+octets, which is where a silent interoperability failure would live. The
+comparison refuses to pass on missing values, so it cannot succeed
+vacuously.
+
+What `xmlsec1` needs that a WS-Security peer does not:
 
 * **Registered IDs.** It has no notion of `wsu:Id`; the harness passes
-  `--id-attr:Id` per element.
-* **The key, directly.** It does not resolve `wsse:SecurityTokenReference`,
-  so the detached cases pass the certificate on the command line, with
-  `--lax-key-search` because 1.3 otherwise refuses a key `KeyInfo` does not
-  name.
-* **The EncryptedKey inside `EncryptedData/ds:KeyInfo`.** That is how it
-  finds the session key. This library does not place it there (see
+  `--id-attr:Id` per element. The Santuario harness registers `wsu:Id` and
+  `xml:id` attributes as IDs, which is what a WS-Security stack does.
+* **The key, directly.** Neither tool resolves `wsse:SecurityTokenReference`
+  from the command line, so the detached cases pass the certificate; for
+  `xmlsec1` with `--lax-key-search`, because 1.3 otherwise refuses a key
+  `KeyInfo` does not name.
+* **The EncryptedKey inside `EncryptedData/ds:KeyInfo`.** That is how both
+  find the session key. This library does not place it there (see
   [todo.md](todo.md)), so the harness does.
 
-Set `GOXMLSEC_REQUIRE_XMLSEC1=1` to make a missing `xmlsec1` fail rather than
+Set `GOXMLSEC_REQUIRE_INTEROP=1` to make a missing tool fail rather than
 skip; the script and CI set it.
+
+## Test data
+
+Everything the tests run against, and where it comes from. No key material
+and no third-party document is committed to this repository.
+
+**Keys and certificates.** Generated fresh in every run from `crypto/rand`:
+RSA 2048-bit keys, and ECDSA keys on P-256, P-384 and P-521, each with a
+self-signed X.509 certificate. Tests that write PEM files for the reference
+tools write them to a per-test temporary directory.
+
+**Documents.** Synthetic, written inline in the tests so each is visible
+beside the assertion that uses it:
+
+| Fixture | Shape | Used by |
+|---|---|---|
+| WS-Security envelope | SOAP 1.2 with a messaging header and a body, plus one MIME attachment by `cid:` | the conformance tests in `dsig`, `FuzzVerify` seeds, `tests/interop` |
+| Enveloped metadata document | a document element declaring an unused namespace, with a comment, signed whole | S-3 and S-4, `TestSignedInfoCanonicalizedInPlace` (the unused namespace is what makes in-place canonicalization observable), `tests/interop` |
+| SOAP 1.1 envelope | minimal, for header construction and ID resolution | `wss` |
+| Invoice and SOAP order | the smallest documents that show each API | `dsig/example_test.go`, quoted in the README |
+| Adversarial documents | XXE and DTD variants, relocated and duplicated IDs, algorithm and key substitutions | `tests/security`, `TestVerifyNegative`, `TestSignRefusals` |
+
+**Reference implementations.** Built into one image by `tests/Dockerfile`:
+
+| Implementation | Version | Source |
+|---|---|---|
+| `xmlsec1` (libxmlsec1 on OpenSSL) | 1.3.11 at the time of writing | Alpine package `xmlsec`, on `golang:1.26-alpine` |
+| Apache Santuario | 4.0.4 | Maven Central `org.apache.santuario:xmlsec`, run on OpenJDK 21 |
+
+The Alpine package is not pinned to a patch release; the version in use is
+printed by `xmlsec1 --version` in the container.
+
+**Fuzz corpora.** Seeded at run time from real signatures and encryptions
+produced by this library, plus the malformed seeds listed under Fuzzing.
+Inputs the fuzzer finds interesting stay in the local Go fuzz cache; any
+failing input is committed under `testdata/fuzz/<Target>/` as a permanent
+regression seed.
 
 ## Fuzzing
 
@@ -117,10 +174,8 @@ fail to encode.
 
 ## Not tested yet
 
-* **Apache Santuario**, the second independent implementation the
-  differential needs. A shared canonicalization bug between us and `xmlsec1`
-  would pass today.
-* **Gate 2**: signature byte-equality with phase4, over a captured corpus.
+* **Gate 2**: byte equality with phase4 over whole captured AS4 messages. The
+  signature-level equivalent, byte equality with Santuario, is in place.
 * **WSS4J** processing our headers and decrypting our output.
 * **Golden files** for a signed envelope with two attachments, a signed and
   encrypted envelope, and an enveloped metadata document.

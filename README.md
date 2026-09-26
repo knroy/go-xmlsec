@@ -7,10 +7,10 @@ Parsing and canonicalization come from [go-xml](https://github.com/knroy/go-xml)
 this library never serializes XML for a digest any other way. That matters,
 because a signature is only as correct as the canonical octets it covers.
 
-> **Status: v0.** The API may change. Output is verified against `xmlsec1`
-> in both directions on every commit, but not yet against a second
-> independent implementation, so treat it as not yet independently validated.
-> See [what is tested](#how-it-is-tested).
+> **Status: v0.** The API may change. Output is verified in both directions
+> against two independent implementations, `xmlsec1` and Apache Santuario, on
+> every commit, and signatures are byte-identical to Santuario's. See
+> [what is tested](#how-it-is-tested).
 
 ## Features
 
@@ -125,14 +125,14 @@ outside the document and its attachments. The reasons are in
 | | |
 |---|---|
 | Unit and conformance tests | Linux, macOS and Windows on every commit; 100% statement coverage, enforced |
-| Interoperability | [`xmlsec1`](https://www.aleksey.com/xmlsec/) 1.3 verifies our signatures and decrypts our output, and we do the same for its output, on every commit |
+| Interoperability | [`xmlsec1`](https://www.aleksey.com/xmlsec/) 1.3 and [Apache Santuario](https://santuario.apache.org/) 4.0.4 verify our signatures and decrypt our output, and we do the same for theirs, on every commit |
+| Byte equality | the same document signed with the same key produces a `SignatureValue` byte-identical to Santuario's, enveloped and WS-Security |
+| Static analysis | `staticcheck` and `gosec`, clean, on every commit |
 | Security | XXE, external fetches, signature wrapping, key substitution, algorithm confusion, comment truncation and encryption downgrade, each a regression test |
 | Fuzzing | Three targets on the verify and decrypt paths, one hour each, nightly |
 
-Not yet: a second independent implementation (Apache Santuario) and
-real-world message corpora. Until both pass, the version stays below 1.0.
-[docs/testing.md](docs/testing.md) has the detail and
-[docs/todo.md](docs/todo.md) what remains.
+[docs/testing.md](docs/testing.md) has the detail, including every dataset
+the tests use, and [docs/todo.md](docs/todo.md) what remains before 1.0.
 
 ## Documentation
 
