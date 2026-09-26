@@ -63,7 +63,9 @@ public final class Harness {
             switch (a[0]) {
                 case "verify" -> verify(a[1], a[2]);
                 case "sign-enveloped" -> signEnveloped(a[1], a[2], a[3], a[4], a[5], a[6], a.length > 7 ? a[7] : "");
-                case "sign-detached" -> signDetached(a[1], a[2], a[3], a[4], java.util.Arrays.copyOfRange(a, 5, a.length));
+                case "verify-insecure" -> verifyInsecure(a[1], a[2]);
+                case "sign-transform" -> signTransform(a[1], a[2], a[3], a[4], java.util.Arrays.copyOfRange(a, 5, a.length));
+                case "sign-detached" ->signDetached(a[1], a[2], a[3], a[4], java.util.Arrays.copyOfRange(a, 5, a.length));
                 case "encrypt" -> encrypt(a[1], a[2], a[3], a[4]);
                 case "decrypt" -> decrypt(a[1], a[2], a[3]);
                 case "encrypt-ecdh" -> encryptECDH(a[1], a[2], a[3], a[4]);
@@ -151,6 +153,67 @@ public final class Harness {
             throw new IllegalStateException("signature does not verify");
         }
         System.out.println("OK");
+    }
+
+    /**
+     * verify-insecure doc.xml cert.pem: as verify, with Santuario's secure
+     * validation off, which refuses the XSLT transform outright.
+     */
+    static void verifyInsecure(String docPath, String certPath) throws Exception {
+        Document doc = parse(docPath);
+        XMLSignature sig = new XMLSignature(first(doc, Constants.SignatureSpecNS, "Signature"), "", false);
+        if (!sig.checkSignatureValue(cert(certPath))) {
+            throw new IllegalStateException("signature does not verify");
+        }
+        System.out.println("OK");
+    }
+
+    /**
+     * sign-transform in.xml key.pem cert.pem out.xml kind arg...: an
+     * enveloped RSA-SHA256 signature over "" whose transforms are
+     * enveloped-signature, the named one and exclusive C14N. kind is one of
+     * xpath EXPR [prefix uri]..., filter2 FILTER EXPR [prefix uri]..., or
+     * xslt stylesheet.xml.
+     */
+    static void signTransform(String in, String keyPath, String certPath, String out, String[] a) throws Exception {
+        Document doc = parse(in);
+        String exc = Transforms.TRANSFORM_C14N_EXCL_OMIT_COMMENTS;
+        XMLSignature sig = new XMLSignature(doc, "", XMLSignature.ALGO_ID_SIGNATURE_RSA_SHA256, exc);
+        doc.getDocumentElement().appendChild(sig.getElement());
+        Transforms t = new Transforms(doc);
+        t.addTransform(Transforms.TRANSFORM_ENVELOPED_SIGNATURE);
+        switch (a[0]) {
+            case "xpath" -> {
+                org.apache.xml.security.transforms.params.XPathContainer x =
+                    new org.apache.xml.security.transforms.params.XPathContainer(doc);
+                x.setXPath(a[1]);
+                for (int i = 2; i + 1 < a.length; i += 2) {
+                    x.setXPathNamespaceContext(a[i], a[i + 1]);
+                }
+                t.addTransform(Transforms.TRANSFORM_XPATH, x.getElement());
+            }
+            case "filter2" -> {
+                org.apache.xml.security.transforms.params.XPath2FilterContainer f = switch (a[1]) {
+                    case "intersect" -> org.apache.xml.security.transforms.params.XPath2FilterContainer.newInstanceIntersect(doc, a[2]);
+                    case "subtract" -> org.apache.xml.security.transforms.params.XPath2FilterContainer.newInstanceSubtract(doc, a[2]);
+                    default -> org.apache.xml.security.transforms.params.XPath2FilterContainer.newInstanceUnion(doc, a[2]);
+                };
+                for (int i = 3; i + 1 < a.length; i += 2) {
+                    f.setXPathNamespaceContext(a[i], a[i + 1]);
+                }
+                t.addTransform(Transforms.TRANSFORM_XPATH2FILTER, f.getElement());
+            }
+            case "xslt" -> {
+                t.setSecureValidation(false); // which refuses XSLT outright
+                t.addTransform(Transforms.TRANSFORM_XSLT, (Element) doc.importNode(parse(a[1]).getDocumentElement(), true));
+            }
+            default -> throw new IllegalArgumentException("unknown transform " + a[0]);
+        }
+        t.addTransform(exc);
+        sig.addDocument("", t, SHA256);
+        sig.addKeyInfo(cert(certPath));
+        sig.sign(key(keyPath));
+        write(doc, out);
     }
 
     /**
