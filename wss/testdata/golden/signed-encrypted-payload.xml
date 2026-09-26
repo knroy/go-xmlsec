@@ -1,0 +1,1 @@
+<p:Payload xmlns:S="http://www.w3.org/2003/05/soap-envelope" xmlns:eb="urn:example:eb" xmlns:p="urn:example:p" xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">hello</p:Payload>

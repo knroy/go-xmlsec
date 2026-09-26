@@ -1,2 +1,6 @@
 * text=auto
 *.go text eol=lf
+# Golden files are compared byte for byte: LF on every OS, whatever the
+# checkout settings. The test key is PEM, kept LF likewise.
+**/testdata/golden/** text eol=lf
+*.pem text eol=lf
