@@ -17,7 +17,7 @@ golden-file key.
 |---|---|---|
 | Unit and conformance | `*_test.go` beside each package, named after the source file they test; `internal/swa` holds the SwA MIME header and content canonicalization | every push, Linux, macOS and Windows, under `-race` |
 | Differential against `xmlsec1`, Apache Santuario and WSS4J | `tests/interop`, build tag `interop`, run by `tests/interop.sh` | every push, Linux |
-| Security regressions | `tests/security`: XXE, external fetches, key substitution, algorithm confusion, comment truncation, encryption downgrade, transform programs outside the allow-list and prefix rebinding | every push, all three systems; a local HTTP listener proves nothing is fetched |
+| Security regressions | `tests/security`: XXE, external fetches, key substitution, algorithm confusion, comment truncation, encryption downgrade, transform programs outside the allow-list and prefix rebinding, Diffie-Hellman small-subgroup and weak-group attacks, PBKDF2 iteration bounds | every push, all three systems; a local HTTP listener proves nothing is fetched |
 | Fuzzing | `FuzzVerify`, `FuzzDecryptEncryptedKey`, `FuzzDecryptData` | nightly, one hour per target |
 | Static analysis | `staticcheck` v0.8.1, `gosec` v2.29.0, pinned | every push: both clean, no `#nosec` suppressions |
 | W3C interop vectors | `tests/w3c`, a nested module | every push, all three systems |
@@ -69,6 +69,10 @@ Named `TestConformance_<ID>_<description>` for the requirement they prove.
 | `TestNilInputs` (`wss`, `xenc`) | a nil or wrong-kind argument is an error, never a panic |
 | `TestImplicitCanonicalization` | a received reference ending in a node set verifies through Canonical XML 1.0, and the implied algorithm is refused when outside the allow-list |
 | `TestX509DataDescriptiveElements` | subject name, issuer-serial and SKI beside one certificate are accepted and ignored; a second certificate, a CRL, a `KeyName` or no certificate are refused |
+| `TestDHRoundTrip`, `TestDHKeyValueForms`, `TestDecryptAgreedKeyDHErrors`, `TestGenerateDHKeyErrors` (`xenc/dh_test.go`) | finite-field `dh-es` and `dh` in the RFC 3526 group 14 and RFC 7919 ffdhe2048 groups; every `DHKeyValue` form; a group under 2048 or over 8192 bits, a composite P, a Q not dividing P-1, a generator outside the subgroup, and a public value of 0, 1, P-1, P or outside the subgroup refused |
+| `TestLegacyKDFKnownAnswers` | the Legacy KDF of section 5.6.2.2 on the specification's own Example 40 input, and on two-block outputs, against values computed independently with Python's `hashlib`. Example 41's printed result does not match Example 40's octets; see the test |
+| `TestPBKDF2KnownAnswers`, `TestUnwrapEncryptedKeyPasswordErrors`, `TestPBKDF2AsAgreementKDF` (`xenc/pbkdf2_test.go`) | PBKDF2-HMAC-SHA256 and the RFC 6070 PBKDF2-HMAC-SHA1 vector as the KEK of an `xenc11:DerivedKey`; every malformed or out-of-policy parameter; PBKDF2 as a key agreement's KDF against a KEK computed independently |
+| `TestDHAndPBKDF2NotAllowedByDefault`, `TestDHSubgroupAndGroupAttacksRefused`, `TestPBKDF2IterationCountBounded` (`tests/security`) | none of the three is accepted under empty allow-lists; small-subgroup, 512-bit and 16384-bit groups refused; an iteration count of 4,000,000,000 refused in under 250 ms, without derivation |
 | `TestFindByID` | duplicate IDs are refused across `wsu:Id` and `xml:id` |
 | `TestFindByIDExtraAttributes`, `TestSAMLAssertionByID`, `TestPlainIdReference`, `TestDefaultIDSetUnchanged` | opt-in `ID`/`Id` resolution; duplicates refused across every counted attribute; an attacker assertion with the signed `ID` refused; the default set unchanged |
 | `TestPrefixBoundElsewhere` | a `wsu` or `wsse` prefix bound to another namespace higher up does not corrupt the header |
@@ -112,6 +116,9 @@ package, does not implement XML Encryption 1.1 `rsa-oaep`.
 | `TestSantuarioTransforms` | Santuario, both ways, digest equality | the XPath transform, the absolute `not(//ancestor-or-self::x)`, which both sides digest as the empty node set, XPath Filter 2.0 intersect, subtract and union, and XSLT; equal `DigestValue`s, so byte-identical transform output; changing a dropped node verifies, changing a kept one fails, on both sides |
 | `TestXmlsec1VerifiesOurHere` | ours → xmlsec1 | `here()` in an XPath and an XPath Filter 2.0 transform. Santuario 4 has no `here()`: its JDK XPath engine reports the function unknown |
 | `TestReferenceImplementationsDecryptOurECDHES`, `TestWeDecryptSantuarioECDHES`, `TestWeDecryptXmlsec1ECDHES` | both ways | ECDH-ES with ConcatKDF on P-256, P-384 and P-521 |
+| `TestXmlsec1DecryptsOurDHES`, `TestWeDecryptXmlsec1DHES` | xmlsec1, both ways | finite-field `dh-es` with ConcatKDF in ffdhe2048 (X9.42 DHX keys); xmlsec1 finds the recipient key only by the `ds:KeyName` of `EncryptOptions.RecipientKeyName` |
+| `TestXmlsec1DecryptsOurPBKDF2`, `TestWeDecryptXmlsec1PBKDF2` | xmlsec1, both ways | a password-derived KEK (`xenc11:DerivedKey`, PBKDF2 with HMAC-SHA256 and SHA-512) |
+| `TestWeDecryptXmlsec1AgreementWithPBKDF2` | xmlsec1 → ours | PBKDF2 as the KDF of ECDH-ES and of `dh-es`, the shared secret as the password |
 | `TestReferenceImplementationsDecryptOurKeyWrap`, `TestWeDecryptTheirKeyWrap` | both ways | AES key wrap |
 | `TestDecryptReplaceKeepsNoNamespace` | ours → both | a decrypted element that undeclares a default namespace stays in no namespace |
 | `TestXmlsec1DecryptsOurEncryption`, `TestSantuarioDecryptsOurEncryption` | ours → each | AES-128-GCM element, RSA-OAEP with explicit SHA-256 MGF and digest |
@@ -150,6 +157,11 @@ What `xmlsec1` needs that a WS-Security peer does not:
 * **The EncryptedKey inside `EncryptedData/ds:KeyInfo`.** That is how both
   find the session key. `xenc.FindEncryptedKey` reads this form, but placing
   the key there is left to the caller, so the harness does.
+
+**Not cross-checked.** Santuario 4.0.4 implements neither finite-field
+Diffie-Hellman (it has no `xenc:DHKeyValue`) nor PBKDF2, and neither
+reference implements the Legacy KDF of `xmlenc#dh`: that is checked only by
+`TestLegacyKDFKnownAnswers` and our own round trip.
 
 Set `GOXMLSEC_REQUIRE_INTEROP=1` to make a missing tool fail rather than
 skip; the script and CI set it.
@@ -228,8 +240,14 @@ URI, so none depends on `ResolveURI`.
 unmodified, and their private keys extracted to PEM, since Go cannot read
 PKCS#12). The three ECDH-ES with ConcatKDF vectors, on P-256, P-384 and
 P-521, decrypt to the published plaintext. The others are refused for stated
-reasons: PBKDF2 is not implemented, finite-field `dh-es` is not allowed, and
-`rsa-oaep-mgf1p` and a SHA-1 MGF are not allowed.
+reasons: PBKDF2 and finite-field `dh-es` are not in the default set, and
+named, the two `dh-es` vectors' 1024-bit group is under the 2048-bit
+floor; `rsa-oaep-mgf1p` and a SHA-1 MGF are not allowed. The ECDH-ES with
+PBKDF2 vector (AGRMNT.9) parses and is accepted once PBKDF2 is named, but
+its KEK cannot be reproduced from any encoding of the shared secret tried;
+xmlsec1's own suite leaves it out too, and the reading implemented, the
+secret's octets as the password, is the one xmlsec1 uses
+(`TestWeDecryptXmlsec1AgreementWithPBKDF2`).
 
 **Real-world corpus.** 122 real Peppol SMP responses, fetched 2026-09-26 from
 62 SMP providers and at least 20 distinct producing implementations, stored
@@ -296,9 +314,13 @@ by faking the standard library. What that meant in practice:
 | `aes.NewCipher` after the key length was checked | the order is swapped: `NewCipher` refuses a length AES does not have, the size check refuses a valid AES key of the wrong size for the algorithm, and both are tested |
 | canonicalizing a `ds:Reference` for `Coverage.Raw` after `ds:SignedInfo` | `Raw` is taken first, so a document with no canonical form fails there; `SignedInfo` keeps its own failure case, a relative namespace declared on `ds:SignatureMethod` and so in no `Reference`'s scope (`TestUnverifiable`) |
 
-One error is discarded, with a comment: `asn1.Marshal` of the PkiPath in
-`wss/bst.go`, a sequence of `RawValue`s that are emitted verbatim and cannot
-fail to encode.
+Errors are discarded in two places, each with a comment: `asn1.Marshal` of
+the PkiPath in `wss/bst.go`, a sequence of `RawValue`s that are emitted
+verbatim and cannot fail to encode; and `pbkdf2.Key` in `xenc/pbkdf2.go`,
+which fails only for a key length out of range, never passed, or in FIPS
+140-only mode, where the nil key it then returns is refused by the key
+unwrap. `xenc/export_test.go` exposes the unexported Legacy KDF to its
+known-answer test.
 
 ## Not tested yet
 

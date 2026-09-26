@@ -51,10 +51,21 @@ func oaepOptions(mgf, digest string, label []byte) (*rsa.OAEPOptions, error) {
 //     xenc:AgreementMethod goes in the EncryptedKey's ds:KeyInfo, with the
 //     ephemeral public key as OriginatorKeyInfo and the recipient's
 //     certificate as RecipientKeyInfo (section 5.6).
+//   - a KeyWrap* algorithm and opts.RecipientDH: AES key wrap under a key
+//     agreed by finite-field Diffie-Hellman with an ephemeral key in the
+//     recipient's group, xmlsec.KeyAgreementDHES with ConcatKDF or
+//     xmlsec.KeyAgreementDH with the Legacy KDF, each with
+//     opts.DigestAlgorithm. The OriginatorKeyInfo holds the ephemeral
+//     xenc:DHKeyValue with its group, and the RecipientKeyInfo the
+//     recipient's public value.
+//   - a KeyWrap* algorithm and opts.Password: AES key wrap under a key
+//     derived by PBKDF2 with HMAC-SHA256, a fresh salt and
+//     opts.PBKDF2Iterations, named by an xenc11:DerivedKey in the
+//     EncryptedKey's ds:KeyInfo.
 //   - a KeyWrap* algorithm and opts.KeyEncryptionKey: AES key wrap under
 //     that shared key.
 //
-// Except for key agreement, the element carries no ds:KeyInfo; the caller
+// Except for key agreement and a password, the element carries no ds:KeyInfo; the caller
 // adds one identifying the recipient's key in whatever form its profile
 // requires. opts.CarriedKeyName and opts.RecipientHint are emitted when set.
 //

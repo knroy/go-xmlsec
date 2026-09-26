@@ -82,21 +82,33 @@ func kwUnwrap(b cipher.Block, ct []byte) ([]byte, error) {
 }
 
 // keyWrap wraps key under opts.KeyTransportAlgorithm, a KeyWrap* one, with
-// a KEK agreed with opts.Recipient or given as opts.KeyEncryptionKey.
+// a KEK agreed with opts.Recipient or opts.RecipientDH, derived from
+// opts.Password, or given as opts.KeyEncryptionKey.
 func keyWrap(ek *xdm.Node, key []byte, opts EncryptOptions) ([]byte, error) {
 	size, ok := wrapSizes[opts.KeyTransportAlgorithm]
 	if !ok {
 		return nil, unsupported("key transport %q", opts.KeyTransportAlgorithm)
 	}
 	kek := opts.KeyEncryptionKey
-	switch {
-	case opts.Recipient != nil && kek != nil:
-		return nil, errors.New("xenc: both a Recipient and a KeyEncryptionKey")
-	case opts.Recipient != nil:
-		var err error
-		if kek, err = agree(ek, size, opts); err != nil {
-			return nil, err
+	keys := 0
+	for _, set := range []bool{opts.Recipient != nil, kek != nil, opts.RecipientDH != nil, len(opts.Password) > 0} {
+		if set {
+			keys++
 		}
+	}
+	var err error
+	switch {
+	case keys > 1:
+		return nil, errors.New("xenc: more than one of Recipient, RecipientDH, KeyEncryptionKey and Password")
+	case opts.Recipient != nil:
+		kek, err = agree(ek, size, opts)
+	case opts.RecipientDH != nil:
+		kek, err = agreeDH(ek, size, opts)
+	case len(opts.Password) > 0:
+		kek, err = passwordKEK(ek, size, opts)
+	}
+	if err != nil {
+		return nil, err
 	}
 	b, err := kwCipher(opts.KeyTransportAlgorithm, kek)
 	if err != nil {
@@ -155,7 +167,8 @@ func unwrap(el *xdm.Node, alg string, kek []byte) ([]byte, error) {
 // wrapped by AES key wrap (xmlsec.KeyWrapAES128, 192 or 256) under kek, a
 // key the caller already shares with the sender, such as one it found by
 // the EncryptedKey's ds:KeyName. The EncryptedKey's ds:KeyInfo is not read.
-// For a KEK from key agreement use DecryptAgreedKey.
+// For a KEK from key agreement use DecryptAgreedKey or DecryptAgreedKeyDH,
+// and for one derived from a password UnwrapEncryptedKeyPassword.
 //
 // opts.AllowedKeyWrapAlgorithms restricts the accepted algorithms; empty
 // means the default set, AES key wrap. The legacy xmlsec.KeyWrapTripleDES,

@@ -31,7 +31,8 @@ var idAttr = xdm.QName{Local: "Id"}
 // the same way. Any other ds:KeyInfo is xmlsec.ErrUnsupportedKeyInfo.
 //
 // It is opt-in: DecryptData never looks for a key. Decrypt the result with
-// DecryptEncryptedKey, UnwrapEncryptedKey or DecryptAgreedKey.
+// DecryptEncryptedKey, UnwrapEncryptedKey, DecryptAgreedKey,
+// DecryptAgreedKeyDH or UnwrapEncryptedKeyPassword.
 func FindEncryptedKey(ed *xdm.Node) (*xdm.Node, error) {
 	if ed == nil || !ed.IsElement(xmlsec.NSXEnc, "EncryptedData") {
 		return nil, malformed("not an xenc:EncryptedData")

@@ -147,7 +147,7 @@ func TestDecryptAgreedKeyErrors(t *testing.T) {
 		{"allow-listed unimplemented agreement", edit(am, `<xenc:AgreementMethod Algorithm="urn:x">`), r.priv, lists{agreement: []string{"urn:x"}}, xmlsec.ErrUnsupportedAlgorithm},
 		{"KA-Nonce", edit(am, am+`<xenc:KA-Nonce>Zm9v</xenc:KA-Nonce>`), r.priv, lists{}, xmlsec.ErrMalformed},
 		{"no OriginatorKeyInfo", cut(`<xenc:OriginatorKeyInfo>`, `</xenc:OriginatorKeyInfo>`), r.priv, lists{}, xmlsec.ErrMalformed},
-		{"PBKDF2", edit(`Algorithm="`+xmlsec.KeyDerivationConcatKDF+`"`, `Algorithm="http://www.w3.org/2009/xmlenc11#pbkdf2"`), r.priv, lists{}, xmlsec.ErrUnsupportedAlgorithm},
+		{"PBKDF2 not named", edit(`Algorithm="`+xmlsec.KeyDerivationConcatKDF+`"`, `Algorithm="`+xmlsec.KeyDerivationPBKDF2+`"`), r.priv, lists{}, xmlsec.ErrAlgorithmNotAllowed},
 		{"no ConcatKDFParams", cut(`<xenc11:ConcatKDFParams`, `</xenc11:ConcatKDFParams>`), r.priv, lists{}, xmlsec.ErrMalformed},
 		{"no DigestMethod", cut(`<ds:DigestMethod`, `</ds:DigestMethod>`), r.priv, lists{}, xmlsec.ErrMalformed},
 		{"SHA-1 KDF", edit(`<ds:DigestMethod Algorithm="`+xmlsec.DigestSHA256, `<ds:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1`), r.priv, lists{}, xmlsec.ErrAlgorithmNotAllowed},

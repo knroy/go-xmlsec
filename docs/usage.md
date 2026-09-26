@@ -474,6 +474,8 @@ Key agreement and key wrap:
   `xenc.DecryptAgreedKey(ek, priv.ECDH(), xenc.DecryptOptions{})`.
 - **AES key wrap** with a key you share: set `KeyEncryptionKey`, and receive
   with `xenc.UnwrapEncryptedKey`.
+- **Finite-field Diffie-Hellman** and **a password (PBKDF2)**: OPTIONAL, and
+  opt-in on receipt; see below.
 
 Receiving:
 
@@ -498,6 +500,57 @@ in scope at the target, and put the nodes in place of the `EncryptedData`.
 `DecryptData` also follows a same-document `CipherReference` with the base64
 transform. `EncryptionMethod` is read strictly: a child the algorithm does not
 permit, or a `KeySize` inconsistent with it, is refused.
+
+### Finite-field Diffie-Hellman and passwords
+
+XML Encryption 1.1's OPTIONAL key establishment, none of it in a default
+allow-list. Diffie-Hellman keys are `xenc.DHPublicKey` and
+`xenc.DHPrivateKey` (`math/big` P, Q, G, Y and X), in a group of 2048 to
+8192 bits with its subgroup order Q, such as RFC 7919 ffdhe2048, whose Q is
+(P-1)/2:
+
+```go
+recipient, err := xenc.GenerateDHKey(p, q, g) // checks the group
+
+ek, err := xenc.GenerateEncryptedKey(xenc.EncryptOptions{
+    DataAlgorithm:         xmlsec.EncAES128GCM,
+    KeyTransportAlgorithm: xmlsec.KeyWrapAES128,
+    KeyAgreementAlgorithm: xmlsec.KeyAgreementDHES, // or KeyAgreementDH, the Legacy KDF
+    DigestAlgorithm:       xmlsec.DigestSHA256,     // ConcatKDF, or Legacy KDF, digest
+    RecipientDH:           &recipient.DHPublicKey,
+    RecipientKeyName:      "recipient",             // optional; xmlsec1 finds the key only by name
+})
+
+key, err := xenc.DecryptAgreedKeyDH(ek, recipient, xenc.DecryptOptions{
+    AllowedKeyAgreementAlgorithms: []string{xmlsec.KeyAgreementDHES},
+})
+```
+
+The receiver checks that the originator's public value lies in its own
+group's order-Q subgroup, and refuses any other group.
+
+A password derives the KEK by PBKDF2 with HMAC-SHA256, a fresh 16-octet salt
+and 600,000 iterations unless `PBKDF2Iterations` says otherwise; the
+parameters travel in an `xenc11:DerivedKey`:
+
+```go
+ek, err := xenc.GenerateEncryptedKey(xenc.EncryptOptions{
+    DataAlgorithm:         xmlsec.EncAES256GCM,
+    KeyTransportAlgorithm: xmlsec.KeyWrapAES256,
+    Password:              password,
+})
+
+key, err := xenc.UnwrapEncryptedKeyPassword(ek, password, xenc.DecryptOptions{
+    AllowedKeyDerivationAlgorithms: []string{xmlsec.KeyDerivationPBKDF2},
+})
+```
+
+A received iteration count over `xenc.MaxPBKDF2Iterations` (10,000,000) is
+refused before any work, and one under 1000 as weak. The HMAC-SHA1 PRF is
+accepted only when `AllowedPRFAlgorithms` names `xmlsec.SigHMACSHA1`.
+Naming `xmlsec.KeyDerivationPBKDF2` also lets `DecryptAgreedKey` and
+`DecryptAgreedKeyDH` accept PBKDF2 as a key agreement's KDF, with the shared
+secret as the password.
 
 ### Receiving from a legacy peer
 

@@ -3,6 +3,19 @@
 // AES-GCM data encryption of elements, element content and attachments,
 // inline or by CipherReference.
 //
+// # Optional key agreement and derivation
+//
+// Three OPTIONAL algorithms of section 5 are implemented, and none is in a
+// default allow-list: finite-field Diffie-Hellman, xmlsec.KeyAgreementDHES
+// with an explicit KDF and xmlsec.KeyAgreementDH with the Legacy KDF
+// (DecryptAgreedKeyDH, EncryptOptions.RecipientDH, DHPublicKey), in groups
+// of MinDHBits to MaxDHBits with a checked subgroup; and
+// xmlsec.KeyDerivationPBKDF2, from a password (UnwrapEncryptedKeyPassword,
+// EncryptOptions.Password) or as the KDF of a key agreement, with an
+// iteration count from MinPBKDF2Iterations to MaxPBKDF2Iterations. Each is
+// accepted only when a caller names it, and PBKDF2's legacy HMAC-SHA1 PRF
+// only when named in DecryptOptions.AllowedPRFAlgorithms.
+//
 // # Allow-lists
 //
 // Every Decrypt and Unwrap function takes a DecryptOptions whose allow-lists
@@ -83,7 +96,8 @@ type EncryptOptions struct {
 	Recipient *x509.Certificate
 
 	// KeyAgreementAlgorithm is xmlsec.KeyAgreementECDHES, required when
-	// Recipient holds an EC key. The KEK is derived with ConcatKDF.
+	// Recipient holds an EC key. The KEK is derived with ConcatKDF. With
+	// RecipientDH it is xmlsec.KeyAgreementDHES or KeyAgreementDH.
 	KeyAgreementAlgorithm string
 
 	// KeyEncryptionKey is a shared AES key wrapping the session key under
@@ -112,6 +126,27 @@ type EncryptOptions struct {
 	// for an EncryptedKey.AddDataReference to point at. It must be an
 	// NCName.
 	DataID string
+
+	// RecipientDH is the recipient's finite-field Diffie-Hellman key, for
+	// a KeyWrap* algorithm under a key agreed by KeyAgreementAlgorithm
+	// xmlsec.KeyAgreementDHES (ConcatKDF) or xmlsec.KeyAgreementDH (the
+	// Legacy KDF), with DigestAlgorithm, when there is no Recipient.
+	RecipientDH *DHPublicKey
+
+	// RecipientKeyName, if set, names the RecipientDH key in the
+	// RecipientKeyInfo as a ds:KeyName, instead of its public value in an
+	// xenc:DHKeyValue. xmlsec1 finds a recipient's DH key only by name.
+	RecipientKeyName string
+
+	// Password, when set and there is no other key, derives the KEK of a
+	// KeyWrap* algorithm by PBKDF2 with HMAC-SHA256, a fresh 16-octet salt
+	// and PBKDF2Iterations.
+	Password []byte
+
+	// PBKDF2Iterations is the PBKDF2 iteration count for Password, from
+	// MinPBKDF2Iterations to MaxPBKDF2Iterations. Zero means
+	// DefaultPBKDF2Iterations.
+	PBKDF2Iterations int
 }
 
 // keySizes maps each data algorithm to its AES key length.
@@ -158,7 +193,9 @@ type DecryptOptions struct {
 	AllowedKeyWrapAlgorithms []string
 
 	// AllowedKeyAgreementAlgorithms restricts the xenc:AgreementMethod.
-	// Default: xmlsec.KeyAgreementECDHES.
+	// Default: xmlsec.KeyAgreementECDHES. The finite-field
+	// xmlsec.KeyAgreementDHES and KeyAgreementDH are accepted only when
+	// named.
 	AllowedKeyAgreementAlgorithms []string
 
 	// ResolveURI supplies the octets of an xenc:CipherReference to an
@@ -169,6 +206,16 @@ type DecryptOptions struct {
 	// wrapped with xmlsec.ErrDereference. When nil, such a CipherReference
 	// is refused, and a relative URI is always refused.
 	ResolveURI xmlsec.URIResolver
+
+	// AllowedKeyDerivationAlgorithms restricts the
+	// xenc11:KeyDerivationMethod. Default: xmlsec.KeyDerivationConcatKDF.
+	// xmlsec.KeyDerivationPBKDF2 is accepted only when named.
+	AllowedKeyDerivationAlgorithms []string
+
+	// AllowedPRFAlgorithms restricts the PBKDF2 PRF. Default:
+	// xmlsec.SigHMACSHA256, 384 and 512. The legacy xmlsec.SigHMACSHA1,
+	// the PKCS #5 default, is accepted only when named.
+	AllowedPRFAlgorithms []string
 }
 
 // The default allow-lists, used when a caller passes an empty one.
@@ -177,6 +224,8 @@ var (
 	defaultKeyTransport = []string{xmlsec.KeyTransportRSAOAEP}
 	defaultKeyWrap      = []string{xmlsec.KeyWrapAES128, xmlsec.KeyWrapAES192, xmlsec.KeyWrapAES256}
 	defaultAgreement    = []string{xmlsec.KeyAgreementECDHES}
+	defaultDerivation   = []string{xmlsec.KeyDerivationConcatKDF}
+	defaultPRF          = []string{xmlsec.SigHMACSHA256, xmlsec.SigHMACSHA384, xmlsec.SigHMACSHA512}
 	defaultMGF          = []string{xmlsec.MGF1SHA256, xmlsec.MGF1SHA384, xmlsec.MGF1SHA512}
 	defaultDigest       = []string{xmlsec.DigestSHA256, xmlsec.DigestSHA384, xmlsec.DigestSHA384XMLEnc, xmlsec.DigestSHA512}
 )

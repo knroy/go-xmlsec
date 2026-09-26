@@ -113,6 +113,17 @@ const (
 const (
 	KeyAgreementECDHES     = "http://www.w3.org/2009/xmlenc11#ECDH-ES"
 	KeyDerivationConcatKDF = "http://www.w3.org/2009/xmlenc11#ConcatKDF"
+
+	// OPTIONAL finite-field Diffie-Hellman (section 5.6.2): dh-es with an
+	// explicit xenc11:KeyDerivationMethod, and dh with the Legacy KDF of
+	// section 5.6.2.2. Neither is in a default allow-list.
+	KeyAgreementDHES = "http://www.w3.org/2009/xmlenc11#dh-es"
+	KeyAgreementDH   = "http://www.w3.org/2001/04/xmlenc#dh"
+
+	// KeyDerivationPBKDF2 is PBKDF2 (section 5.4.2), OPTIONAL. Its PRF is
+	// named by an HMAC URI: SigHMACSHA256, 384 or 512, or the legacy
+	// SigHMACSHA1. It is not in a default allow-list.
+	KeyDerivationPBKDF2 = "http://www.w3.org/2009/xmlenc11#pbkdf2"
 )
 
 // Mask generation function URIs, for RSA-OAEP.
