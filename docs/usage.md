@@ -7,8 +7,9 @@ produce a signature that looks right and that no peer accepts.
 
 | Context | Canonicalization |
 |---|---|
-| WS-Security, AS4: references and `ds:SignedInfo` | `c14n.Exclusive10` |
-| Enveloped document signatures such as SMP metadata | `c14n.Inclusive10` |
+| WS-Security, AS4: references and `ds:SignedInfo` | `c14n.Exclusive10` (the WS-I Basic Security Profile requires it) |
+| A new inclusive signature | `c14n.Inclusive11`, which XML Signature 1.1 §3.1.1 and §6.5 recommend |
+| Enveloped documents whose profile names Canonical XML 1.0, such as SMP metadata | `c14n.Inclusive10` |
 
 Canonicalization algorithm URIs are go-xml's `c14n.Algorithm` constants; this
 module does not redefine them.
@@ -29,7 +30,7 @@ doc := tree.Root
 `MaxDepth` and `MaxNodes` to what your profile needs. Limits can only be
 tightened, never loosened, and exceeding one is `ErrLimitExceeded`.
 
-## WS-Security signature
+## Signing
 
 `dsig.Sign` returns a detached `ds:Signature` for you to place, and does not
 modify the document. A detached signature's `ds:SignedInfo` is canonicalized
@@ -37,34 +38,34 @@ before you place it, and only exclusive canonicalization is independent of
 where it ends up, so a detached signature needs exclusive canonicalization.
 To use any other, set `SignOptions.Parent` to the element the signature
 belongs in: `Sign` then appends it there first and computes it in place,
-leaves it there, and leaves the document unchanged if it fails. (The WS-I
-Basic Security Profile requires exclusive canonicalization for WS-Security
-anyway.)
+leaves it there, and leaves the document unchanged if it fails.
 
-1. Give every signed element an ID: `wss.AssignID(doc, el)`.
-2. Create the header and the token: `wss.NewHeader`, then
-   `hdr.AddBinarySecurityToken`. The token must be in the document before
-   signing, since the `SecurityTokenReference` points at it.
-3. `dsig.Sign` with `KeyInfo: dsig.KeyInfoSecurityTokenReference` and
-   `SecurityTokenID` set to the token's ID.
-4. `hdr.Append(sig)`.
+`Sign` refuses RSA keys under 2048 bits (XML Signature §6.4.2), a
+`SignatureID` or `Reference.ID` that is not an XML name, and a
+`Reference.Type` that is not a URI.
 
 Reference forms:
 
 | URI | Transforms | Covers |
 |---|---|---|
-| `"#id"` | a canonicalization, last | the element with that `wsu:Id` or `xml:id`, or an attribute named in `IDAttributes` |
-| `"cid:..."` | `TransformAttachmentContentSignature` | the attachment content, canonicalized: Exclusive C14N for XML types, CRLF line endings for other text, the octets as they are otherwise |
-| `"cid:..."` | `TransformAttachmentCompleteSignature` | as above, preceded by the canonical Content-Description, -Disposition, -ID, -Location and -Type headers |
-| `""` | `TransformEnvelopedSignature`, then a canonicalization | the whole document minus the enclosing signature |
+| `"#id"` | a canonicalization, last | the element with that `wsu:Id` or `xml:id`, or an attribute named in `IDAttributes`; comments removed |
+| `"#xpointer(id('id'))"` | a canonicalization, last | as `"#id"`, comments included: use a `#WithComments` algorithm to sign them |
+| `""` | `TransformEnvelopedSignature`, then a canonicalization | the whole document minus the enclosing signature; comments removed |
+| `"#xpointer(/)"` | `TransformEnvelopedSignature`, then a canonicalization | as `""`, comments included |
+| `"cid:..."` | `TransformAttachmentContentSignature`, first | the attachment content, canonicalized: Exclusive C14N for XML types, CRLF line endings for other text, the octets as they are otherwise |
+| `"cid:..."` | `TransformAttachmentCompleteSignature`, first | as above, preceded by the canonical Content-Description, -Disposition, -ID, -Location and -Type headers |
+
+Any other XPointer is refused. A canonicalization that follows octets parses
+them with `xmlsec.Parse`, and the base64 transform over an element decodes
+its text content, as XML Signature §4.4.3.2 and §6.6.2 describe.
 
 When signing, a same-document reference with no transforms, or whose last
 transform leaves a node set, is refused: this library never produces a
 signature that relies on an implicit canonicalization. When verifying, such a
-reference is completed with Canonical XML 1.0, as XML Signature section
-4.4.3.2 requires, because most signing software relies on exactly that; the
-implied algorithm is checked against `AllowedCanonicalizationAlgorithms` like
-a named one.
+reference is completed with Canonical XML 1.0, as XML Signature §4.4.3.2
+requires, because most signing software relies on exactly that; the implied
+algorithm is checked against `AllowedCanonicalizationAlgorithms` like a named
+one.
 
 Fill `Attachment.MIMEHeaders` with the part's headers as your MIME parser
 returns them: Content-Type selects the content canonicalization, and a part
@@ -77,6 +78,91 @@ Exclusive C14N in `AllowedCanonicalizationAlgorithms`.
 `TransformAttachmentContentOnly` and `TransformAttachmentComplete` are the
 SwA profile's `EncryptedData` Type URIs, not signature transforms. A
 `ds:Transform` naming either is refused: no WS-Security peer accepts it.
+
+## WS-Security
+
+WS-Security has each step **prepended** to the `wsse:Security` header (SOAP
+Message Security 1.1.1 §5, §8.2, §9), so the header lists the steps last
+first and a receiver processes it top to bottom.
+
+- `hdr.Prepend(el)` places a signature, an `EncryptedKey` or a
+  `ReferenceList`. It keeps two things ahead of the new element: a leading
+  timestamp, and every token the element references (Basic Security Profile
+  R5205). It refuses an `EncryptedKey` that would land after an
+  `EncryptedData` it lists (R3208).
+- `AddBinarySecurityToken` and `AddTimestamp` place their elements
+  themselves; the timestamp always goes first, at most once.
+- `hdr.Append(el)` places an element last, for callers who order the header
+  themselves.
+
+Sign, then encrypt:
+
+1. `hdr.AddTimestamp(now, ttl)`.
+2. `wss.AssignID` on every element to sign. On an XML Signature or XML
+   Encryption element it sets the schema's own unqualified `Id` rather than
+   `wsu:Id`; sign such references with `IDAttributes: []xdm.QName{dsig.IDAttrDSig}`.
+3. `hdr.AddBinarySecurityToken(signerCert, nil, xmlsec.BSTValueTypeX509v3)`, then
+   `dsig.Sign` with `KeyInfo: dsig.KeyInfoSecurityTokenReference` and
+   `SecurityTokenID` set to the token's ID, then `hdr.Prepend(sig)`.
+4. Name the recipient's key: a token of its certificate and
+   `wss.NewSecurityTokenReference`, or `wss.NewKeyIdentifierReference(cert)`
+   (subject key identifier, or a SHA-1 thumbprint when the certificate has
+   none) or `wss.NewIssuerSerialReference(cert)` when the certificate is not
+   sent.
+5. `ek.SetKeyInfo(str)`, `ek.AddDataReference(id)`, `hdr.Prepend(ek.Element)`,
+   then `xenc.EncryptElement`.
+
+The result reads `wsu:Timestamp`, [recipient token], `xenc:EncryptedKey`,
+signer token, `ds:Signature`: a receiver decrypts, then verifies.
+`TestWSS4JProcessesSignThenEncrypt` sends exactly this to WSS4J, with each
+of the three recipient-key forms.
+
+On an Envelope that uses a default SOAP namespace, `wss.NewHeader` declares a
+prefix so that `mustUnderstand` and `actor`/`role` stay SOAP attributes. A
+reference to a PKIPath or PKCS7 token carries `wsse11:TokenType`.
+
+### Timestamps
+
+```go
+ts, err := wss.ParseTimestamp(timestampElement)
+err = ts.Check(time.Now(), 5*time.Minute, 10*time.Minute) // skew, maximum age
+```
+
+`ParseTimestamp` enforces the Basic Security Profile structure: exactly one
+`Created`, an optional `Expires` after it, UTC with `Z`, at most millisecond
+precision. `Check` returns `ErrMessageExpired` for an expired, future-dated
+or too-old timestamp. A timestamp protects nothing unless the signature's
+`Coverage` includes its ID.
+
+### Token references
+
+`wss.ResolveSecurityTokenReference` follows a direct reference to a token in
+the message. `wss.ResolveSecurityTokenReferenceStrict` also enforces the
+Basic Security Profile rules on how the reference is written: a `ValueType`
+matching the token, a consistent `TokenType`, the token in the same header
+before the reference. `VerifyOptions.StrictSecurityTokenReference` applies
+the strict form inside `dsig.Verify`.
+
+`wss.MatchSecurityTokenReference(str, cert)` checks a key identifier or
+issuer-serial reference against a certificate you supply. It never selects a
+key from the message.
+
+### Faults
+
+SOAP Message Security §12 names the faults a receiver returns. The library's
+errors map onto them as follows; for SOAP 1.2 the Code is `env:Sender` with
+the QName as Subcode.
+
+| Error | Fault |
+|---|---|
+| `ErrUnsupportedAlgorithm`, `ErrAlgorithmNotAllowed`, `ErrTransformRefused` | `wsse:UnsupportedAlgorithm` |
+| `ErrUnsupportedKeyInfo` | `wsse:UnsupportedSecurityToken` |
+| `ErrIDNotFound` while resolving a token reference | `wsse:SecurityTokenUnavailable` |
+| `ErrMalformed` from a token or token reference | `wsse:InvalidSecurityToken` |
+| other `ErrMalformed`, `ErrAmbiguousID`, `ErrIDNotFound`, `ErrUnverifiable`, `ErrLimitExceeded`, `ErrAttachmentNotFound` | `wsse:InvalidSecurity` |
+| `ErrDigestMismatch`, `ErrSignatureInvalid`, a key-unwrap or decryption failure | `wsse:FailedCheck` |
+| `ErrUntrusted` | `wsse:FailedAuthentication` |
+| `ErrMessageExpired` | `wsse:MessageExpired` |
 
 ## SAML, XAdES and other ID attributes
 
@@ -97,8 +183,7 @@ cov, err := dsig.Verify(doc, sig, dsig.VerifyOptions{
 The listed attributes add to `wsu:Id` and `xml:id` and never replace them.
 Name only what your profile defines as an ID, and use the same list when
 signing and verifying. `wss.FindByIDAttributes` does the same lookup
-directly. `SecurityTokenID` and `SecurityTokenReference` resolution still use
-`wsu:Id` and `xml:id` only.
+directly.
 
 ## Enveloped signature
 
@@ -134,22 +219,28 @@ cov, err := dsig.Verify(doc, sigElement, dsig.VerifyOptions{
 })
 ```
 
-Pass exactly the algorithms your profile permits. An empty list means every
-algorithm this module implements, which is a downgrade surface.
+Pass exactly the algorithms your profile permits. An empty list means the
+default set: every secure algorithm this library implements. An algorithm
+kept only for legacy interoperability is outside that set and is accepted
+only when named explicitly.
 
 To pin a sender known by a raw key rather than a certificate, set
 `VerifyOptions.PublicKey` instead of `Certificate`; setting both is an
-error. A pinned key replaces `KeyInfo` and is not compared with it, but an
-unsupported or malformed `KeyInfo` is still refused. When signing,
-`KeyInfoKeyValue` and `KeyInfoDEREncodedKeyValue` emit the signer's key
-without a certificate.
+error. With a key pinned, a `KeyInfo` form this library does not accept is
+ignored (`KeyInfoForm` is then `KeyInfoNone`); a malformed or ambiguous one is
+still refused. When signing, `KeyInfoKeyValue` and
+`KeyInfoDEREncodedKeyValue` emit the signer's key without a certificate. A
+`dsig11:KeyInfoReference` is followed to a `ds:KeyInfo` in the same document,
+never further.
 
-Two more options narrow what is accepted:
+More options:
 
 | Option | Effect |
 |---|---|
 | `TrustKey func(cert *x509.Certificate, key crypto.PublicKey) error` | Called with the signer's key, and its certificate when there is one, before any cryptographic or digest work; an error stops verification with `ErrUntrusted`. Use it when you cannot pin one certificate but know which you accept: a refused sender costs nothing to process. |
-| `RequireExplicitCanonicalization` | Refuse a reference that relies on the Canonical XML 1.0 implied by XML-DSig 4.4.3.2, even when that algorithm is in the allow-list. Off by default, because most signers rely on it. |
+| `RequireExplicitCanonicalization` | Refuse a reference that relies on the Canonical XML 1.0 implied by XML Signature §4.4.3.2, even when that algorithm is in the allow-list. Off by default, because most signers rely on it. |
+| `StrictSecurityTokenReference` | Resolve a `wsse:SecurityTokenReference` with the Basic Security Profile rules; see Token references above. |
+| `ResolveOmittedURI func() ([]byte, error)` | Supplies the data of the one `ds:Reference` without a URI that XML Signature §4.4.3.1 allows; `Coverage.OmittedURISigned` reports that it was covered. Without it, such a reference is refused. |
 
 Then check `Coverage`, every time:
 
@@ -172,6 +263,7 @@ Errors worth distinguishing, all matchable with `errors.Is`:
 | `ErrAmbiguousID` | an ID appears more than once |
 | `ErrDigestMismatch` / `ErrSignatureInvalid` | the content or the signature value does not match |
 | `ErrTransformRefused` | XSLT or XPath |
+| `ErrUntrusted` | your `TrustKey` refused the signer |
 
 ## Encryption
 
@@ -198,52 +290,67 @@ Pass `xmlsec.TransformAttachmentComplete` instead to encrypt the listed MIME
 headers with the body. Then keep Content-ID on the part and drop the other
 listed headers.
 
-```go
-```
-
 The MGF is emitted explicitly. Omitting it means SHA-1 by specification
 default, so `DecryptEncryptedKey` refuses an `EncryptedKey` without one.
 
-A WS-Security receiver such as WSS4J finds the session key through the
-`EncryptedKey` in the header: its `ds:KeyInfo` names the recipient's key, and
-its `xenc:ReferenceList` names each `EncryptedData` it decrypts. Compose them
-as a sender does:
+What to encrypt:
+
+| Function | Encrypts | Type |
+|---|---|---|
+| `xenc.EncryptElement(doc, el, key, opts)` | an element, in place of itself | `xenc#Element` |
+| `xenc.EncryptContent(doc, el, key, opts)` | an element's content, such as the SOAP Body's | `xenc#Content` |
+| `xenc.EncryptHeader(doc, block, security, key, opts)` | a SOAP header block, as a `wsse11:EncryptedHeader` carrying the Security header's `mustUnderstand` and `actor`/`role` | `xenc#Element` |
+| `xenc.EncryptAttachment(att, key, transform, opts)` | a MIME part, by `CipherReference` | the SwA Type |
+
+`EncryptElement` refuses the SOAP Envelope, Header and Body and any header
+block: a header block must become an `EncryptedHeader` (Basic Security
+Profile R3228, R5614). Plaintext must be in Unicode Normalization Form C
+(`xenc.ErrNotNFC`); it is refused, never normalized, since it may already be
+signed. An element that undeclares a default namespace is encrypted with
+`xmlns=""`, so a peer that decrypts in place keeps it out of its parent's
+namespace. `EncryptOptions.DataID` must be an XML name.
+
+A WS-Security receiver finds the session key through the `EncryptedKey` in
+the header: its `ds:KeyInfo` names the recipient's key, and its
+`xenc:ReferenceList` names each `EncryptedData` it decrypts:
 
 ```go
-tokenID, err := hdr.AddBinarySecurityToken(recipientCert, nil, xmlsec.BSTValueTypeX509v3)
-str, err := wss.NewSecurityTokenReference(doc, tokenID, xmlsec.BSTValueTypeX509v3)
-
-opts.DataID = "ED-1"                  // the Id the EncryptedData will carry
+opts.DataID = "ED-1"                    // the Id the EncryptedData will carry
 ek, err := xenc.GenerateEncryptedKey(opts)
-err = ek.SetKeyInfo(str)              // which key unwraps it
-ek.AddDataReference(opts.DataID)      // what it decrypts
-err = hdr.Append(ek.Element)
+err = ek.SetKeyInfo(str)                // which key unwraps it
+err = ek.AddDataReference(opts.DataID)  // what it decrypts
+err = hdr.Prepend(ek.Element)
 encrypted, err := xenc.EncryptElement(doc, payload, ek.SessionKey, opts)
 ```
 
-This is exactly what `TestWSS4JDecryptsOurEncryption` sends to WSS4J. A
-peer that instead looks for the key inside `EncryptedData/ds:KeyInfo`, as
-`xmlsec1` does, needs the `EncryptedKey` placed there.
+`EncryptOptions.CarriedKeyName` and `RecipientHint` emit the `EncryptedKey`'s
+`CarriedKeyName` and `Recipient`.
+
+Key agreement and key wrap:
+
+- **ECDH-ES** (P-256, P-384, P-521, with ConcatKDF): set
+  `KeyTransportAlgorithm: xmlsec.KeyWrapAES128` (or 192, 256),
+  `KeyAgreementAlgorithm: xmlsec.KeyAgreementECDHES`, `DigestAlgorithm` for
+  the KDF, and an EC `Recipient`. The receiver calls
+  `xenc.DecryptAgreedKey(ek, priv.ECDH(), …allow-lists)`.
+- **AES key wrap** with a key you share: set `KeyEncryptionKey`, and receive
+  with `xenc.UnwrapEncryptedKey`.
 
 Receiving:
 
 ```go
-key, err := xenc.DecryptEncryptedKey(ekElement, decrypter,
+edKey, err := xenc.FindEncryptedKey(edElement) // inline, RetrievalMethod, KeyName, or ReferenceList
+key, err := xenc.DecryptEncryptedKey(edKey, decrypter,
     []string{xmlsec.KeyTransportRSAOAEP}, []string{xmlsec.MGF1SHA256}, []string{xmlsec.DigestSHA256})
 att, err := xenc.DecryptAttachment(edElement, mimeBody, key, []string{xmlsec.EncAES128GCM})
 // Replace the part's body with att.Body, and its headers of the same names
 // with att.MIMEHeaders.
 ```
 
-`xenc.EncryptElement` encrypts an element in place of itself and returns the
-document octets; `xenc.DecryptData` returns the element's octets, which parse
-on their own because the plaintext declares every namespace in scope.
-
-## Order within `wsse:Security`
-
-1. `wsse:BinarySecurityToken`
-2. `ds:Signature`
-3. `xenc:EncryptedKey`
-4. `xenc:EncryptedData`
-
-A token must precede the signature that references it.
+`xenc.DecryptData` returns the plaintext octets. For `Element`, they parse on
+their own, because the plaintext declares every namespace in scope; for
+`Content`, parse them as the content of an element declaring the namespaces
+in scope at the target, and put the nodes in place of the `EncryptedData`.
+`DecryptData` also follows a same-document `CipherReference` with the base64
+transform. `EncryptionMethod` is read strictly: a child the algorithm does not
+permit, or a `KeySize` inconsistent with it, is refused.

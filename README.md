@@ -18,10 +18,12 @@ because a signature is only as correct as the canonical octets it covers.
   signatures over elements by ID and over MIME attachments by `cid:`.
 - **Signature coverage**: verification reports exactly which elements and
   attachments a signature covers, the defence against XML Signature Wrapping.
-- **WS-Security**: the `wsse:Security` header, binary security tokens,
-  security token references, `wsu:Id` and timestamps.
-- **XML Encryption**: RSA-OAEP key transport with an explicit MGF, and AES-GCM
-  for elements and for attachments by `CipherReference`.
+- **WS-Security**: the `wsse:Security` header in processing order, binary
+  security tokens, direct, key-identifier and issuer-serial token references,
+  `wsu:Id`, and timestamps checked on receipt.
+- **XML Encryption**: RSA-OAEP key transport with an explicit MGF, AES key
+  wrap, ECDH-ES key agreement, and AES-GCM for elements, element content,
+  SOAP header blocks (`wsse11:EncryptedHeader`) and attachments.
 - **Hardened by default**: no DOCTYPE, no network or file access, no SHA-1, no
   XSLT or XPath transforms, algorithm allow-lists checked before any
   cryptography.
@@ -115,12 +117,15 @@ default produces a signature that looks valid and that no peer accepts.
 | Canonicalization | Canonical XML 1.0 and 1.1, Exclusive Canonical XML 1.0, with or without comments, from `go-xml/c14n` |
 | Transforms | enveloped signature, base64, SwA `Attachment-Content-Signature` and `Attachment-Complete-Signature` |
 | Key transport | RSA-OAEP (XML Encryption 1.1), MGF1 with SHA-256, SHA-384, SHA-512 |
+| Key wrap | AES-128, AES-192, AES-256 (RFC 3394) |
+| Key agreement | ECDH-ES on P-256, P-384, P-521, with ConcatKDF |
 | Data encryption | AES-128-GCM, AES-192-GCM, AES-256-GCM; attachments as SwA `Attachment-Content-Only` or `Attachment-Complete` |
 
-Refused on purpose, whoever asks: SHA-1 in any role, `rsa-oaep-mgf1p`,
-`rsa-1_5`, XSLT and XPath transforms, DOCTYPE, and dereferencing any URI
-outside the document and its attachments. The reasons are in
-[docs/security.md](docs/security.md#deliberate-refusals).
+Refused on purpose: SHA-1 as a digest or signature algorithm,
+`rsa-oaep-mgf1p`, `rsa-1_5`, AES-CBC and 3DES, XSLT and XPath transforms,
+DOCTYPE, and dereferencing any URI outside the document and its
+attachments. The reasons, and how this measures against each specification
+requirement by requirement, are in [docs/security.md](docs/security.md#conformance).
 
 ## How it is tested
 

@@ -52,6 +52,9 @@ Named `TestConformance_<ID>_<description>` for the requirement they prove.
 | `TestParseRefusesXXE`, `TestParseFetchesNothing`, `TestVerifyDereferencesNothingExternal` | every XXE and external-reference route in the [assessment](security.md#assessment) is refused or inert, with zero requests reaching a local listener |
 | `TestRawKeyRoundTrip`, `TestRawKeyInfoStructure`, `TestCoveragePublicKey` | each raw-key form with RSA and P-256/384/521, self-described and pinned; a different pinned key refused; malformed and refused raw keys (short RSA, even modulus or exponent, off-curve and compressed points, explicit parameters, unknown curves) |
 | `TestPinnedCertificateIgnoresEmbeddedKey`, `TestAlgorithmConfusion` | an attacker's own key is refused against a pinned certificate; HMAC, SHA-1 and key-type confusion are refused |
+| `TestXPointerReferences`, `TestBase64OfNodeSet`, `TestOmittedURI`, `TestKeyInfoReference`, `TestPinnedKeyIgnoresUnsupportedKeyInfo` | the XML Signature 1.1 processing rules: XPointer forms keeping comments, base64 over a node set, the one URI-less reference, same-document `KeyInfoReference`, and a pinned key tolerating an unsupported `KeyInfo` |
+| `TestSignInPlace`, `TestSignInPlaceRefusals` | in-place signing with any canonicalization, and a failed `Sign` leaving the document unchanged |
+| `TestStrictSecurityTokenReference` | the Basic Security Profile rules on a received token reference |
 | `TestNilInputs` (`wss`, `xenc`) | a nil or wrong-kind argument is an error, never a panic |
 | `TestImplicitCanonicalization` | a received reference ending in a node set verifies through Canonical XML 1.0, and the implied algorithm is refused when outside the allow-list |
 | `TestX509DataDescriptiveElements` | subject name, issuer-serial and SKI beside one certificate are accepted and ignored; a second certificate, a CRL, a `KeyName` or no certificate are refused |
@@ -89,6 +92,13 @@ package, does not implement XML Encryption 1.1 `rsa-oaep`.
 | `TestWSS4JDecryptsOurEncryption` | WSS4J | an encrypted body with the `EncryptedKey` in the header, naming the recipient's token and the `EncryptedData`; WSS4J must decrypt it to the original |
 | `TestWSS4JVerifiesOurAttachmentSignatures`, `TestWeVerifyWSS4JAttachmentSignatures` | WSS4J, both ways | Content- and Complete-Signature transforms over XML, text and binary parts; a tampered part must be refused |
 | `TestWSS4JDecryptsOurAttachmentEncryption`, `TestWeDecryptWSS4JAttachmentEncryption` | WSS4J, both ways | Attachment-Content-Only and Attachment-Complete encryption, AES-128-GCM under RSA-OAEP |
+| `TestWSS4JProcessesSignThenEncrypt` | WSS4J | sign then encrypt in WS-Security order, with the recipient key named by token reference, subject key identifier and issuer-serial, plus an encrypted signature; WSS4J decrypts, then verifies. A control that appends the `EncryptedKey` (the old order) is refused |
+| `TestWSS4JDecryptsOurEncryptedHeaderAndContent` | WSS4J | a `wsse11:EncryptedHeader` and encrypted Body content |
+| `TestSantuarioXPointerReferences` | Santuario, both ways | `#xpointer(/)` and `#xpointer(id('…'))` with comments; byte-identical `SignatureValue`; a changed comment is refused |
+| `TestSantuarioVerifiesOurInPlaceInclusiveSignature` | ours → Santuario | an inclusive-canonicalization signature computed in place (`SignOptions.Parent`) |
+| `TestReferenceImplementationsDecryptOurECDHES`, `TestWeDecryptSantuarioECDHES`, `TestWeDecryptXmlsec1ECDHES` | both ways | ECDH-ES with ConcatKDF on P-256, P-384 and P-521 |
+| `TestReferenceImplementationsDecryptOurKeyWrap`, `TestWeDecryptTheirKeyWrap` | both ways | AES key wrap |
+| `TestDecryptReplaceKeepsNoNamespace` | ours → both | a decrypted element that undeclares a default namespace stays in no namespace |
 | `TestXmlsec1DecryptsOurEncryption`, `TestSantuarioDecryptsOurEncryption` | ours → each | AES-128-GCM element, RSA-OAEP with explicit SHA-256 MGF and digest |
 | `TestWeDecryptXmlsec1Encryption`, `TestWeDecryptSantuarioEncryption` | each → ours | the same |
 
@@ -157,6 +167,12 @@ beside the assertion that uses it:
 | Apache Santuario | 4.0.4 | Maven Central `org.apache.santuario:xmlsec`, run on OpenJDK 21 |
 | Apache WSS4J | 4.0.1 | Maven Central `org.apache.wss4j:wss4j-ws-security-dom`, same harness |
 
+The harness (`tests/santuario/Harness.java`) exposes Santuario and WSS4J as
+commands: `verify`, `sign-enveloped`, `sign-detached`, `encrypt`, `decrypt`,
+`encrypt-ecdh`, `encrypt-kw`, `decrypt-kw`, `wss4j-verify`, `wss4j-decrypt`,
+`wss4j-process` (both keys: decrypt, then verify), and the attachment
+commands; `--id-attr NAME` registers extra ID attributes.
+
 The Alpine package is not pinned to a patch release; the version in use is
 printed by `xmlsec1 --version` in the container.
 
@@ -178,6 +194,14 @@ signature over a `ds:Object` (identified with `IDAttrDSig`). The other 15
 are refused, each for a documented reason: 4 carry 1024-bit RSA keys, below
 the 2048-bit minimum; 9 use the legacy RFC 4050 `ECDSAKeyValue` form; one
 uses `KeyInfoReference` and one `X509Digest`.
+
+**W3C XML Encryption 1.1 interop vectors.** `tests/w3c/testdata/xmlenc11`, the
+2012 Oracle vectors under the same license, with their keys (the `.p12` files
+unmodified, and their private keys extracted to PEM, since Go cannot read
+PKCS#12). The three ECDH-ES with ConcatKDF vectors, on P-256, P-384 and
+P-521, decrypt to the published plaintext. The others are refused for stated
+reasons: PBKDF2 is not implemented, finite-field `dh-es` is not allowed, and
+`rsa-oaep-mgf1p` and a SHA-1 MGF are not allowed.
 
 **Real-world corpus.** 122 real Peppol SMP responses, fetched 2026-09-26 from
 62 SMP providers and at least 20 distinct producing implementations, stored
