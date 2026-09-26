@@ -182,7 +182,7 @@ cov, err := dsig.Verify(doc, sig, dsig.VerifyOptions{
 
 The listed attributes add to `wsu:Id` and `xml:id` and never replace them.
 Name only what your profile defines as an ID, and use the same list when
-signing and verifying. `wss.FindByIDAttributes` does the same lookup
+signing and verifying. `wss.FindByID` does the same lookup
 directly.
 
 ## Enveloped signature
@@ -309,7 +309,7 @@ What to encrypt:
 `EncryptElement` refuses the SOAP Envelope, Header and Body and any header
 block: a header block must become an `EncryptedHeader` (Basic Security
 Profile R3228, R5614). Plaintext must be in Unicode Normalization Form C
-(`xenc.ErrNotNFC`); it is refused, never normalized, since it may already be
+(`xmlsec.ErrNotNFC`); it is refused, never normalized, since it may already be
 signed. An element that undeclares a default namespace is encrypted with
 `xmlns=""`, so a peer that decrypts in place keeps it out of its parent's
 namespace. `EncryptOptions.DataID` must be an XML name.
@@ -336,7 +336,7 @@ Key agreement and key wrap:
   `KeyTransportAlgorithm: xmlsec.KeyWrapAES128` (or 192, 256),
   `KeyAgreementAlgorithm: xmlsec.KeyAgreementECDHES`, `DigestAlgorithm` for
   the KDF, and an EC `Recipient`. The receiver calls
-  `xenc.DecryptAgreedKey(ek, priv.ECDH(), …allow-lists)`.
+  `xenc.DecryptAgreedKey(ek, priv.ECDH(), xenc.DecryptOptions{})`.
 - **AES key wrap** with a key you share: set `KeyEncryptionKey`, and receive
   with `xenc.UnwrapEncryptedKey`.
 
@@ -344,9 +344,14 @@ Receiving:
 
 ```go
 edKey, err := xenc.FindEncryptedKey(edElement) // inline, RetrievalMethod, KeyName, or ReferenceList
-key, err := xenc.DecryptEncryptedKey(edKey, decrypter,
-    []string{xmlsec.KeyTransportRSAOAEP}, []string{xmlsec.MGF1SHA256}, []string{xmlsec.DigestSHA256})
-att, err := xenc.DecryptAttachment(edElement, mimeBody, key, []string{xmlsec.EncAES128GCM})
+allow := xenc.DecryptOptions{ // empty lists mean the secure defaults
+    AllowedDataAlgorithms:         []string{xmlsec.EncAES128GCM},
+    AllowedKeyTransportAlgorithms: []string{xmlsec.KeyTransportRSAOAEP},
+    AllowedMGFAlgorithms:          []string{xmlsec.MGF1SHA256},
+    AllowedDigestAlgorithms:       []string{xmlsec.DigestSHA256},
+}
+key, err := xenc.DecryptEncryptedKey(edKey, decrypter, allow)
+att, err := xenc.DecryptAttachment(edElement, mimeBody, key, allow)
 // Replace the part's body with att.Body, and its headers of the same names
 // with att.MIMEHeaders.
 ```
@@ -366,13 +371,20 @@ answered in kind: name every legacy part, and nothing else.
 
 ```go
 // AES-CBC data under rsa-oaep-mgf1p (SHA-1).
-key, err := xenc.DecryptEncryptedKey(ek, decrypter,
-    []string{xmlsec.KeyTransportRSAOAEPMGF1P}, []string{xmlsec.MGF1SHA1}, []string{xmlsec.DigestSHA1})
-pt, err := xenc.DecryptData(ed, key, []string{xmlsec.EncAES128CBC})
+legacy := xenc.DecryptOptions{
+    AllowedDataAlgorithms:         []string{xmlsec.EncAES128CBC},
+    AllowedKeyTransportAlgorithms: []string{xmlsec.KeyTransportRSAOAEPMGF1P},
+    AllowedMGFAlgorithms:          []string{xmlsec.MGF1SHA1},
+    AllowedDigestAlgorithms:       []string{xmlsec.DigestSHA1},
+}
+key, err := xenc.DecryptEncryptedKey(ek, decrypter, legacy)
+pt, err := xenc.DecryptData(ed, key, legacy)
 
 // RSA v1.5: a separate function, and a key pair used for nothing else.
-key, err = xenc.DecryptEncryptedKeyPKCS1v15(ek, ed, v15OnlyDecrypter,
-    []string{xmlsec.KeyTransportRSA15}, []string{xmlsec.EncTripleDESCBC})
+key, err = xenc.DecryptEncryptedKeyPKCS1v15(ek, ed, v15OnlyDecrypter, xenc.DecryptOptions{
+    AllowedKeyTransportAlgorithms: []string{xmlsec.KeyTransportRSA15},
+    AllowedDataAlgorithms:         []string{xmlsec.EncTripleDESCBC},
+})
 ```
 
 An absent `DigestMethod` or `MGF` means SHA-1 and is named the same way.

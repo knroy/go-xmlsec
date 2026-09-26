@@ -20,8 +20,8 @@ import (
 
 // newSTR returns an empty, detached wsse:SecurityTokenReference.
 func newSTR() *xdm.Node {
-	str := xmltree.Element(nil, "wsse", NSWSSE, "SecurityTokenReference")
-	str.AddNamespace("wsse", NSWSSE)
+	str := xmltree.Element(nil, "wsse", xmlsec.NSWSSE, "SecurityTokenReference")
+	str.AddNamespace("wsse", xmlsec.NSWSSE)
 	return str
 }
 
@@ -51,10 +51,10 @@ func NewSecurityTokenReference(doc *xdm.Node, tokenID, valueType string) (*xdm.N
 	}
 	str := newSTR()
 	if valueType == xmlsec.BSTValueTypeX509PKIPath || valueType == valueTypePKCS7 {
-		str.AddNamespace("wsse11", NSWSSE11)
-		xmltree.SetAttr(str, "wsse11", NSWSSE11, "TokenType", valueType)
+		str.AddNamespace("wsse11", xmlsec.NSWSSE11)
+		xmltree.SetAttr(str, "wsse11", xmlsec.NSWSSE11, "TokenType", valueType)
 	}
-	ref := xmltree.Element(str, "wsse", NSWSSE, "Reference")
+	ref := xmltree.Element(str, "wsse", xmlsec.NSWSSE, "Reference")
 	xmltree.SetAttr(ref, "", "", "URI", "#"+tokenID)
 	xmltree.SetAttr(ref, "", "", "ValueType", valueType)
 	return str, nil
@@ -88,7 +88,7 @@ func NewKeyIdentifierReference(cert *x509.Certificate) (*xdm.Node, error) {
 		vt, id = valueTypeThumbprintSHA1, thumbprintSHA1(cert)
 	}
 	str := newSTR()
-	ki := xmltree.Element(str, "wsse", NSWSSE, "KeyIdentifier")
+	ki := xmltree.Element(str, "wsse", xmlsec.NSWSSE, "KeyIdentifier")
 	xmltree.SetAttr(ki, "", "", "EncodingType", xmlsec.BSTEncodingBase64)
 	xmltree.SetAttr(ki, "", "", "ValueType", vt)
 	xmltree.Text(ki, base64.StdEncoding.EncodeToString(id))
@@ -111,11 +111,11 @@ func NewIssuerSerialReference(cert *x509.Certificate) (*xdm.Node, error) {
 		return nil, fmt.Errorf("%w: certificate issuer", xmlsec.ErrMalformed)
 	}
 	str := newSTR()
-	xd := xmltree.Element(str, "ds", nsDSig, "X509Data")
-	xd.AddNamespace("ds", nsDSig)
-	is := xmltree.Element(xd, "ds", nsDSig, "X509IssuerSerial")
-	xmltree.Text(xmltree.Element(is, "ds", nsDSig, "X509IssuerName"), issuer.String())
-	xmltree.Text(xmltree.Element(is, "ds", nsDSig, "X509SerialNumber"), cert.SerialNumber.String())
+	xd := xmltree.Element(str, "ds", xmlsec.NSDSig, "X509Data")
+	xd.AddNamespace("ds", xmlsec.NSDSig)
+	is := xmltree.Element(xd, "ds", xmlsec.NSDSig, "X509IssuerSerial")
+	xmltree.Text(xmltree.Element(is, "ds", xmlsec.NSDSig, "X509IssuerName"), issuer.String())
+	xmltree.Text(xmltree.Element(is, "ds", xmlsec.NSDSig, "X509SerialNumber"), cert.SerialNumber.String())
 	return str, nil
 }
 
@@ -158,7 +158,7 @@ func ResolveSecurityTokenReferenceStrict(doc, str *xdm.Node) (*x509.Certificate,
 	if got := str.ChildElements()[0].AttrValue("ValueType"); got == "" || got != vt {
 		return nil, fmt.Errorf("%w: wsse:Reference ValueType %q, token %q (BSP R3059, R3058)", xmlsec.ErrMalformed, got, vt)
 	}
-	tt := xmltree.AttrValue(str, NSWSSE11, "TokenType")
+	tt := xmltree.AttrValue(str, xmlsec.NSWSSE11, "TokenType")
 	if tt != "" && tt != vt || tt == "" && (vt == xmlsec.BSTValueTypeX509PKIPath || vt == valueTypePKCS7) {
 		return nil, fmt.Errorf("%w: wsse11:TokenType %q for a %q token (BSP R5215, R5212)", xmlsec.ErrMalformed, tt, vt)
 	}
@@ -167,7 +167,7 @@ func ResolveSecurityTokenReferenceStrict(doc, str *xdm.Node) (*x509.Certificate,
 	for step.Parent != nil && step.Parent != tok.Parent {
 		step = step.Parent
 	}
-	if !tok.Parent.IsElement(NSWSSE, "Security") || step.Parent == nil ||
+	if !tok.Parent.IsElement(xmlsec.NSWSSE, "Security") || step.Parent == nil ||
 		slices.Index(step.Parent.Children, step) <= slices.Index(step.Parent.Children, tok) {
 		return nil, fmt.Errorf("%w: the token must precede the reference in the same wsse:Security (BSP R5205, R3066)", xmlsec.ErrMalformed)
 	}
@@ -176,11 +176,11 @@ func ResolveSecurityTokenReferenceStrict(doc, str *xdm.Node) (*x509.Certificate,
 
 // referencedToken returns the element a single direct wsse:Reference names.
 func referencedToken(doc, str *xdm.Node) (*xdm.Node, error) {
-	if doc == nil || str == nil || !str.IsElement(NSWSSE, "SecurityTokenReference") {
+	if doc == nil || str == nil || !str.IsElement(xmlsec.NSWSSE, "SecurityTokenReference") {
 		return nil, fmt.Errorf("%w: not a wsse:SecurityTokenReference", xmlsec.ErrUnsupportedKeyInfo)
 	}
 	kids := str.ChildElements()
-	if len(kids) != 1 || !kids[0].IsElement(NSWSSE, "Reference") {
+	if len(kids) != 1 || !kids[0].IsElement(xmlsec.NSWSSE, "Reference") {
 		return nil, fmt.Errorf("%w: only a single direct wsse:Reference is accepted", xmlsec.ErrUnsupportedKeyInfo)
 	}
 	id, ok := strings.CutPrefix(kids[0].AttrValue("URI"), "#")
@@ -207,7 +207,7 @@ func referencedToken(doc, str *xdm.Node) (*xdm.Node, error) {
 // ignoring case and repeated or surrounding spaces, as peers write them
 // differently: "CN=a,O=b" and "CN=a, O=b" are the same issuer.
 func MatchSecurityTokenReference(str *xdm.Node, cert *x509.Certificate) bool {
-	if str == nil || cert == nil || !str.IsElement(NSWSSE, "SecurityTokenReference") {
+	if str == nil || cert == nil || !str.IsElement(xmlsec.NSWSSE, "SecurityTokenReference") {
 		return false
 	}
 	kids := str.ChildElements()
@@ -215,7 +215,7 @@ func MatchSecurityTokenReference(str *xdm.Node, cert *x509.Certificate) bool {
 		return false
 	}
 	switch k := kids[0]; {
-	case k.IsElement(NSWSSE, "KeyIdentifier"):
+	case k.IsElement(xmlsec.NSWSSE, "KeyIdentifier"):
 		// EncodingType is optional in SOAP Message Security; absent means
 		// the Base64Binary its ValueTypes use.
 		if enc := k.Attr("", "EncodingType"); enc != nil && enc.Value != xmlsec.BSTEncodingBase64 {
@@ -231,13 +231,13 @@ func MatchSecurityTokenReference(str *xdm.Node, cert *x509.Certificate) bool {
 		case valueTypeThumbprintSHA1:
 			return bytes.Equal(v, thumbprintSHA1(cert))
 		}
-	case k.IsElement(nsDSig, "X509Data"):
+	case k.IsElement(xmlsec.NSDSig, "X509Data"):
 		d := k.ChildElements()
-		if len(d) != 1 || !d[0].IsElement(nsDSig, "X509IssuerSerial") {
+		if len(d) != 1 || !d[0].IsElement(xmlsec.NSDSig, "X509IssuerSerial") {
 			return false
 		}
 		is := d[0].ChildElements()
-		if len(is) != 2 || !is[0].IsElement(nsDSig, "X509IssuerName") || !is[1].IsElement(nsDSig, "X509SerialNumber") {
+		if len(is) != 2 || !is[0].IsElement(xmlsec.NSDSig, "X509IssuerName") || !is[1].IsElement(xmlsec.NSDSig, "X509SerialNumber") {
 			return false
 		}
 		serial, ok := new(big.Int).SetString(strings.TrimSpace(is[1].StringValue()), 10)

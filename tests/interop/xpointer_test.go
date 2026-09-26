@@ -53,7 +53,7 @@ func TestSantuarioXPointerReferences(t *testing.T) {
 
 			verify := func(b []byte) (*dsig.Coverage, error) {
 				d := parse(t, b)
-				return dsig.Verify(d, find(d, dsig.NSDSig, "Signature"), dsig.VerifyOptions{
+				return dsig.Verify(d, find(d, xmlsec.NSDSig, "Signature"), dsig.VerifyOptions{
 					Certificate: kp.provider.Certificate, IDAttributes: ids,
 				})
 			}

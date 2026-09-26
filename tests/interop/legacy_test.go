@@ -57,7 +57,7 @@ func TestWeVerifyXmlsec1LegacySignatures(t *testing.T) {
 		smChildren, keyInfo     string
 		keyArgs                 []string
 		opts                    dsig.VerifyOptions
-		form                    dsig.KeyInfoSpec
+		form                    dsig.KeyInfoForm
 	}{
 		{"rsa-sha1 with sha1 digest", xmlsec.SigRSASHA1, xmlsec.DigestSHA1, "", x509KI,
 			[]string{"--privkey-pem", rsaKP.keyPEM + "," + rsaKP.certPEM}, dsig.VerifyOptions{}, dsig.KeyInfoX509Data},
@@ -95,7 +95,7 @@ func TestWeVerifyXmlsec1LegacySignatures(t *testing.T) {
 			}
 
 			doc := parse(t, signed)
-			sig := find(doc, dsig.NSDSig, "Signature")
+			sig := find(doc, xmlsec.NSDSig, "Signature")
 			if _, err := dsig.Verify(doc, sig, c.opts); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
 				t.Fatalf("empty allow-lists: got %v\n%s", err, signed)
 			}
@@ -112,7 +112,7 @@ func TestWeVerifyXmlsec1LegacySignatures(t *testing.T) {
 
 			// The control: the harness must be able to fail.
 			tampered := parse(t, bytes.Replace(signed, []byte("example.com"), []byte("evil.com"), 1))
-			if _, err := dsig.Verify(tampered, find(tampered, dsig.NSDSig, "Signature"), opts); !errors.Is(err, xmlsec.ErrDigestMismatch) {
+			if _, err := dsig.Verify(tampered, find(tampered, xmlsec.NSDSig, "Signature"), opts); !errors.Is(err, xmlsec.ErrDigestMismatch) {
 				t.Fatalf("tampered: got %v", err)
 			}
 		})

@@ -19,7 +19,7 @@ func TestAssignIDErrors(t *testing.T) {
 	if _, err := AssignID(doc, body); err == nil {
 		t.Fatal("wsu prefix bound to another URI accepted")
 	}
-	if body.Attr(NSWSU, "Id") != nil {
+	if body.Attr(xmlsec.NSWSU, "Id") != nil {
 		t.Fatal("wsu:Id set despite the error")
 	}
 }
@@ -32,7 +32,7 @@ func TestRandomnessFailure(t *testing.T) {
 	t.Cleanup(func() { randReader = old })
 
 	doc := parseDoc(t, env11)
-	h, err := NewHeader(doc, NSSOAP11, "", false)
+	h, err := NewHeader(doc, xmlsec.NSSOAP11, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,12 +78,12 @@ func TestNewIDSkipsCollision(t *testing.T) {
 // XML Signature and XML Encryption elements get the unqualified Id their
 // schemas define, never wsu:Id (BSP R3003, R3004); everything else wsu:Id.
 func TestAssignIDSignatureAndEncryption(t *testing.T) {
-	for _, ns := range []string{nsDSig, nsDSig11, nsXEnc, nsXEnc11} {
-		doc := parseDoc(t, `<r xmlns:x="`+ns+`" xmlns:wsu="`+NSWSU+`">`+
+	for _, ns := range []string{xmlsec.NSDSig, xmlsec.NSDSig11, xmlsec.NSXEnc, xmlsec.NSXEnc11} {
+		doc := parseDoc(t, `<r xmlns:x="`+ns+`" xmlns:wsu="`+xmlsec.NSWSU+`">`+
 			`<x:New/><x:HasId Id="given"/><x:HasWSUId wsu:Id="w"/></r>`)
 		kids := xmltree.DocumentElement(doc).ChildElements()
 		id, err := AssignID(doc, kids[0])
-		if err != nil || kids[0].AttrValue("Id") != id || kids[0].Attr(NSWSU, "Id") != nil {
+		if err != nil || kids[0].AttrValue("Id") != id || kids[0].Attr(xmlsec.NSWSU, "Id") != nil {
 			t.Fatalf("%s: %q, %v, attrs %v", ns, id, err, kids[0].Attrs)
 		}
 		if again, _ := AssignID(doc, kids[0]); again != id {
@@ -96,7 +96,7 @@ func TestAssignIDSignatureAndEncryption(t *testing.T) {
 		if got, _ := AssignID(doc, kids[2]); got == "w" || kids[2].AttrValue("Id") != got {
 			t.Errorf("%s: wsu:Id reused: %q", ns, got)
 		}
-		if _, err := FindByIDAttributes(doc, id, xdm.QName{Local: "Id"}); err != nil {
+		if _, err := FindByID(doc, id, xdm.QName{Local: "Id"}); err != nil {
 			t.Errorf("%s: dsig.IDAttrDSig does not resolve it: %v", ns, err)
 		}
 	}
@@ -113,7 +113,7 @@ func TestNilInputs(t *testing.T) {
 	_, checks["ParseBinarySecurityToken(nil)"] = ParseBinarySecurityToken(nil)
 	_, checks["ResolveSecurityTokenReference(doc, nil)"] = ResolveSecurityTokenReference(doc, nil)
 	_, checks["ResolveSecurityTokenReference(nil, nil)"] = ResolveSecurityTokenReference(nil, nil)
-	_, checks["NewHeader(nil)"] = NewHeader(nil, NSSOAP11, "", false)
+	_, checks["NewHeader(nil)"] = NewHeader(nil, xmlsec.NSSOAP11, "", false)
 	for name, err := range checks {
 		if err == nil {
 			t.Errorf("%s: accepted", name)

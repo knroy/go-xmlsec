@@ -211,10 +211,10 @@ func TestEncryptionAlgorithmSubstitution(t *testing.T) {
 					t.Fatal(err)
 				}
 				ed := xmltree.DocumentElement(doc.Root).ChildElements()[0]
-				if _, err := xenc.DecryptData(ed, ek.SessionKey, []string{xmlsec.EncAES128GCM}); err == nil {
+				if _, err := xenc.DecryptData(ed, ek.SessionKey, xenc.DecryptOptions{AllowedDataAlgorithms: []string{xmlsec.EncAES128GCM}}); err == nil {
 					t.Fatal("decrypted")
 				}
-				if _, err := xenc.DecryptData(ed, ek.SessionKey, nil); err == nil {
+				if _, err := xenc.DecryptData(ed, ek.SessionKey, xenc.DecryptOptions{}); err == nil {
 					t.Fatal("decrypted under the default set")
 				}
 				return
@@ -224,11 +224,10 @@ func TestEncryptionAlgorithmSubstitution(t *testing.T) {
 				t.Fatal(err)
 			}
 			el := xmltree.DocumentElement(doc.Root)
-			if _, err := xenc.DecryptEncryptedKey(el, kp.Signer.(crypto.Decrypter),
-				[]string{xmlsec.KeyTransportRSAOAEP}, []string{xmlsec.MGF1SHA256}, []string{xmlsec.DigestSHA256}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
+			if _, err := xenc.DecryptEncryptedKey(el, kp.Signer.(crypto.Decrypter), xenc.DecryptOptions{AllowedKeyTransportAlgorithms: []string{xmlsec.KeyTransportRSAOAEP}, AllowedMGFAlgorithms: []string{xmlsec.MGF1SHA256}, AllowedDigestAlgorithms: []string{xmlsec.DigestSHA256}}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
 				t.Fatalf("got %v", err)
 			}
-			if _, err := xenc.DecryptEncryptedKey(el, kp.Signer.(crypto.Decrypter), nil, nil, nil); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
+			if _, err := xenc.DecryptEncryptedKey(el, kp.Signer.(crypto.Decrypter), xenc.DecryptOptions{}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
 				t.Fatalf("default set: got %v", err)
 			}
 		})

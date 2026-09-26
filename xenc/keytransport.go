@@ -10,6 +10,7 @@ import (
 
 	"github.com/knroy/go-xml/xdm"
 	"github.com/knroy/go-xmlsec"
+	"github.com/knroy/go-xmlsec/internal/hashes"
 	"github.com/knroy/go-xmlsec/internal/xmltree"
 )
 
@@ -18,9 +19,9 @@ type EncryptedKey struct {
 	// Element is the xenc:EncryptedKey to place in the security header.
 	Element *xdm.Node
 
-	// SessionKey is the unwrapped symmetric key, retained so the caller can
-	// encrypt several EncryptedData or attachment bodies under one
-	// EncryptedKey.
+	// SessionKey is the symmetric key the EncryptedKey wraps. Pass it to
+	// every Encrypt call whose data this EncryptedKey is to cover: several
+	// EncryptedData and attachment bodies can share one EncryptedKey.
 	//
 	// Callers should zero this when done.
 	SessionKey []byte
@@ -28,11 +29,11 @@ type EncryptedKey struct {
 
 // oaepOptions validates the RSA-OAEP parameters of an encryption.
 func oaepOptions(mgf, digest string, label []byte) (*rsa.OAEPOptions, error) {
-	mh, ok := xmlsec.MGFHash(mgf)
+	mh, ok := hashes.MGF(mgf)
 	if !ok {
 		return nil, unsupported("MGF %q", mgf)
 	}
-	dh, ok := xmlsec.DigestHash(digest)
+	dh, ok := hashes.Digest(digest)
 	if !ok {
 		return nil, unsupported("OAEP digest %q", digest)
 	}
@@ -120,8 +121,8 @@ func rsaOAEPWrap(m *xdm.Node, key []byte, opts EncryptOptions) ([]byte, error) {
 	if len(opts.OAEPParams) > 0 {
 		xmltree.Text(element(m, "OAEPparams"), base64.StdEncoding.EncodeToString(opts.OAEPParams))
 	}
-	xmltree.SetAttr(nsElement(m, "ds", NSDSig, "DigestMethod"), "", "", "Algorithm", opts.DigestAlgorithm)
-	xmltree.SetAttr(nsElement(m, "xenc11", NSXEnc11, "MGF"), "", "", "Algorithm", opts.MGFAlgorithm)
+	xmltree.SetAttr(nsElement(m, "ds", xmlsec.NSDSig, "DigestMethod"), "", "", "Algorithm", opts.DigestAlgorithm)
+	xmltree.SetAttr(nsElement(m, "xenc11", xmlsec.NSXEnc11, "MGF"), "", "", "Algorithm", opts.MGFAlgorithm)
 	return wrapped, nil
 }
 
@@ -129,21 +130,19 @@ func rsaOAEPWrap(m *xdm.Node, key []byte, opts EncryptOptions) ([]byte, error) {
 // transported by RSA-OAEP. For AES key wrap use UnwrapEncryptedKey, for key
 // agreement DecryptAgreedKey, and for RSA v1.5 DecryptEncryptedKeyPKCS1v15.
 //
-// The allowed lists restrict the accepted algorithms; an empty list means
-// the default set (see the package documentation). The key transport
-// algorithm is checked first. An absent DigestMethod or MGF means SHA-1 by
-// specification default (section 5.5.2), and is accepted only when
-// allowedDigest names xmlsec.DigestSHA1 or allowedMGF names xmlsec.MGF1SHA1,
-// exactly as an explicit SHA-1 is. The legacy
-// xmlsec.KeyTransportRSAOAEPMGF1P, decrypted only when allowedKeyTransport
-// names it, fixes MGF1 with SHA-1, so it also needs xmlsec.MGF1SHA1 in
-// allowedMGF, and must not carry an xenc11:MGF. A KeySize under the
+// opts' key transport, MGF and digest lists restrict the accepted
+// algorithms, the key transport algorithm first. An absent DigestMethod or
+// MGF means SHA-1 by specification default (section 5.5.2), and is accepted
+// only when AllowedDigestAlgorithms names xmlsec.DigestSHA1 or
+// AllowedMGFAlgorithms names xmlsec.MGF1SHA1, exactly as an explicit SHA-1
+// is. The legacy xmlsec.KeyTransportRSAOAEPMGF1P, decrypted only when
+// AllowedKeyTransportAlgorithms names it, fixes MGF1 with SHA-1, so it also
+// needs xmlsec.MGF1SHA1 in AllowedMGFAlgorithms, and must not carry an
+// xenc11:MGF. A KeySize under the
 // EncryptionMethod must equal the bit length of dec's RSA modulus, the key
 // size of RSA-OAEP key transport (section 3.2).
-func DecryptEncryptedKey(el *xdm.Node, dec crypto.Decrypter,
-	allowedKeyTransport, allowedMGF, allowedDigest []string) ([]byte, error) {
-
-	if el == nil || !el.IsElement(NSXEnc, "EncryptedKey") {
+func DecryptEncryptedKey(el *xdm.Node, dec crypto.Decrypter, opts DecryptOptions) ([]byte, error) {
+	if el == nil || !el.IsElement(xmlsec.NSXEnc, "EncryptedKey") {
 		return nil, malformed("not an xenc:EncryptedKey")
 	}
 	if dec == nil {
@@ -153,13 +152,13 @@ func DecryptEncryptedKey(el *xdm.Node, dec crypto.Decrypter,
 	if err != nil {
 		return nil, err
 	}
-	if err := allowed("key transport", kt, allowedKeyTransport, defaultKeyTransport); err != nil {
+	if err := allowed("key transport", kt, opts.AllowedKeyTransportAlgorithms, defaultKeyTransport); err != nil {
 		return nil, err
 	}
-	permitted := []xdm.QName{{URI: NSDSig, Local: "DigestMethod"}, {URI: NSXEnc, Local: "OAEPparams"}}
+	permitted := []xdm.QName{{URI: xmlsec.NSDSig, Local: "DigestMethod"}, {URI: xmlsec.NSXEnc, Local: "OAEPparams"}}
 	switch kt {
 	case xmlsec.KeyTransportRSAOAEP:
-		permitted = append(permitted, xdm.QName{URI: NSXEnc11, Local: "MGF"})
+		permitted = append(permitted, xdm.QName{URI: xmlsec.NSXEnc11, Local: "MGF"})
 	case xmlsec.KeyTransportRSAOAEPMGF1P:
 		// Section 5.5.2: xenc11:MGF MUST NOT be provided.
 	case xmlsec.KeyTransportRSA15:
@@ -179,7 +178,7 @@ func DecryptEncryptedKey(el *xdm.Node, dec crypto.Decrypter,
 	if k := p["MGF"]; k != nil {
 		mgf, mgfKind = k.AttrValue("Algorithm"), "MGF"
 	}
-	if err := allowed(mgfKind, mgf, allowedMGF, defaultMGF); err != nil {
+	if err := allowed(mgfKind, mgf, opts.AllowedMGFAlgorithms, defaultMGF); err != nil {
 		return nil, err
 	}
 	mh, ok := mgfHash(mgf)
@@ -190,7 +189,7 @@ func DecryptEncryptedKey(el *xdm.Node, dec crypto.Decrypter,
 	if k := p["DigestMethod"]; k != nil {
 		dm, dmKind = k.AttrValue("Algorithm"), "OAEP digest"
 	}
-	dh, err := digest(dmKind, dm, allowedDigest)
+	dh, err := digest(dmKind, dm, opts.AllowedDigestAlgorithms)
 	if err != nil {
 		return nil, err
 	}
@@ -220,11 +219,11 @@ func (ek *EncryptedKey) SetKeyInfo(el *xdm.Node) error {
 		return errors.New("xenc: SetKeyInfo needs a detached element")
 	}
 	for _, k := range ek.Element.ChildElements() {
-		if k.IsElement(NSDSig, "KeyInfo") {
+		if k.IsElement(xmlsec.NSDSig, "KeyInfo") {
 			return errors.New("xenc: EncryptedKey already has a ds:KeyInfo")
 		}
 	}
-	ki := nsElement(ek.Element, "ds", NSDSig, "KeyInfo")
+	ki := nsElement(ek.Element, "ds", xmlsec.NSDSig, "KeyInfo")
 	ki.AppendChild(el)
 	// Schema order: EncryptionMethod, KeyInfo, CipherData, ReferenceList,
 	// CarriedKeyName.
@@ -245,9 +244,9 @@ func (ek *EncryptedKey) AddDataReference(id string) error {
 	var list, name *xdm.Node
 	for _, k := range ek.Element.ChildElements() {
 		switch {
-		case k.IsElement(NSXEnc, "ReferenceList"):
+		case k.IsElement(xmlsec.NSXEnc, "ReferenceList"):
 			list = k
-		case k.IsElement(NSXEnc, "CarriedKeyName"):
+		case k.IsElement(xmlsec.NSXEnc, "CarriedKeyName"):
 			name = k
 		}
 	}

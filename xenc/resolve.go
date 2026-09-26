@@ -33,12 +33,12 @@ var idAttr = xdm.QName{Local: "Id"}
 // It is opt-in: DecryptData never looks for a key. Decrypt the result with
 // DecryptEncryptedKey, UnwrapEncryptedKey or DecryptAgreedKey.
 func FindEncryptedKey(ed *xdm.Node) (*xdm.Node, error) {
-	if ed == nil || !ed.IsElement(NSXEnc, "EncryptedData") {
+	if ed == nil || !ed.IsElement(xmlsec.NSXEnc, "EncryptedData") {
 		return nil, malformed("not an xenc:EncryptedData")
 	}
 	var ki *xdm.Node
 	for _, k := range ed.ChildElements() {
-		if k.IsElement(NSDSig, "KeyInfo") {
+		if k.IsElement(xmlsec.NSDSig, "KeyInfo") {
 			ki = k
 		}
 	}
@@ -51,9 +51,9 @@ func FindEncryptedKey(ed *xdm.Node) (*xdm.Node, error) {
 	}
 	k := kids[0]
 	switch {
-	case k.IsElement(NSXEnc, "EncryptedKey"):
+	case k.IsElement(xmlsec.NSXEnc, "EncryptedKey"):
 		return k, nil
-	case k.IsElement(NSDSig, "RetrievalMethod"):
+	case k.IsElement(xmlsec.NSDSig, "RetrievalMethod"):
 		uri := k.AttrValue("URI")
 		if k.AttrValue("Type") != TypeEncryptedKey || !strings.HasPrefix(uri, "#") || len(k.ChildElements()) > 0 {
 			return nil, fmt.Errorf("%w: only a same-document ds:RetrievalMethod of Type %s without transforms", xmlsec.ErrUnsupportedKeyInfo, TypeEncryptedKey)
@@ -62,15 +62,15 @@ func FindEncryptedKey(ed *xdm.Node) (*xdm.Node, error) {
 		if err != nil {
 			return nil, err
 		}
-		if !t.IsElement(NSXEnc, "EncryptedKey") {
+		if !t.IsElement(xmlsec.NSXEnc, "EncryptedKey") {
 			return nil, malformed("ds:RetrievalMethod %q names a %s, not an xenc:EncryptedKey", uri, t.Name.Local)
 		}
 		return t, nil
-	case k.IsElement(NSDSig, "KeyName"):
+	case k.IsElement(xmlsec.NSDSig, "KeyName"):
 		name := k.StringValue()
 		return oneKey(ed, "carrying name "+name, func(ek *xdm.Node) bool {
 			for _, c := range ek.ChildElements() {
-				if c.IsElement(NSXEnc, "CarriedKeyName") && c.StringValue() == name {
+				if c.IsElement(xmlsec.NSXEnc, "CarriedKeyName") && c.StringValue() == name {
 					return true
 				}
 			}
@@ -93,9 +93,9 @@ func byReference(ed *xdm.Node) (*xdm.Node, error) {
 	}
 	return oneKey(ed, "referencing #"+id, func(ek *xdm.Node) bool {
 		for _, c := range ek.ChildElements() {
-			if c.IsElement(NSXEnc, "ReferenceList") {
+			if c.IsElement(xmlsec.NSXEnc, "ReferenceList") {
 				for _, r := range c.ChildElements() {
-					if r.IsElement(NSXEnc, "DataReference") && r.AttrValue("URI") == "#"+id {
+					if r.IsElement(xmlsec.NSXEnc, "DataReference") && r.AttrValue("URI") == "#"+id {
 						return true
 					}
 				}
@@ -110,7 +110,7 @@ func byReference(ed *xdm.Node) (*xdm.Node, error) {
 func oneKey(n *xdm.Node, what string, match func(*xdm.Node) bool) (*xdm.Node, error) {
 	var found []*xdm.Node
 	xmltree.Walk(n.Root(), func(e *xdm.Node) {
-		if e.IsElement(NSXEnc, "EncryptedKey") && match(e) {
+		if e.IsElement(xmlsec.NSXEnc, "EncryptedKey") && match(e) {
 			found = append(found, e)
 		}
 	})

@@ -10,7 +10,6 @@ import (
 	"github.com/knroy/go-xmlsec"
 	"github.com/knroy/go-xmlsec/dsig"
 	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/wss"
 )
 
 const samlAssertion = `<saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="_a1" Version="2.0">` +
@@ -82,7 +81,7 @@ func TestSAMLAssertionByID(t *testing.T) {
 
 	// The same value as a wsu:Id elsewhere is a duplicate too.
 	withWSU := strings.Replace(signed, "<saml:Issuer>",
-		`<x xmlns:wsu="`+wss.NSWSU+`" wsu:Id="_a1"/><saml:Issuer>`, 1)
+		`<x xmlns:wsu="`+xmlsec.NSWSU+`" wsu:Id="_a1"/><saml:Issuer>`, 1)
 	if _, _, err := verifyWith(t, withWSU, dsig.IDAttrSAML); !errors.Is(err, xmlsec.ErrAmbiguousID) {
 		t.Fatalf("ID and wsu:Id: %v", err)
 	}

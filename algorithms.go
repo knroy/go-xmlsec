@@ -1,7 +1,5 @@
 package xmlsec
 
-import "crypto"
-
 // Signature algorithm URIs, for signing and verification.
 const (
 	SigRSASHA256   = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
@@ -17,10 +15,17 @@ const (
 	DigestSHA256 = "http://www.w3.org/2001/04/xmlenc#sha256"
 	DigestSHA384 = "http://www.w3.org/2001/04/xmldsig-more#sha384"
 	DigestSHA512 = "http://www.w3.org/2001/04/xmlenc#sha512"
+
+	// DigestSHA384XMLEnc is XML Encryption's own SHA-384 identifier
+	// (section 5.8.3). The xenc package accepts it on decryption as the
+	// OAEP and ConcatKDF digest, alongside DigestSHA384, which is what it
+	// emits because xmlsec1 and Santuario recognise only that one. XML
+	// Signature does not define it.
+	DigestSHA384XMLEnc = "http://www.w3.org/2001/04/xmlenc#sha384"
 )
 
 // Legacy XML Signature 1.1 algorithms (section 6.1), implemented for
-// VERIFICATION ONLY. Sign never produces them, SignatureHash and DigestHash
+// VERIFICATION ONLY. Sign never produces them, the dsig package's hash tables
 // do not return them, and no default set includes them: dsig.Verify accepts
 // one only when the caller names it in the matching VerifyOptions allow-list.
 const (
@@ -64,6 +69,10 @@ const (
 	// TransformAttachmentCompleteSignature.
 	TransformAttachmentContentOnly = "http://docs.oasis-open.org/wss/oasis-wss-SwAProfile-1.1#Attachment-Content-Only"
 	TransformAttachmentComplete    = "http://docs.oasis-open.org/wss/oasis-wss-SwAProfile-1.1#Attachment-Complete"
+
+	// TransformAttachmentCiphertext is the xenc:CipherReference transform
+	// the SwA profile requires on every encrypted attachment, section 5.5.2.
+	TransformAttachmentCiphertext = "http://docs.oasis-open.org/wss/oasis-wss-SwAProfile-1.1#Attachment-Ciphertext-Transform"
 )
 
 // Transform URIs that are recognised only in order to be refused with
@@ -119,46 +128,6 @@ const (
 // BSTEncodingBase64 is the only EncodingType this library emits or accepts.
 const BSTEncodingBase64 = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-soap-message-security-1.0#Base64Binary"
 
-var signatureHashes = map[string]crypto.Hash{
-	SigRSASHA256:   crypto.SHA256,
-	SigRSASHA384:   crypto.SHA384,
-	SigRSASHA512:   crypto.SHA512,
-	SigECDSASHA256: crypto.SHA256,
-	SigECDSASHA384: crypto.SHA384,
-	SigECDSASHA512: crypto.SHA512,
-}
-
-var digestHashes = map[string]crypto.Hash{
-	DigestSHA256: crypto.SHA256,
-	DigestSHA384: crypto.SHA384,
-	DigestSHA512: crypto.SHA512,
-}
-
-var mgfHashes = map[string]crypto.Hash{
-	MGF1SHA256: crypto.SHA256,
-	MGF1SHA384: crypto.SHA384,
-	MGF1SHA512: crypto.SHA512,
-}
-
-// SignatureHash returns the hash a Sig* algorithm signs over, and false for
-// any URI that is not a Sig* constant.
-func SignatureHash(uri string) (crypto.Hash, bool) {
-	h, ok := signatureHashes[uri]
-	return h, ok
-}
-
-// DigestHash returns the hash for a Digest* URI, and false for any other.
-func DigestHash(uri string) (crypto.Hash, bool) {
-	h, ok := digestHashes[uri]
-	return h, ok
-}
-
-// MGFHash returns the hash for an MGF1* URI, and false for any other.
-func MGFHash(uri string) (crypto.Hash, bool) {
-	h, ok := mgfHashes[uri]
-	return h, ok
-}
-
 // ---- BEGIN legacy XML Encryption algorithms (decryption only) ----
 //
 // XML Encryption 1.1 section 5.1.1 marks these REQUIRED (rsa-1_5 is
@@ -170,9 +139,9 @@ func MGFHash(uri string) (crypto.Hash, bool) {
 // Name them only for a peer that cannot send AES-GCM and XML Encryption 1.1
 // RSA-OAEP with SHA-2.
 //
-// The SHA-1 digest and MGF are not added to DigestHash or MGFHash: xenc
-// resolves them itself, so neither becomes usable for signing, verifying or
-// encrypting through those tables.
+// The SHA-1 digest and MGF are not in the tables the dsig and xenc packages
+// resolve secure algorithms through: xenc resolves them itself, so neither
+// becomes usable for signing, verifying or encrypting.
 const (
 	// Block encryption, sections 5.2.2 and 5.2.3: CBC with the IV prefixed
 	// and the section 5.2.1 padding. Unauthenticated: see section 6.1.1.

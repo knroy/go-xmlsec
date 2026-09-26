@@ -39,7 +39,7 @@ func malformed(format string, args ...any) error {
 // reference is parsed.
 func parseSignature(sig *xdm.Node, maxRefs int) (*parsedSignature, error) {
 	kids := sig.ChildElements()
-	if len(kids) < 2 || !kids[0].IsElement(NSDSig, "SignedInfo") || !kids[1].IsElement(NSDSig, "SignatureValue") {
+	if len(kids) < 2 || !kids[0].IsElement(xmlsec.NSDSig, "SignedInfo") || !kids[1].IsElement(xmlsec.NSDSig, "SignatureValue") {
 		return nil, malformed("ds:Signature must begin with ds:SignedInfo, ds:SignatureValue")
 	}
 	p := &parsedSignature{signedInfo: kids[0]}
@@ -49,16 +49,16 @@ func parseSignature(sig *xdm.Node, maxRefs int) (*parsedSignature, error) {
 	}
 	for i, k := range kids[2:] {
 		switch {
-		case i == 0 && k.IsElement(NSDSig, "KeyInfo"):
+		case i == 0 && k.IsElement(xmlsec.NSDSig, "KeyInfo"):
 			p.keyInfo = k
-		case k.IsElement(NSDSig, "Object"):
+		case k.IsElement(xmlsec.NSDSig, "Object"):
 		default:
 			return nil, malformed("unexpected %s in ds:Signature", k.Name.Local)
 		}
 	}
 
 	si := p.signedInfo.ChildElements()
-	if len(si) < 3 || !si[0].IsElement(NSDSig, "CanonicalizationMethod") || !si[1].IsElement(NSDSig, "SignatureMethod") {
+	if len(si) < 3 || !si[0].IsElement(xmlsec.NSDSig, "CanonicalizationMethod") || !si[1].IsElement(xmlsec.NSDSig, "SignatureMethod") {
 		return nil, malformed("ds:SignedInfo must hold CanonicalizationMethod, SignatureMethod, Reference+")
 	}
 	cm, err := parseTransform(si[0])
@@ -88,7 +88,7 @@ func parseSignature(sig *xdm.Node, maxRefs int) (*parsedSignature, error) {
 
 func parseReference(r *xdm.Node) (parsedReference, error) {
 	ref := parsedReference{el: r, typ: r.AttrValue("Type")}
-	if !r.IsElement(NSDSig, "Reference") {
+	if !r.IsElement(xmlsec.NSDSig, "Reference") {
 		return ref, malformed("unexpected %s in ds:SignedInfo", r.Name.Local)
 	}
 	if uri := r.Attr("", "URI"); uri != nil {
@@ -98,13 +98,13 @@ func parseReference(r *xdm.Node) (parsedReference, error) {
 	}
 
 	kids := r.ChildElements()
-	if len(kids) > 0 && kids[0].IsElement(NSDSig, "Transforms") {
+	if len(kids) > 0 && kids[0].IsElement(xmlsec.NSDSig, "Transforms") {
 		ts := kids[0].ChildElements()
 		if len(ts) > MaxTransformsPerReference {
 			return ref, fmt.Errorf("%w: %d transforms", xmlsec.ErrLimitExceeded, len(ts))
 		}
 		for _, t := range ts {
-			if !t.IsElement(NSDSig, "Transform") {
+			if !t.IsElement(xmlsec.NSDSig, "Transform") {
 				return ref, malformed("unexpected %s in ds:Transforms", t.Name.Local)
 			}
 			spec, err := parseTransform(t)
@@ -115,7 +115,7 @@ func parseReference(r *xdm.Node) (parsedReference, error) {
 		}
 		kids = kids[1:]
 	}
-	if len(kids) != 2 || !kids[0].IsElement(NSDSig, "DigestMethod") || !kids[1].IsElement(NSDSig, "DigestValue") {
+	if len(kids) != 2 || !kids[0].IsElement(xmlsec.NSDSig, "DigestMethod") || !kids[1].IsElement(xmlsec.NSDSig, "DigestValue") {
 		return ref, malformed("ds:Reference must end with DigestMethod, DigestValue")
 	}
 	ref.digestAlg = kids[0].AttrValue("Algorithm")
@@ -132,7 +132,7 @@ func parseReference(r *xdm.Node) (parsedReference, error) {
 func parseTransform(t *xdm.Node) (TransformSpec, error) {
 	spec := TransformSpec{Algorithm: t.AttrValue("Algorithm")}
 	for _, k := range t.ChildElements() {
-		if !k.IsElement(NSExcC14N, "InclusiveNamespaces") || !c14n.Algorithm(spec.Algorithm).Exclusive() ||
+		if !k.IsElement(xmlsec.NSExcC14N, "InclusiveNamespaces") || !c14n.Algorithm(spec.Algorithm).Exclusive() ||
 			spec.InclusiveNamespacePrefixes != nil {
 			// Unknown children are refused rather than ignored: an XPath or
 			// XSLT transform carries its program as a child.

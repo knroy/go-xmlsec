@@ -12,7 +12,6 @@ import (
 	"github.com/knroy/go-xmlsec"
 	"github.com/knroy/go-xmlsec/dsig"
 	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/wss"
 )
 
 // Transform chains that end in octets: base64 over an attachment's SwA
@@ -138,7 +137,7 @@ func TestSwASignatureTransforms(t *testing.T) {
 // in octets, so it does not rely on implicit canonicalization.
 func TestBase64OfNodeSet(t *testing.T) {
 	key := newKey(t, rsaKey)
-	doc := parse(t, []byte(`<r xmlns:wsu="`+wss.NSWSU+`"><d wsu:Id="d">aGVs<!-- c -->bG8<i>h</i></d></r>`))
+	doc := parse(t, []byte(`<r xmlns:wsu="`+xmlsec.NSWSU+`"><d wsu:Id="d">aGVs<!-- c -->bG8<i>h</i></d></r>`))
 	sig, err := dsig.Sign(doc, key, dsig.SignOptions{
 		SignatureAlgorithm:        xmlsec.SigRSASHA256,
 		CanonicalizationAlgorithm: string(c14n.Exclusive10),
@@ -167,7 +166,7 @@ func TestBase64OfNodeSet(t *testing.T) {
 // a #WithComments canonicalization covers them; "" and "#id" do not.
 func TestXPointerReferences(t *testing.T) {
 	key := newKey(t, rsaKey)
-	const src = `<r xmlns:wsu="` + wss.NSWSU + `"><!-- top --><d wsu:Id="d" ID="s">x<!-- inner --></d></r>`
+	const src = `<r xmlns:wsu="` + xmlsec.NSWSU + `"><!-- top --><d wsu:Id="d" ID="s">x<!-- inner --></d></r>`
 	incWC := string(c14n.Inclusive10WithComments)
 
 	signIn := func(t *testing.T, uri, alg string, ids ...xdm.QName) *xdm.Node {
@@ -232,7 +231,7 @@ func TestXPointerReferences(t *testing.T) {
 
 	// Duplicate IDs are refused through an XPointer as through "#id".
 	doc := signIn(t, "#xpointer(id('d'))", incWC)
-	if _, err := verify(edit(t, doc, "<!-- top -->", `<e xmlns:wsu="`+wss.NSWSU+`" wsu:Id="d"/>`)); !errors.Is(err, xmlsec.ErrAmbiguousID) {
+	if _, err := verify(edit(t, doc, "<!-- top -->", `<e xmlns:wsu="`+xmlsec.NSWSU+`" wsu:Id="d"/>`)); !errors.Is(err, xmlsec.ErrAmbiguousID) {
 		t.Fatalf("duplicate wsu:Id: %v", err)
 	}
 	if _, err := verify(edit(t, doc, "<!-- top -->", `<e ID="d"/>`), dsig.IDAttrSAML); !errors.Is(err, xmlsec.ErrAmbiguousID) {

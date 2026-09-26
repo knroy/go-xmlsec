@@ -13,6 +13,7 @@ import (
 
 	"github.com/knroy/go-xml/xdm"
 	"github.com/knroy/go-xmlsec"
+	"github.com/knroy/go-xmlsec/internal/hashes"
 	"github.com/knroy/go-xmlsec/internal/xmltree"
 )
 
@@ -78,7 +79,7 @@ func agree(ek *xdm.Node, size int, opts EncryptOptions) ([]byte, error) {
 	if err != nil {
 		return nil, unsupported("ECDH-ES on %s: %v", pub.Curve.Params().Name, err)
 	}
-	h, ok := xmlsec.DigestHash(opts.DigestAlgorithm)
+	h, ok := hashes.Digest(opts.DigestAlgorithm)
 	if !ok {
 		return nil, unsupported("ConcatKDF digest %q", opts.DigestAlgorithm)
 	}
@@ -93,23 +94,23 @@ func agree(ek *xdm.Node, size int, opts EncryptOptions) ([]byte, error) {
 	algID := "00" + hex.EncodeToString([]byte(opts.KeyTransportAlgorithm))
 	kek := concatKDF(h, z, []byte(opts.KeyTransportAlgorithm), size)
 
-	ki := nsElement(ek, "ds", NSDSig, "KeyInfo")
+	ki := nsElement(ek, "ds", xmlsec.NSDSig, "KeyInfo")
 	am := element(ki, "AgreementMethod")
 	xmltree.SetAttr(am, "", "", "Algorithm", xmlsec.KeyAgreementECDHES)
-	kdm := nsElement(am, "xenc11", NSXEnc11, "KeyDerivationMethod")
+	kdm := nsElement(am, "xenc11", xmlsec.NSXEnc11, "KeyDerivationMethod")
 	xmltree.SetAttr(kdm, "", "", "Algorithm", xmlsec.KeyDerivationConcatKDF)
-	params := xmltree.Element(kdm, "xenc11", NSXEnc11, "ConcatKDFParams")
+	params := xmltree.Element(kdm, "xenc11", xmlsec.NSXEnc11, "ConcatKDFParams")
 	xmltree.SetAttr(params, "", "", "AlgorithmID", algID)
 	xmltree.SetAttr(params, "", "", "PartyUInfo", "")
 	xmltree.SetAttr(params, "", "", "PartyVInfo", "")
-	xmltree.SetAttr(xmltree.Element(params, "ds", NSDSig, "DigestMethod"), "", "", "Algorithm", opts.DigestAlgorithm)
+	xmltree.SetAttr(xmltree.Element(params, "ds", xmlsec.NSDSig, "DigestMethod"), "", "", "Algorithm", opts.DigestAlgorithm)
 
-	kv := xmltree.Element(element(am, "OriginatorKeyInfo"), "ds", NSDSig, "KeyValue")
-	ec := nsElement(kv, "dsig11", nsDSig11, "ECKeyValue")
-	xmltree.SetAttr(xmltree.Element(ec, "dsig11", nsDSig11, "NamedCurve"), "", "", "URI", curveURIs[rpub.Curve()])
-	xmltree.Text(xmltree.Element(ec, "dsig11", nsDSig11, "PublicKey"), base64.StdEncoding.EncodeToString(eph.PublicKey().Bytes()))
-	x509 := xmltree.Element(element(am, "RecipientKeyInfo"), "ds", NSDSig, "X509Data")
-	xmltree.Text(xmltree.Element(x509, "ds", NSDSig, "X509Certificate"), base64.StdEncoding.EncodeToString(opts.Recipient.Raw))
+	kv := xmltree.Element(element(am, "OriginatorKeyInfo"), "ds", xmlsec.NSDSig, "KeyValue")
+	ec := nsElement(kv, "dsig11", xmlsec.NSDSig11, "ECKeyValue")
+	xmltree.SetAttr(xmltree.Element(ec, "dsig11", xmlsec.NSDSig11, "NamedCurve"), "", "", "URI", curveURIs[rpub.Curve()])
+	xmltree.Text(xmltree.Element(ec, "dsig11", xmlsec.NSDSig11, "PublicKey"), base64.StdEncoding.EncodeToString(eph.PublicKey().Bytes()))
+	x509 := xmltree.Element(element(am, "RecipientKeyInfo"), "ds", xmlsec.NSDSig, "X509Data")
+	xmltree.Text(xmltree.Element(x509, "ds", xmlsec.NSDSig, "X509Certificate"), base64.StdEncoding.EncodeToString(opts.Recipient.Raw))
 	return kek, nil
 }
 
@@ -131,8 +132,8 @@ func originatorKey(oki *xdm.Node) (*ecdh.PublicKey, error) {
 	var kv *xdm.Node
 	for _, k := range oki.ChildElements() {
 		switch {
-		case k.IsElement(NSDSig, "KeyName"):
-		case k.IsElement(NSDSig, "KeyValue") && kv == nil:
+		case k.IsElement(xmlsec.NSDSig, "KeyName"):
+		case k.IsElement(xmlsec.NSDSig, "KeyValue") && kv == nil:
 			kv = k
 		default:
 			return nil, malformed("OriginatorKeyInfo must hold one ds:KeyValue, and at most ds:KeyName beside it")
@@ -141,12 +142,12 @@ func originatorKey(oki *xdm.Node) (*ecdh.PublicKey, error) {
 	if kv == nil {
 		return nil, malformed("OriginatorKeyInfo without ds:KeyValue")
 	}
-	ec, err := only(kv, nsDSig11, "ECKeyValue")
+	ec, err := only(kv, xmlsec.NSDSig11, "ECKeyValue")
 	if err != nil {
 		return nil, err
 	}
 	kids := ec.ChildElements()
-	if len(kids) != 2 || !kids[0].IsElement(nsDSig11, "NamedCurve") || !kids[1].IsElement(nsDSig11, "PublicKey") {
+	if len(kids) != 2 || !kids[0].IsElement(xmlsec.NSDSig11, "NamedCurve") || !kids[1].IsElement(xmlsec.NSDSig11, "PublicKey") {
 		return nil, malformed("dsig11:ECKeyValue must hold dsig11:NamedCurve, then dsig11:PublicKey")
 	}
 	uri := kids[0].AttrValue("URI")
@@ -175,13 +176,11 @@ func originatorKey(oki *xdm.Node) (*ecdh.PublicKey, error) {
 // ds:KeyValue/dsig11:ECKeyValue on priv's curve. RecipientKeyInfo is
 // ignored: priv is the caller's choice. A KA-Nonce is refused.
 //
-// The allowed lists restrict the key wrap, key agreement and ConcatKDF
-// digest algorithms; an empty list means the default set. Callers with an
+// opts' key wrap, key agreement and digest lists restrict the key wrap,
+// key agreement and ConcatKDF digest algorithms. Callers with an
 // *ecdsa.PrivateKey pass its ECDH().
-func DecryptAgreedKey(el *xdm.Node, priv *ecdh.PrivateKey,
-	allowedKeyWrap, allowedAgreement, allowedDigest []string) ([]byte, error) {
-
-	alg, err := wrapMethod(el, allowedKeyWrap)
+func DecryptAgreedKey(el *xdm.Node, priv *ecdh.PrivateKey, opts DecryptOptions) ([]byte, error) {
+	alg, err := wrapMethod(el, opts.AllowedKeyWrapAlgorithms)
 	if err != nil {
 		return nil, err
 	}
@@ -189,15 +188,15 @@ func DecryptAgreedKey(el *xdm.Node, priv *ecdh.PrivateKey,
 		return nil, errors.New("xenc: no private key")
 	}
 	kids := el.ChildElements()
-	if len(kids) < 2 || !kids[1].IsElement(NSDSig, "KeyInfo") {
+	if len(kids) < 2 || !kids[1].IsElement(xmlsec.NSDSig, "KeyInfo") {
 		return nil, fmt.Errorf("%w: no ds:KeyInfo holding an xenc:AgreementMethod", xmlsec.ErrUnsupportedKeyInfo)
 	}
-	am, err := only(kids[1], NSXEnc, "AgreementMethod")
+	am, err := only(kids[1], xmlsec.NSXEnc, "AgreementMethod")
 	if err != nil {
 		return nil, err
 	}
 	agreement := am.AttrValue("Algorithm")
-	if err := allowed("key agreement", agreement, allowedAgreement, defaultAgreement); err != nil {
+	if err := allowed("key agreement", agreement, opts.AllowedKeyAgreementAlgorithms, defaultAgreement); err != nil {
 		return nil, err
 	}
 	if agreement != xmlsec.KeyAgreementECDHES {
@@ -206,11 +205,11 @@ func DecryptAgreedKey(el *xdm.Node, priv *ecdh.PrivateKey,
 	var kdm, oki *xdm.Node
 	for _, k := range am.ChildElements() {
 		switch {
-		case k.IsElement(NSXEnc11, "KeyDerivationMethod") && kdm == nil:
+		case k.IsElement(xmlsec.NSXEnc11, "KeyDerivationMethod") && kdm == nil:
 			kdm = k
-		case k.IsElement(NSXEnc, "OriginatorKeyInfo") && oki == nil:
+		case k.IsElement(xmlsec.NSXEnc, "OriginatorKeyInfo") && oki == nil:
 			oki = k
-		case k.IsElement(NSXEnc, "RecipientKeyInfo"):
+		case k.IsElement(xmlsec.NSXEnc, "RecipientKeyInfo"):
 		default:
 			return nil, malformed("unexpected %s in xenc:AgreementMethod", k.Name.Local)
 		}
@@ -221,15 +220,15 @@ func DecryptAgreedKey(el *xdm.Node, priv *ecdh.PrivateKey,
 	if kdf := kdm.AttrValue("Algorithm"); kdf != xmlsec.KeyDerivationConcatKDF {
 		return nil, unsupported("key derivation %q", kdf)
 	}
-	params, err := only(kdm, NSXEnc11, "ConcatKDFParams")
+	params, err := only(kdm, xmlsec.NSXEnc11, "ConcatKDFParams")
 	if err != nil {
 		return nil, err
 	}
-	dm, err := only(params, NSDSig, "DigestMethod")
+	dm, err := only(params, xmlsec.NSDSig, "DigestMethod")
 	if err != nil {
 		return nil, err
 	}
-	h, err := digest("ConcatKDF digest", dm.AttrValue("Algorithm"), allowedDigest)
+	h, err := digest("ConcatKDF digest", dm.AttrValue("Algorithm"), opts.AllowedDigestAlgorithms)
 	if err != nil {
 		return nil, err
 	}

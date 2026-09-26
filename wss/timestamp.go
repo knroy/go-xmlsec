@@ -26,7 +26,7 @@ func (h *Header) AddTimestamp(now time.Time, ttl time.Duration) (string, error) 
 		return "", fmt.Errorf("wss: negative timestamp ttl %v", ttl)
 	}
 	for _, e := range h.el.ChildElements() {
-		if e.IsElement(NSWSU, "Timestamp") {
+		if e.IsElement(xmlsec.NSWSU, "Timestamp") {
 			return "", errors.New("wss: the header already has a wsu:Timestamp")
 		}
 	}
@@ -35,13 +35,13 @@ func (h *Header) AddTimestamp(now time.Time, ttl time.Duration) (string, error) 
 		return "", err
 	}
 	// Built detached and attached last, as in AddBinarySecurityToken.
-	ts := xmltree.Element(nil, "wsu", NSWSU, "Timestamp")
-	ts.AddNamespace("wsu", NSWSU)
-	xmltree.SetAttr(ts, "wsu", NSWSU, "Id", id)
+	ts := xmltree.Element(nil, "wsu", xmlsec.NSWSU, "Timestamp")
+	ts.AddNamespace("wsu", xmlsec.NSWSU)
+	xmltree.SetAttr(ts, "wsu", xmlsec.NSWSU, "Id", id)
 	now = now.UTC()
-	xmltree.Text(xmltree.Element(ts, "wsu", NSWSU, "Created"), now.Format(timestampLayout))
+	xmltree.Text(xmltree.Element(ts, "wsu", xmlsec.NSWSU, "Created"), now.Format(timestampLayout))
 	if ttl != 0 {
-		xmltree.Text(xmltree.Element(ts, "wsu", NSWSU, "Expires"), now.Add(ttl).Format(timestampLayout))
+		xmltree.Text(xmltree.Element(ts, "wsu", xmlsec.NSWSU, "Expires"), now.Add(ttl).Format(timestampLayout))
 	}
 	h.insert(0, ts)
 	return id, nil
@@ -66,12 +66,12 @@ var dateTimeUTC = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{
 // It checks structure only. Timestamp.Check decides freshness.
 func ParseTimestamp(el *xdm.Node) (Timestamp, error) {
 	var ts Timestamp
-	if el == nil || !el.IsElement(NSWSU, "Timestamp") {
+	if el == nil || !el.IsElement(xmlsec.NSWSU, "Timestamp") {
 		return ts, fmt.Errorf("%w: not a wsu:Timestamp", xmlsec.ErrMalformed)
 	}
 	kids := el.ChildElements()
-	if len(kids) == 0 || len(kids) > 2 || !kids[0].IsElement(NSWSU, "Created") ||
-		len(kids) == 2 && !kids[1].IsElement(NSWSU, "Expires") {
+	if len(kids) == 0 || len(kids) > 2 || !kids[0].IsElement(xmlsec.NSWSU, "Created") ||
+		len(kids) == 2 && !kids[1].IsElement(xmlsec.NSWSU, "Expires") {
 		return ts, fmt.Errorf("%w: wsu:Timestamp must hold wsu:Created and at most a wsu:Expires after it", xmlsec.ErrMalformed)
 	}
 	var err error

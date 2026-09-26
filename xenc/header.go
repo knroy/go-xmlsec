@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/knroy/go-xml/xdm"
+	"github.com/knroy/go-xmlsec"
 	"github.com/knroy/go-xmlsec/internal/xmltree"
 )
 
@@ -27,17 +28,17 @@ func EncryptHeader(doc, block, security *xdm.Node, sessionKey []byte, opts Encry
 	if !isSOAP(block.Parent, "Header") {
 		return nil, errors.New("xenc: EncryptHeader needs a SOAP header block")
 	}
-	if security == nil || !security.IsElement(nsWSSE, "Security") || security == block || security.Root() != doc.Root() {
+	if security == nil || !security.IsElement(xmlsec.NSWSSE, "Security") || security == block || security.Root() != doc.Root() {
 		return nil, errors.New("xenc: EncryptHeader needs the referencing wsse:Security header, other than block")
 	}
 	return replaceElement(doc, block, sessionKey, opts, func(ed *xdm.Node) (*xdm.Node, error) {
-		eh := nsElement(nil, "wsse11", NSWSSE11, "EncryptedHeader")
+		eh := nsElement(nil, "wsse11", xmlsec.NSWSSE11, "EncryptedHeader")
 		eh.AppendChild(ed)
 		// Declare against what is in scope where eh will sit; emitWith
 		// links it there properly.
 		eh.Parent = block.Parent
 		for _, a := range security.Attrs {
-			if (a.Name.URI == nsSOAP11 || a.Name.URI == nsSOAP12) &&
+			if (a.Name.URI == xmlsec.NSSOAP11 || a.Name.URI == xmlsec.NSSOAP12) &&
 				(a.Name.Local == "mustUnderstand" || a.Name.Local == "actor" || a.Name.Local == "role" || a.Name.Local == "relay") {
 				if err := xmltree.Declare(eh, a.Name.Prefix, a.Name.URI); err != nil {
 					return nil, err

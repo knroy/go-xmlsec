@@ -19,6 +19,7 @@ import (
 
 	"github.com/knroy/go-xml/xdm"
 	"github.com/knroy/go-xmlsec"
+	"github.com/knroy/go-xmlsec/internal/hashes"
 )
 
 // legacy lists every decryption-only algorithm. No encryption path accepts
@@ -132,25 +133,25 @@ func cmsUnwrap(b cipher.Block, ct []byte) ([]byte, error) {
 }
 
 // mgfHash resolves an MGF URI that has passed the allow-list, including
-// MGF1 with SHA-1, which xmlsec.MGFHash deliberately lacks.
+// MGF1 with SHA-1, which hashes.MGF deliberately lacks.
 func mgfHash(uri string) (crypto.Hash, bool) {
 	if uri == xmlsec.MGF1SHA1 {
 		return crypto.SHA1, true
 	}
-	return xmlsec.MGFHash(uri)
+	return hashes.MGF(uri)
 }
 
 // DecryptEncryptedKeyPKCS1v15 unwraps the session key of ed, an
 // xenc:EncryptedData, from el, an xenc:EncryptedKey transported by RSA
 // PKCS#1 v1.5 (xmlsec.KeyTransportRSA15, XML Encryption 1.1 section 5.5.1).
 // It is a legacy algorithm, implemented for decryption only: it is refused
-// unless allowedKeyTransport names xmlsec.KeyTransportRSA15, which the
+// unless opts.AllowedKeyTransportAlgorithms names xmlsec.KeyTransportRSA15, which the
 // default set never includes, and calling this function rather than
 // DecryptEncryptedKey is itself the opt-in.
 //
 // It implements the section 6.1.2 countermeasure to Bleichenbacher's
 // attack. The key length comes from ed's data algorithm, which must pass
-// allowedData (empty: the default set, AES-GCM). When the decrypted block
+// opts.AllowedDataAlgorithms (empty: the default set, AES-GCM). When the decrypted block
 // is not PKCS#1 v1.5 conformant, or holds a key of another length, or dec
 // fails in any way, the result is a random key of that length and no
 // error, in constant time with an *rsa.PrivateKey. The failure then
@@ -171,8 +172,8 @@ func mgfHash(uri string) (crypto.Hash, bool) {
 //
 // A KeySize under the EncryptionMethod must equal the bit length of dec's
 // RSA modulus; the method may hold nothing else.
-func DecryptEncryptedKeyPKCS1v15(el, ed *xdm.Node, dec crypto.Decrypter, allowedKeyTransport, allowedData []string) ([]byte, error) {
-	if el == nil || !el.IsElement(NSXEnc, "EncryptedKey") {
+func DecryptEncryptedKeyPKCS1v15(el, ed *xdm.Node, dec crypto.Decrypter, opts DecryptOptions) ([]byte, error) {
+	if el == nil || !el.IsElement(xmlsec.NSXEnc, "EncryptedKey") {
 		return nil, malformed("not an xenc:EncryptedKey")
 	}
 	if dec == nil {
@@ -182,13 +183,13 @@ func DecryptEncryptedKeyPKCS1v15(el, ed *xdm.Node, dec crypto.Decrypter, allowed
 	if err != nil {
 		return nil, err
 	}
-	if err := allowed("key transport", kt, allowedKeyTransport, defaultKeyTransport); err != nil {
+	if err := allowed("key transport", kt, opts.AllowedKeyTransportAlgorithms, defaultKeyTransport); err != nil {
 		return nil, err
 	}
 	if kt != xmlsec.KeyTransportRSA15 {
 		return nil, unsupported("key transport %q: DecryptEncryptedKeyPKCS1v15 is for %s only", kt, xmlsec.KeyTransportRSA15)
 	}
-	alg, err := dataAlgorithm(ed, allowedData)
+	alg, err := dataAlgorithm(ed, opts.AllowedDataAlgorithms)
 	if err != nil {
 		return nil, err
 	}

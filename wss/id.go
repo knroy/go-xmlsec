@@ -17,38 +17,32 @@ var randReader io.Reader = rand.Reader
 
 // isDefaultID reports whether an attribute is wsu:Id or xml:id.
 func isDefaultID(n xdm.QName) bool {
-	return n.URI == NSWSU && n.Local == "Id" || n.URI == NSXML && n.Local == "id"
+	return n.URI == xmlsec.NSWSU && n.Local == "Id" || n.URI == xdm.NSXML && n.Local == "id"
 }
 
 // isAnyID reports whether an attribute is wsu:Id, xml:id, or an
 // unqualified Id or ID: every attribute this module may resolve as an ID,
-// by default or through FindByIDAttributes with the dsig and SAML names.
+// by default or through FindByID with the dsig and SAML names.
 func isAnyID(n xdm.QName) bool {
 	return isDefaultID(n) || n.URI == "" && (n.Local == "Id" || n.Local == "ID")
 }
 
-// FindByID returns the element bearing the given wsu:Id or xml:id.
+// FindByID returns the element bearing the given wsu:Id or xml:id, or one
+// of extra: attributes that also count as IDs, such as the unqualified ID
+// of a SAML assertion. extra adds to wsu:Id and xml:id and never replaces
+// them. Names match on namespace URI and local name, prefix ignored; an
+// unprefixed attribute has no namespace, so xdm.QName{Local: "ID"} is the
+// SAML attribute.
 //
 // It returns xmlsec.ErrAmbiguousID if more than one element carries the ID,
 // which is malformed input and is also an XML Signature Wrapping technique:
 // duplicating an ID so that the verifier and the application resolve it to
-// different elements. It never returns the first match. xdm.ElementByID is
-// deliberately not used: it returns the first match.
-func FindByID(doc *xdm.Node, id string) (*xdm.Node, error) {
-	return FindByIDAttributes(doc, id)
-}
-
-// FindByIDAttributes is FindByID with extra attributes that also count as
-// IDs, such as the unqualified ID of a SAML assertion. wsu:Id and xml:id
-// always count; extra adds to them and never replaces them. Names match on
-// namespace URI and local name, prefix ignored; an unprefixed attribute has
-// no namespace, so xdm.QName{Local: "ID"} is the SAML attribute.
-//
-// Every counted attribute forms one set: an id value carried by any two of
-// them, on one element or on two, is xmlsec.ErrAmbiguousID. Each attribute
-// added widens what an attacker can use to duplicate an ID, so add only
-// what the profile defines as an ID.
-func FindByIDAttributes(doc *xdm.Node, id string, extra ...xdm.QName) (*xdm.Node, error) {
+// different elements. It never returns the first match. Every counted
+// attribute forms one set: an id value carried by any two of them, on one
+// element or on two, is ambiguous. Each attribute added widens what an
+// attacker can use to duplicate an ID, so add only what the profile defines
+// as an ID.
+func FindByID(doc *xdm.Node, id string, extra ...xdm.QName) (*xdm.Node, error) {
 	if doc == nil {
 		return nil, fmt.Errorf("%w: %q: no document", xmlsec.ErrIDNotFound, id)
 	}
@@ -91,10 +85,10 @@ func AssignID(doc *xdm.Node, el *xdm.Node) (string, error) {
 	}
 	unqualified := false
 	switch el.Name.URI {
-	case nsDSig, nsDSig11, nsXEnc, nsXEnc11:
+	case xmlsec.NSDSig, xmlsec.NSDSig11, xmlsec.NSXEnc, xmlsec.NSXEnc11:
 		unqualified = true
 	}
-	a := el.Attr(NSWSU, "Id")
+	a := el.Attr(xmlsec.NSWSU, "Id")
 	if unqualified {
 		a = el.Attr("", "Id")
 	}
@@ -116,10 +110,10 @@ func AssignID(doc *xdm.Node, el *xdm.Node) (string, error) {
 }
 
 func setWSUID(el *xdm.Node, id string) error {
-	if err := xmltree.Declare(el, "wsu", NSWSU); err != nil {
+	if err := xmltree.Declare(el, "wsu", xmlsec.NSWSU); err != nil {
 		return err
 	}
-	xmltree.SetAttr(el, "wsu", NSWSU, "Id", id)
+	xmltree.SetAttr(el, "wsu", xmlsec.NSWSU, "Id", id)
 	return nil
 }
 

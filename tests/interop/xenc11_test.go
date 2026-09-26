@@ -14,7 +14,6 @@ import (
 	"github.com/knroy/go-xml/c14n"
 	"github.com/knroy/go-xml/xdm"
 	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
 	"github.com/knroy/go-xmlsec/internal/xmltree"
 	"github.com/knroy/go-xmlsec/wss"
 	"github.com/knroy/go-xmlsec/xenc"
@@ -37,9 +36,9 @@ func encryptWithEK(t *testing.T, src, local string, ek *xenc.EncryptedKey, opts 
 		t.Fatal(err)
 	}
 	edoc := parse(t, encrypted)
-	ed := find(edoc, xenc.NSXEnc, "EncryptedData")
-	ki := xmltree.Element(nil, "ds", dsig.NSDSig, "KeyInfo")
-	ki.AddNamespace("ds", dsig.NSDSig)
+	ed := find(edoc, xmlsec.NSXEnc, "EncryptedData")
+	ki := xmltree.Element(nil, "ds", xmlsec.NSDSig, "KeyInfo")
+	ki.AddNamespace("ds", xmlsec.NSDSig)
 	ki.AppendChild(ek.Element)
 	// ds:KeyInfo belongs between EncryptionMethod and CipherData.
 	ed.AppendChild(ki)
@@ -56,7 +55,7 @@ func encryptWithEK(t *testing.T, src, local string, ek *xenc.EncryptedKey, opts 
 func weDecrypt(t *testing.T, b []byte, unwrap func(ek *xdm.Node) ([]byte, error)) []byte {
 	t.Helper()
 	doc := parse(t, b)
-	ed := find(doc, xenc.NSXEnc, "EncryptedData")
+	ed := find(doc, xmlsec.NSXEnc, "EncryptedData")
 	ek, err := xenc.FindEncryptedKey(ed)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, b)
@@ -65,7 +64,7 @@ func weDecrypt(t *testing.T, b []byte, unwrap func(ek *xdm.Node) ([]byte, error)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, b)
 	}
-	plain, err := xenc.DecryptData(ed, key, []string{xmlsec.EncAES128GCM})
+	plain, err := xenc.DecryptData(ed, key, xenc.DecryptOptions{AllowedDataAlgorithms: []string{xmlsec.EncAES128GCM}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,8 +139,7 @@ func TestWeDecryptSantuarioECDHES(t *testing.T) {
 		t.Fatal(err)
 	}
 	plain := weDecrypt(t, readFile(t, out), func(ek *xdm.Node) ([]byte, error) {
-		return xenc.DecryptAgreedKey(ek, priv, []string{xmlsec.KeyWrapAES128},
-			[]string{xmlsec.KeyAgreementECDHES}, []string{xmlsec.DigestSHA256})
+		return xenc.DecryptAgreedKey(ek, priv, xenc.DecryptOptions{AllowedKeyWrapAlgorithms: []string{xmlsec.KeyWrapAES128}, AllowedKeyAgreementAlgorithms: []string{xmlsec.KeyAgreementECDHES}, AllowedDigestAlgorithms: []string{xmlsec.DigestSHA256}})
 	})
 	if !bytes.Contains(plain, []byte(">hello</p:Payload>")) {
 		t.Fatalf("plaintext %s", plain)
@@ -155,12 +153,12 @@ func TestWeDecryptSantuarioECDHES(t *testing.T) {
 func TestWeDecryptXmlsec1ECDHES(t *testing.T) {
 	recipient := newKeypair(t, ecKey(t))
 	originator := newKeypair(t, ecKey(t))
-	tmpl := `<xenc:EncryptedData xmlns:xenc="` + xenc.NSXEnc + `" Type="` + xenc.TypeElement + `">` +
+	tmpl := `<xenc:EncryptedData xmlns:xenc="` + xmlsec.NSXEnc + `" Type="` + xenc.TypeElement + `">` +
 		`<xenc:EncryptionMethod Algorithm="` + xmlsec.EncAES128GCM + `"/>` +
-		`<ds:KeyInfo xmlns:ds="` + dsig.NSDSig + `"><xenc:EncryptedKey>` +
+		`<ds:KeyInfo xmlns:ds="` + xmlsec.NSDSig + `"><xenc:EncryptedKey>` +
 		`<xenc:EncryptionMethod Algorithm="` + xmlsec.KeyWrapAES128 + `"/>` +
 		`<ds:KeyInfo><xenc:AgreementMethod Algorithm="` + xmlsec.KeyAgreementECDHES + `">` +
-		`<xenc11:KeyDerivationMethod xmlns:xenc11="` + xenc.NSXEnc11 + `" Algorithm="` + xmlsec.KeyDerivationConcatKDF + `">` +
+		`<xenc11:KeyDerivationMethod xmlns:xenc11="` + xmlsec.NSXEnc11 + `" Algorithm="` + xmlsec.KeyDerivationConcatKDF + `">` +
 		`<xenc11:ConcatKDFParams AlgorithmID="0001" PartyUInfo="" PartyVInfo=""><ds:DigestMethod Algorithm="` + xmlsec.DigestSHA256 + `"/></xenc11:ConcatKDFParams>` +
 		`</xenc11:KeyDerivationMethod>` +
 		`<xenc:OriginatorKeyInfo><ds:KeyName>originator</ds:KeyName><ds:KeyValue/></xenc:OriginatorKeyInfo>` +
@@ -180,7 +178,7 @@ func TestWeDecryptXmlsec1ECDHES(t *testing.T) {
 		t.Fatal(err)
 	}
 	plain := weDecrypt(t, readFile(t, out), func(ek *xdm.Node) ([]byte, error) {
-		return xenc.DecryptAgreedKey(ek, priv, nil, nil, nil)
+		return xenc.DecryptAgreedKey(ek, priv, xenc.DecryptOptions{})
 	})
 	if !bytes.Contains(plain, []byte(">hello</p:Payload>")) {
 		t.Fatalf("plaintext %s", plain)
@@ -208,8 +206,8 @@ func TestReferenceImplementationsDecryptOurKeyWrap(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			name := xmltree.Element(nil, "ds", dsig.NSDSig, "KeyName")
-			name.AddNamespace("ds", dsig.NSDSig)
+			name := xmltree.Element(nil, "ds", xmlsec.NSDSig, "KeyName")
+			name.AddNamespace("ds", xmlsec.NSDSig)
 			xmltree.Text(name, "kek")
 			if err := ek.SetKeyInfo(name); err != nil {
 				t.Fatal(err)
@@ -233,7 +231,9 @@ func TestWeDecryptTheirKeyWrap(t *testing.T) {
 		wrap := map[int]string{16: xmlsec.KeyWrapAES128, 32: xmlsec.KeyWrapAES256}[n]
 		t.Run(wrap, func(t *testing.T) {
 			kek, kekPath := kekFile(t, n)
-			unwrap := func(ek *xdm.Node) ([]byte, error) { return xenc.UnwrapEncryptedKey(ek, kek, []string{wrap}) }
+			unwrap := func(ek *xdm.Node) ([]byte, error) {
+				return xenc.UnwrapEncryptedKey(ek, kek, xenc.DecryptOptions{AllowedKeyWrapAlgorithms: []string{wrap}})
+			}
 
 			out := filepath.Join(t.TempDir(), "santuario.xml")
 			mustSantuario(t, "encrypt-kw", tempFile(t, "in.xml", []byte(envelope)), kekPath, "Payload", out)
@@ -241,9 +241,9 @@ func TestWeDecryptTheirKeyWrap(t *testing.T) {
 				t.Fatalf("Santuario plaintext %s", plain)
 			}
 
-			tmpl := `<xenc:EncryptedData xmlns:xenc="` + xenc.NSXEnc + `" Type="` + xenc.TypeElement + `">` +
+			tmpl := `<xenc:EncryptedData xmlns:xenc="` + xmlsec.NSXEnc + `" Type="` + xenc.TypeElement + `">` +
 				`<xenc:EncryptionMethod Algorithm="` + xmlsec.EncAES128GCM + `"/>` +
-				`<ds:KeyInfo xmlns:ds="` + dsig.NSDSig + `"><xenc:EncryptedKey>` +
+				`<ds:KeyInfo xmlns:ds="` + xmlsec.NSDSig + `"><xenc:EncryptedKey>` +
 				`<xenc:EncryptionMethod Algorithm="` + wrap + `"/><ds:KeyInfo><ds:KeyName>kek</ds:KeyName></ds:KeyInfo>` +
 				`<xenc:CipherData><xenc:CipherValue/></xenc:CipherData></xenc:EncryptedKey></ds:KeyInfo>` +
 				`<xenc:CipherData><xenc:CipherValue/></xenc:CipherData></xenc:EncryptedData>`
@@ -295,7 +295,7 @@ func wss4jMessage(t *testing.T, recipient keypair, dataID string,
 	encrypt func(doc, security *xdm.Node, key []byte, opts xenc.EncryptOptions) ([]byte, error)) []byte {
 	t.Helper()
 	doc := parse(t, []byte(envelope))
-	hdr, err := wss.NewHeader(doc, wss.NSSOAP12, "", true)
+	hdr, err := wss.NewHeader(doc, xmlsec.NSSOAP12, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -344,7 +344,7 @@ func TestWSS4JDecryptsOurEncryptedHeaderAndContent(t *testing.T) {
 			return xenc.EncryptHeader(doc, find(doc, "urn:example:eb", "Messaging"), security, key, opts)
 		}, "MessageId", []string{"<eb:Messaging", "<eb:MessageId>m1</eb:MessageId>"}},
 		"Body content": {func(doc, _ *xdm.Node, key []byte, opts xenc.EncryptOptions) ([]byte, error) {
-			return xenc.EncryptContent(doc, find(doc, wss.NSSOAP12, "Body"), key, opts)
+			return xenc.EncryptContent(doc, find(doc, xmlsec.NSSOAP12, "Body"), key, opts)
 		}, ">hello<", []string{">hello</p:Payload>"}},
 	} {
 		t.Run(name, func(t *testing.T) {

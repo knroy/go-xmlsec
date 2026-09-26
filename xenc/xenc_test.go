@@ -83,22 +83,21 @@ func TestConformance_AP_06_AES128GCM(t *testing.T) {
 		t.Fatalf("attributes %v %v", ed.AttrValue("MimeType"), ed.AttrValue("Type"))
 	}
 
-	key, err := xenc.DecryptEncryptedKey(reparse(t, ek.Element), recipientKey,
-		[]string{xmlsec.KeyTransportRSAOAEP}, []string{xmlsec.MGF1SHA256}, []string{xmlsec.DigestSHA256})
+	key, err := xenc.DecryptEncryptedKey(reparse(t, ek.Element), recipientKey, xenc.DecryptOptions{AllowedKeyTransportAlgorithms: []string{xmlsec.KeyTransportRSAOAEP}, AllowedMGFAlgorithms: []string{xmlsec.MGF1SHA256}, AllowedDigestAlgorithms: []string{xmlsec.DigestSHA256}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := xenc.DecryptAttachment(ed, ct, key, []string{xmlsec.EncAES128GCM})
+	got, err := xenc.DecryptAttachment(ed, ct, key, xenc.DecryptOptions{AllowedDataAlgorithms: []string{xmlsec.EncAES128GCM}})
 	if err != nil || !bytes.Equal(got.Body, att.Body) || got.ID != att.ID ||
 		len(got.MIMEHeaders) != 1 || got.MIMEHeaders["Content-Type"][0] != "application/gzip" {
 		t.Fatalf("decrypt: %+v, %v", got, err)
 	}
 
 	ct[len(ct)-1] ^= 1
-	if _, err := xenc.DecryptAttachment(ed, ct, key, nil); err == nil {
+	if _, err := xenc.DecryptAttachment(ed, ct, key, xenc.DecryptOptions{}); err == nil {
 		t.Fatal("tampered ciphertext accepted")
 	}
-	if _, err := xenc.DecryptAttachment(ed, ct, key, []string{xmlsec.EncAES256GCM}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
+	if _, err := xenc.DecryptAttachment(ed, ct, key, xenc.DecryptOptions{AllowedDataAlgorithms: []string{xmlsec.EncAES256GCM}}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
 		t.Fatalf("allow-list: %v", err)
 	}
 }
@@ -119,10 +118,10 @@ func TestConformance_AP_07_RSAOAEPExplicitMGF(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := xenc.DecryptEncryptedKey(xmltree.DocumentElement(tree.Root), recipientKey, nil, nil, nil); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
+	if _, err := xenc.DecryptEncryptedKey(xmltree.DocumentElement(tree.Root), recipientKey, xenc.DecryptOptions{}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
 		t.Fatalf("implicit SHA-1 MGF: %v", err)
 	}
-	if _, err := xenc.DecryptEncryptedKey(reparse(t, ek.Element), recipientKey, nil, []string{xmlsec.MGF1SHA512}, nil); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
+	if _, err := xenc.DecryptEncryptedKey(reparse(t, ek.Element), recipientKey, xenc.DecryptOptions{AllowedMGFAlgorithms: []string{xmlsec.MGF1SHA512}}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
 		t.Fatalf("MGF allow-list: %v", err)
 	}
 }
@@ -139,8 +138,7 @@ func TestAlgorithmCombinations(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				key, err := xenc.DecryptEncryptedKey(reparse(t, ek.Element), recipientKey,
-					[]string{xmlsec.KeyTransportRSAOAEP}, []string{mgf}, []string{digest})
+				key, err := xenc.DecryptEncryptedKey(reparse(t, ek.Element), recipientKey, xenc.DecryptOptions{AllowedKeyTransportAlgorithms: []string{xmlsec.KeyTransportRSAOAEP}, AllowedMGFAlgorithms: []string{mgf}, AllowedDigestAlgorithms: []string{digest}})
 				if err != nil || !bytes.Equal(key, ek.SessionKey) {
 					t.Fatalf("%s %s %s: %v", data, mgf, digest, err)
 				}
@@ -176,7 +174,7 @@ func TestEncryptElement(t *testing.T) {
 		t.Fatal(err)
 	}
 	ed := xmltree.DocumentElement(enc.Root).ChildElements()[0].ChildElements()[0]
-	pt, err := xenc.DecryptData(ed, key, nil)
+	pt, err := xenc.DecryptData(ed, key, xenc.DecryptOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +182,7 @@ func TestEncryptElement(t *testing.T) {
 	if _, err := xmlsec.Parse(pt); err != nil || !strings.Contains(string(pt), `xmlns:q="urn:q"`) {
 		t.Fatalf("plaintext %s: %v", pt, err)
 	}
-	if _, err := xenc.DecryptData(ed, bytes.Repeat([]byte{8}, 16), nil); err == nil {
+	if _, err := xenc.DecryptData(ed, bytes.Repeat([]byte{8}, 16), xenc.DecryptOptions{}); err == nil {
 		t.Fatal("wrong key accepted")
 	}
 }

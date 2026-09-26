@@ -16,6 +16,7 @@ import (
 	"github.com/knroy/go-xml/c14n"
 	"github.com/knroy/go-xml/xdm"
 	"github.com/knroy/go-xmlsec"
+	"github.com/knroy/go-xmlsec/internal/hashes"
 )
 
 // VerifyOptions configures verification.
@@ -173,7 +174,7 @@ type Coverage struct {
 	// dsig11:KeyInfoReference, how the ds:KeyInfo it references describes
 	// it. When a key was pinned, that description was read but not used, and
 	// a form this library does not accept is reported as KeyInfoNone.
-	KeyInfoForm KeyInfoSpec
+	KeyInfoForm KeyInfoForm
 
 	// References are the verified references in order, retained because
 	// some receipts must echo them.
@@ -240,7 +241,7 @@ func Verify(doc *xdm.Node, sig *xdm.Node, opts VerifyOptions) (*Coverage, error)
 }
 
 func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
-	if doc == nil || sig == nil || !sig.IsElement(NSDSig, "Signature") {
+	if doc == nil || sig == nil || !sig.IsElement(xmlsec.NSDSig, "Signature") {
 		return nil, malformed("not a ds:Signature")
 	}
 	if sig.Root() != doc.Root() {
@@ -443,10 +444,10 @@ func digestOmitted(h hash.Hash, transforms []TransformSpec, resolve func() ([]by
 
 // The default sets: what an empty allow-list accepts. An algorithm
 // implemented only for legacy interoperability (legacy.go) is left out of
-// them, so it is accepted only when an allow-list names it: xmlsec's
-// SignatureHash and DigestHash never return one.
-func defaultSignature(alg string) bool { _, ok := xmlsec.SignatureHash(alg); return ok }
-func defaultDigest(alg string) bool    { _, ok := xmlsec.DigestHash(alg); return ok }
+// them, so it is accepted only when an allow-list names it:
+// hashes.Signature and hashes.Digest never return one.
+func defaultSignature(alg string) bool { _, ok := hashes.Signature(alg); return ok }
+func defaultDigest(alg string) bool    { _, ok := hashes.Digest(alg); return ok }
 func defaultC14N(alg string) bool      { return isC14N(alg) }
 
 // allowed checks v against list, or against the default set when list is

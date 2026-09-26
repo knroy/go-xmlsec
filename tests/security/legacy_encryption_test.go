@@ -36,12 +36,12 @@ func legacyCV(b []byte) string {
 
 func legacyED(t *testing.T, alg string, ct []byte) *xdm.Node {
 	t.Helper()
-	return legacyParse(t, `<xenc:EncryptedData xmlns:xenc="`+xenc.NSXEnc+`"><xenc:EncryptionMethod Algorithm="`+alg+`"/>`+legacyCV(ct)+`</xenc:EncryptedData>`)
+	return legacyParse(t, `<xenc:EncryptedData xmlns:xenc="`+xmlsec.NSXEnc+`"><xenc:EncryptionMethod Algorithm="`+alg+`"/>`+legacyCV(ct)+`</xenc:EncryptedData>`)
 }
 
 func legacyEK(t *testing.T, alg, method string, ct []byte) *xdm.Node {
 	t.Helper()
-	return legacyParse(t, `<xenc:EncryptedKey xmlns:xenc="`+xenc.NSXEnc+`" xmlns:ds="`+xenc.NSDSig+`">`+
+	return legacyParse(t, `<xenc:EncryptedKey xmlns:xenc="`+xmlsec.NSXEnc+`" xmlns:ds="`+xmlsec.NSDSig+`">`+
 		`<xenc:EncryptionMethod Algorithm="`+alg+`">`+method+`</xenc:EncryptionMethod>`+legacyCV(ct)+`</xenc:EncryptedKey>`)
 }
 
@@ -86,10 +86,10 @@ func TestLegacyEncryptionAlgorithmsOnlyWhenNamed(t *testing.T) {
 		for alg, size := range map[string]int{xmlsec.EncAES128CBC: 16, xmlsec.EncAES192CBC: 24, xmlsec.EncAES256CBC: 32, xmlsec.EncTripleDESCBC: 24} {
 			key := bytes.Repeat([]byte{1}, size)
 			ed := legacyED(t, alg, cbcSeal(t, alg, key, pt, -1))
-			if _, err := xenc.DecryptData(ed, key, nil); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
+			if _, err := xenc.DecryptData(ed, key, xenc.DecryptOptions{}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
 				t.Fatalf("%s, empty list: %v", alg, err)
 			}
-			if got, err := xenc.DecryptData(ed, key, []string{alg}); err != nil || !bytes.Equal(got, pt) {
+			if got, err := xenc.DecryptData(ed, key, xenc.DecryptOptions{AllowedDataAlgorithms: []string{alg}}); err != nil || !bytes.Equal(got, pt) {
 				t.Fatalf("%s, named: %q, %v", alg, got, err)
 			}
 		}
@@ -102,10 +102,10 @@ func TestLegacyEncryptionAlgorithmsOnlyWhenNamed(t *testing.T) {
 			t.Fatal(err)
 		}
 		ek := legacyEK(t, xmlsec.KeyTransportRSAOAEPMGF1P, `<ds:DigestMethod Algorithm="`+xmlsec.DigestSHA1+`"/>`, ct)
-		if _, err := xenc.DecryptEncryptedKey(ek, priv, nil, nil, nil); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
+		if _, err := xenc.DecryptEncryptedKey(ek, priv, xenc.DecryptOptions{}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
 			t.Fatalf("empty lists: %v", err)
 		}
-		got, err := xenc.DecryptEncryptedKey(ek, priv, []string{xmlsec.KeyTransportRSAOAEPMGF1P}, []string{xmlsec.MGF1SHA1}, []string{xmlsec.DigestSHA1})
+		got, err := xenc.DecryptEncryptedKey(ek, priv, xenc.DecryptOptions{AllowedKeyTransportAlgorithms: []string{xmlsec.KeyTransportRSAOAEPMGF1P}, AllowedMGFAlgorithms: []string{xmlsec.MGF1SHA1}, AllowedDigestAlgorithms: []string{xmlsec.DigestSHA1}})
 		if err != nil || !bytes.Equal(got, key) {
 			t.Fatalf("named: %x, %v", got, err)
 		}
@@ -119,11 +119,11 @@ func TestLegacyEncryptionAlgorithmsOnlyWhenNamed(t *testing.T) {
 		}
 		ek := legacyEK(t, xmlsec.KeyTransportRSAOAEP, ``, ct)
 		for _, l := range [][2][]string{{}, {{xmlsec.MGF1SHA1}}, {1: {xmlsec.DigestSHA1}}} {
-			if _, err := xenc.DecryptEncryptedKey(ek, priv, nil, l[0], l[1]); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
+			if _, err := xenc.DecryptEncryptedKey(ek, priv, xenc.DecryptOptions{AllowedMGFAlgorithms: l[0], AllowedDigestAlgorithms: l[1]}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
 				t.Fatalf("%v: %v", l, err)
 			}
 		}
-		got, err := xenc.DecryptEncryptedKey(ek, priv, nil, []string{xmlsec.MGF1SHA1}, []string{xmlsec.DigestSHA1})
+		got, err := xenc.DecryptEncryptedKey(ek, priv, xenc.DecryptOptions{AllowedMGFAlgorithms: []string{xmlsec.MGF1SHA1}, AllowedDigestAlgorithms: []string{xmlsec.DigestSHA1}})
 		if err != nil || !bytes.Equal(got, key) {
 			t.Fatalf("named: %x, %v", got, err)
 		}
@@ -138,13 +138,13 @@ func TestLegacyEncryptionAlgorithmsOnlyWhenNamed(t *testing.T) {
 		}
 		ek := legacyEK(t, xmlsec.KeyTransportRSA15, ``, ct)
 		ed := legacyED(t, xmlsec.EncTripleDESCBC, cbcSeal(t, xmlsec.EncTripleDESCBC, key, pt, -1))
-		if _, err := xenc.DecryptEncryptedKey(ek, priv, nil, nil, nil); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
+		if _, err := xenc.DecryptEncryptedKey(ek, priv, xenc.DecryptOptions{}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
 			t.Fatalf("DecryptEncryptedKey, empty lists: %v", err)
 		}
-		if _, err := xenc.DecryptEncryptedKeyPKCS1v15(ek, ed, priv, nil, []string{xmlsec.EncTripleDESCBC}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
+		if _, err := xenc.DecryptEncryptedKeyPKCS1v15(ek, ed, priv, xenc.DecryptOptions{AllowedDataAlgorithms: []string{xmlsec.EncTripleDESCBC}}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
 			t.Fatalf("empty key transport list: %v", err)
 		}
-		got, err := xenc.DecryptEncryptedKeyPKCS1v15(ek, ed, priv, []string{xmlsec.KeyTransportRSA15}, []string{xmlsec.EncTripleDESCBC})
+		got, err := xenc.DecryptEncryptedKeyPKCS1v15(ek, ed, priv, xenc.DecryptOptions{AllowedKeyTransportAlgorithms: []string{xmlsec.KeyTransportRSA15}, AllowedDataAlgorithms: []string{xmlsec.EncTripleDESCBC}})
 		if err != nil || !bytes.Equal(got, key) {
 			t.Fatalf("named: %x, %v", got, err)
 		}
@@ -160,10 +160,10 @@ func TestLegacyEncryptionAlgorithmsOnlyWhenNamed(t *testing.T) {
 		slices.Reverse(temp)
 		cipher.NewCBCEncrypter(b, []byte{0x4a, 0xdd, 0xa2, 0x2c, 0x79, 0xe8, 0x21, 0x05}).CryptBlocks(temp, temp)
 		ek := legacyEK(t, xmlsec.KeyWrapTripleDES, ``, temp)
-		if _, err := xenc.UnwrapEncryptedKey(ek, kek, nil); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
+		if _, err := xenc.UnwrapEncryptedKey(ek, kek, xenc.DecryptOptions{}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
 			t.Fatalf("empty list: %v", err)
 		}
-		got, err := xenc.UnwrapEncryptedKey(ek, kek, []string{xmlsec.KeyWrapTripleDES})
+		got, err := xenc.UnwrapEncryptedKey(ek, kek, xenc.DecryptOptions{AllowedKeyWrapAlgorithms: []string{xmlsec.KeyWrapTripleDES}})
 		if err != nil || !bytes.Equal(got, key) {
 			t.Fatalf("named: %x, %v", got, err)
 		}
@@ -187,7 +187,7 @@ func TestCBCPaddingOracle(t *testing.T) {
 		"wrong key length":   {good, key[:8]},
 		"AES-256 key length": {good, bytes.Repeat([]byte{7}, 32)},
 	} {
-		_, err := xenc.DecryptData(legacyED(t, alg, c.ct), c.key, []string{alg})
+		_, err := xenc.DecryptData(legacyED(t, alg, c.ct), c.key, xenc.DecryptOptions{AllowedDataAlgorithms: []string{alg}})
 		if err == nil {
 			t.Fatalf("%s: decrypted", name)
 		}
@@ -203,14 +203,14 @@ func TestCBCPaddingOracle(t *testing.T) {
 	priv := rsaKey(t)
 	ek := legacyEK(t, xmlsec.KeyTransportRSA15, ``, make([]byte, 256))
 	ed := legacyED(t, alg, good)
-	k, err := xenc.DecryptEncryptedKeyPKCS1v15(ek, ed, priv, []string{xmlsec.KeyTransportRSA15}, []string{alg})
+	k, err := xenc.DecryptEncryptedKeyPKCS1v15(ek, ed, priv, xenc.DecryptOptions{AllowedKeyTransportAlgorithms: []string{xmlsec.KeyTransportRSA15}, AllowedDataAlgorithms: []string{alg}})
 	if err != nil || len(k) != 16 {
 		t.Fatalf("implicit rejection: %x, %v", k, err)
 	}
 	// A random key leaves a valid pad with probability about 1/16, when
 	// the data decrypts to garbage: that is the Bleichenbacher limit
 	// section 6.1.2 describes, not a failure of this test.
-	if _, err := xenc.DecryptData(ed, k, []string{alg}); err != nil && err != first {
+	if _, err := xenc.DecryptData(ed, k, xenc.DecryptOptions{AllowedDataAlgorithms: []string{alg}}); err != nil && err != first {
 		t.Fatalf("after implicit rejection: %v", err)
 	}
 }

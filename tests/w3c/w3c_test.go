@@ -51,7 +51,7 @@ var sentinels = map[string]error{
 	"ErrUnsupportedKeyInfo":   xmlsec.ErrUnsupportedKeyInfo,
 }
 
-var keyInfoForms = map[string]dsig.KeyInfoSpec{
+var keyInfoForms = map[string]dsig.KeyInfoForm{
 	"None":                   dsig.KeyInfoNone,
 	"X509Data":               dsig.KeyInfoX509Data,
 	"SecurityTokenReference": dsig.KeyInfoSecurityTokenReference,
@@ -134,13 +134,13 @@ func check(t *testing.T, e entry) {
 func locate(doc *xdm.Node, where string) *xdm.Node {
 	root := doc.ChildElements()[0]
 	if where == "root" {
-		if root.IsElement(dsig.NSDSig, "Signature") {
+		if root.IsElement(xmlsec.NSDSig, "Signature") {
 			return root
 		}
 		return nil
 	}
 	for _, c := range root.ChildElements() {
-		if c.IsElement(dsig.NSDSig, "Signature") {
+		if c.IsElement(xmlsec.NSDSig, "Signature") {
 			return c
 		}
 	}
@@ -157,11 +157,11 @@ func checkAlgorithms(t *testing.T, e entry, sig *xdm.Node) {
 	walk = func(n *xdm.Node) {
 		for _, c := range n.ChildElements() {
 			switch {
-			case c.IsElement(dsig.NSDSig, "DigestMethod"):
+			case c.IsElement(xmlsec.NSDSig, "DigestMethod"):
 				if a := c.AttrValue("Algorithm"); !slices.Contains(digest, a) {
 					digest = append(digest, a)
 				}
-			case c.IsElement(dsig.NSDSig, "Transform"):
+			case c.IsElement(xmlsec.NSDSig, "Transform"):
 				transforms = append(transforms, c.AttrValue("Algorithm"))
 			}
 			walk(c)

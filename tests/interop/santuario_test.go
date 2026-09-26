@@ -14,7 +14,6 @@ import (
 	"github.com/knroy/go-xmlsec"
 	"github.com/knroy/go-xmlsec/dsig"
 	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/wss"
 	"github.com/knroy/go-xmlsec/xenc"
 )
 
@@ -73,7 +72,7 @@ func signatureValue(t *testing.T, doc []byte) (sig []byte, digests [][]byte) {
 	t.Helper()
 	root := parse(t, doc)
 	xmltree.Walk(root, func(e *xdm.Node) {
-		if e.Name.URI != dsig.NSDSig {
+		if e.Name.URI != xmlsec.NSDSig {
 			return
 		}
 		switch e.Name.Local {
@@ -123,7 +122,7 @@ func TestWeVerifySantuarioEnvelopedSignature(t *testing.T) {
 				kp.keyPEM, kp.certPEM, string(c.c14n), c.sigAlg, out)
 			signed := readFile(t, out)
 			doc := parse(t, signed)
-			cov, err := dsig.Verify(doc, find(doc, dsig.NSDSig, "Signature"), dsig.VerifyOptions{
+			cov, err := dsig.Verify(doc, find(doc, xmlsec.NSDSig, "Signature"), dsig.VerifyOptions{
 				Certificate:                       kp.provider.Certificate,
 				AllowedSignatureAlgorithms:        []string{c.sigAlg},
 				AllowedCanonicalizationAlgorithms: []string{string(c.c14n)},
@@ -206,7 +205,7 @@ func TestSignatureValueMatchesSantuarioDetached(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	find(doc, wss.NSWSSE, "Security").AppendChild(sig)
+	find(doc, xmlsec.NSWSSE, "Security").AppendChild(sig)
 	ours, err := c14n.Bytes(doc, c14n.Options{Algorithm: c14n.Inclusive10})
 	if err != nil {
 		t.Fatal(err)
@@ -221,7 +220,7 @@ func TestSignatureValueMatchesSantuarioDetached(t *testing.T) {
 
 	mustSantuario(t, "verify", tempFile(t, "ours.xml", ours), kp.certPEM)
 	td := parse(t, theirs)
-	cov, err := dsig.Verify(td, find(td, dsig.NSDSig, "Signature"), dsig.VerifyOptions{Certificate: kp.provider.Certificate})
+	cov, err := dsig.Verify(td, find(td, xmlsec.NSDSig, "Signature"), dsig.VerifyOptions{Certificate: kp.provider.Certificate})
 	if err != nil {
 		t.Fatalf("%v\n%s", err, theirs)
 	}
@@ -249,12 +248,11 @@ func TestWeDecryptSantuarioEncryption(t *testing.T) {
 	encrypted := readFile(t, out)
 
 	doc := parse(t, encrypted)
-	sessionKey, err := xenc.DecryptEncryptedKey(find(doc, xenc.NSXEnc, "EncryptedKey"), key,
-		[]string{xmlsec.KeyTransportRSAOAEP}, []string{xmlsec.MGF1SHA256}, []string{xmlsec.DigestSHA256})
+	sessionKey, err := xenc.DecryptEncryptedKey(find(doc, xmlsec.NSXEnc, "EncryptedKey"), key, xenc.DecryptOptions{AllowedKeyTransportAlgorithms: []string{xmlsec.KeyTransportRSAOAEP}, AllowedMGFAlgorithms: []string{xmlsec.MGF1SHA256}, AllowedDigestAlgorithms: []string{xmlsec.DigestSHA256}})
 	if err != nil {
 		t.Fatalf("%v\n%s", err, encrypted)
 	}
-	plain, err := xenc.DecryptData(find(doc, xenc.NSXEnc, "EncryptedData"), sessionKey, []string{xmlsec.EncAES128GCM})
+	plain, err := xenc.DecryptData(find(doc, xmlsec.NSXEnc, "EncryptedData"), sessionKey, xenc.DecryptOptions{AllowedDataAlgorithms: []string{xmlsec.EncAES128GCM}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +273,7 @@ func TestSantuarioVerifiesOurInPlaceInclusiveSignature(t *testing.T) {
 		CanonicalizationAlgorithm: incl,
 		References: []dsig.Reference{{URI: "#body", DigestAlgorithm: xmlsec.DigestSHA256,
 			Transforms: []dsig.TransformSpec{{Algorithm: incl}}}},
-		Parent: find(doc, wss.NSWSSE, "Security"),
+		Parent: find(doc, xmlsec.NSWSSE, "Security"),
 	})
 	if err != nil {
 		t.Fatal(err)

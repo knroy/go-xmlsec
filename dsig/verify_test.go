@@ -19,7 +19,6 @@ import (
 	"github.com/knroy/go-xmlsec"
 	"github.com/knroy/go-xmlsec/dsig"
 	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/wss"
 )
 
 var covECKey = func() *ecdsa.PrivateKey {
@@ -40,7 +39,7 @@ const (
 	covDigest = `<ds:DigestMethod Algorithm="` + xmlsec.DigestSHA256 + `"/><ds:DigestValue>AAAA</ds:DigestValue>`
 	covRef    = `<ds:Reference URI="#a">` + covTr + covDigest + `</ds:Reference>`
 	covSV     = `<ds:SignatureValue>AAAA</ds:SignatureValue>`
-	covIN     = `<ec:InclusiveNamespaces xmlns:ec="` + dsig.NSExcC14N + `" PrefixList="p"/>`
+	covIN     = `<ec:InclusiveNamespaces xmlns:ec="` + xmlsec.NSExcC14N + `" PrefixList="p"/>`
 )
 
 func covSI(inner string) string { return `<ds:SignedInfo>` + inner + `</ds:SignedInfo>` }
@@ -60,9 +59,9 @@ func covTransforms(algs ...string) string {
 // covDoc places a ds:Signature with the given content in a document that
 // has an element with wsu:Id "a" and one, not a token, with wsu:Id "nb".
 func covDoc(sigContent string) string {
-	return `<r xmlns:wsu="` + wss.NSWSU + `" xmlns:wsse="` + wss.NSWSSE + `" xmlns:p="urn:p">` +
+	return `<r xmlns:wsu="` + xmlsec.NSWSU + `" xmlns:wsse="` + xmlsec.NSWSSE + `" xmlns:p="urn:p">` +
 		`<a wsu:Id="a">x</a><z wsu:Id="nb"/>` +
-		`<ds:Signature xmlns:ds="` + dsig.NSDSig + `">` + sigContent + `</ds:Signature></r>`
+		`<ds:Signature xmlns:ds="` + xmlsec.NSDSig + `">` + sigContent + `</ds:Signature></r>`
 }
 
 func TestVerifyStructure(t *testing.T) {
@@ -125,7 +124,7 @@ func TestVerifyStructure(t *testing.T) {
 		{"no KeyInfo and no certificate", covSI(covCM+covSM+covRef) + covSV, dsig.VerifyOptions{}, xmlsec.ErrUnsupportedKeyInfo},
 
 		// Signature value against the key.
-		{"empty PrefixList reaches the signature check", covSI(`<ds:CanonicalizationMethod Algorithm="`+covExc+`"><ec:InclusiveNamespaces xmlns:ec="`+dsig.NSExcC14N+`" PrefixList=""/></ds:CanonicalizationMethod>`+covSM+covRef) + covSV, withCert, xmlsec.ErrSignatureInvalid},
+		{"empty PrefixList reaches the signature check", covSI(`<ds:CanonicalizationMethod Algorithm="`+covExc+`"><ec:InclusiveNamespaces xmlns:ec="`+xmlsec.NSExcC14N+`" PrefixList=""/></ds:CanonicalizationMethod>`+covSM+covRef) + covSV, withCert, xmlsec.ErrSignatureInvalid},
 		{"RSA key with an ECDSA algorithm", covSI(covCM+ecSM+covRef) + covSV, withCert, xmlsec.ErrUnsupportedAlgorithm},
 		{"ECDSA key with an RSA algorithm", covSI(covCM+covSM+covRef) + covSV, dsig.VerifyOptions{Certificate: ecCert}, xmlsec.ErrUnsupportedAlgorithm},
 		{"ECDSA value of the wrong length", covSI(covCM+ecSM+covRef) + covSV, dsig.VerifyOptions{Certificate: ecCert}, xmlsec.ErrSignatureInvalid},
@@ -290,7 +289,7 @@ func TestImplicitCanonicalization(t *testing.T) {
 
 	// A same-document reference with no transforms at all.
 	key = newKey(t, rsaKey)
-	tree, err := xmlsec.Parse([]byte(`<r xmlns:wsu="` + wss.NSWSU + `"><a wsu:Id="a">x</a></r>`))
+	tree, err := xmlsec.Parse([]byte(`<r xmlns:wsu="` + xmlsec.NSWSU + `"><a wsu:Id="a">x</a></r>`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +315,7 @@ func TestImplicitCanonicalization(t *testing.T) {
 // certificate, as most SMP software emits; they are ignored.
 func TestX509DataDescriptiveElements(t *testing.T) {
 	add := func(parent *xdm.Node, local, text string) *xdm.Node {
-		e := xmltree.Element(parent, "ds", dsig.NSDSig, local)
+		e := xmltree.Element(parent, "ds", xmlsec.NSDSig, local)
 		xmltree.Text(e, text)
 		return e
 	}
@@ -334,12 +333,12 @@ func TestX509DataDescriptiveElements(t *testing.T) {
 		{"subject name and issuer-serial", func(ki *xdm.Node) {
 			x := ki.ChildElements()[0]
 			add(x, "X509SubjectName", "CN=test")
-			is := xmltree.Element(x, "ds", dsig.NSDSig, "X509IssuerSerial")
+			is := xmltree.Element(x, "ds", xmlsec.NSDSig, "X509IssuerSerial")
 			add(is, "X509IssuerName", "CN=test")
 			add(is, "X509SerialNumber", "1")
 		}, nil},
 		{"a second X509Data with an SKI", func(ki *xdm.Node) {
-			add(xmltree.Element(ki, "ds", dsig.NSDSig, "X509Data"), "X509SKI", "AAAA")
+			add(xmltree.Element(ki, "ds", xmlsec.NSDSig, "X509Data"), "X509SKI", "AAAA")
 		}, nil},
 		{"two certificates", func(ki *xdm.Node) {
 			x := ki.ChildElements()[0]
@@ -367,7 +366,7 @@ func TestHMACReportedAsNotAllowed(t *testing.T) {
 	sig := findSignature(doc)
 	sm := sig.ChildElements()[0].ChildElements()[1]
 	sm.Attr("", "Algorithm").Value = "http://www.w3.org/2000/09/xmldsig#hmac-sha1"
-	xmltree.Text(xmltree.Element(sm, "ds", dsig.NSDSig, "HMACOutputLength"), "160")
+	xmltree.Text(xmltree.Element(sm, "ds", xmlsec.NSDSig, "HMACOutputLength"), "160")
 	if _, err := dsig.Verify(doc, sig, dsig.VerifyOptions{}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
 		t.Fatalf("got %v", err)
 	}

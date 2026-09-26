@@ -46,9 +46,9 @@ func (h *Header) AddBinarySecurityToken(cert *x509.Certificate, chain []*x509.Ce
 	}
 	// Built detached and attached last: its own xmlns:wsu cannot conflict
 	// with an ancestor's, and a failure leaves the header untouched.
-	bst := xmltree.Element(nil, "wsse", NSWSSE, "BinarySecurityToken")
-	bst.AddNamespace("wsu", NSWSU)
-	xmltree.SetAttr(bst, "wsu", NSWSU, "Id", id)
+	bst := xmltree.Element(nil, "wsse", xmlsec.NSWSSE, "BinarySecurityToken")
+	bst.AddNamespace("wsu", xmlsec.NSWSU)
+	xmltree.SetAttr(bst, "wsu", xmlsec.NSWSU, "Id", id)
 	xmltree.SetAttr(bst, "", "", "EncodingType", xmlsec.BSTEncodingBase64)
 	xmltree.SetAttr(bst, "", "", "ValueType", valueType)
 	xmltree.Text(bst, base64.StdEncoding.EncodeToString(der))
@@ -60,7 +60,7 @@ func (h *Header) AddBinarySecurityToken(cert *x509.Certificate, chain []*x509.Ce
 // wsse:BinarySecurityToken carries: the token itself for X509v3, the target
 // (last) certificate for X509PKIPathv1.
 func ParseBinarySecurityToken(bst *xdm.Node) (*x509.Certificate, error) {
-	if bst == nil || !bst.IsElement(NSWSSE, "BinarySecurityToken") {
+	if bst == nil || !bst.IsElement(xmlsec.NSWSSE, "BinarySecurityToken") {
 		return nil, fmt.Errorf("%w: not a wsse:BinarySecurityToken", xmlsec.ErrUnsupportedKeyInfo)
 	}
 	if enc := bst.AttrValue("EncodingType"); enc != xmlsec.BSTEncodingBase64 {

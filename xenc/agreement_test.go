@@ -60,7 +60,7 @@ func TestKeyAgreementRoundTrip(t *testing.T) {
 			b, _ := c14n.Bytes(ek.Element, c14n.Options{Algorithm: c14n.Exclusive10})
 			for _, want := range []string{
 				`<xenc:AgreementMethod Algorithm="` + xmlsec.KeyAgreementECDHES + `">`,
-				`<xenc11:KeyDerivationMethod xmlns:xenc11="` + xenc.NSXEnc11 + `" Algorithm="` + xmlsec.KeyDerivationConcatKDF + `">`,
+				`<xenc11:KeyDerivationMethod xmlns:xenc11="` + xmlsec.NSXEnc11 + `" Algorithm="` + xmlsec.KeyDerivationConcatKDF + `">`,
 				`<ds:DigestMethod Algorithm="` + c.digest + `">`,
 				`<xenc:OriginatorKeyInfo><ds:KeyValue><dsig11:ECKeyValue`,
 				`<xenc:RecipientKeyInfo><ds:X509Data><ds:X509Certificate>`,
@@ -69,8 +69,7 @@ func TestKeyAgreementRoundTrip(t *testing.T) {
 					t.Fatalf("no %s in\n%s", want, b)
 				}
 			}
-			key, err := xenc.DecryptAgreedKey(reparse(t, ek.Element), r.priv, []string{c.wrap},
-				[]string{xmlsec.KeyAgreementECDHES}, []string{c.digest})
+			key, err := xenc.DecryptAgreedKey(reparse(t, ek.Element), r.priv, xenc.DecryptOptions{AllowedKeyWrapAlgorithms: []string{c.wrap}, AllowedKeyAgreementAlgorithms: []string{xmlsec.KeyAgreementECDHES}, AllowedDigestAlgorithms: []string{c.digest}})
 			if err != nil || !bytes.Equal(key, ek.SessionKey) {
 				t.Fatalf("agreed %x, %v", key, err)
 			}
@@ -169,7 +168,7 @@ func TestDecryptAgreedKeyErrors(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			key, err := xenc.DecryptAgreedKey(covParse(t, c.el), c.priv, c.allow.wrap, c.allow.agreement, c.allow.digest)
+			key, err := xenc.DecryptAgreedKey(covParse(t, c.el), c.priv, xenc.DecryptOptions{AllowedKeyWrapAlgorithms: c.allow.wrap, AllowedKeyAgreementAlgorithms: c.allow.agreement, AllowedDigestAlgorithms: c.allow.digest})
 			if err == nil || c.want != nil && !errors.Is(err, c.want) {
 				t.Fatalf("got %v, want %v", err, c.want)
 			}
@@ -181,7 +180,7 @@ func TestDecryptAgreedKeyErrors(t *testing.T) {
 
 	// A ds:KeyName beside the originator's ds:KeyValue is ignored.
 	named := edit(`<xenc:OriginatorKeyInfo>`, `<xenc:OriginatorKeyInfo><ds:KeyName>originator</ds:KeyName>`)
-	if key, err := xenc.DecryptAgreedKey(covParse(t, named), r.priv, nil, nil, nil); err != nil || !bytes.Equal(key, ek.SessionKey) {
+	if key, err := xenc.DecryptAgreedKey(covParse(t, named), r.priv, xenc.DecryptOptions{}); err != nil || !bytes.Equal(key, ek.SessionKey) {
 		t.Fatalf("KeyName beside KeyValue: %v", err)
 	}
 
@@ -192,8 +191,8 @@ func TestDecryptAgreedKeyErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ = c14n.Bytes(ek.Element, c14n.Options{Algorithm: c14n.Exclusive10})
-	alias := strings.Replace(string(b), xmlsec.DigestSHA384, xenc.DigestSHA384XMLEnc, 1)
-	if key, err := xenc.DecryptAgreedKey(covParse(t, alias), r.priv, nil, nil, nil); err != nil || !bytes.Equal(key, ek.SessionKey) {
+	alias := strings.Replace(string(b), xmlsec.DigestSHA384, xmlsec.DigestSHA384XMLEnc, 1)
+	if key, err := xenc.DecryptAgreedKey(covParse(t, alias), r.priv, xenc.DecryptOptions{}); err != nil || !bytes.Equal(key, ek.SessionKey) {
 		t.Fatalf("xmlenc#sha384: %v", err)
 	}
 }

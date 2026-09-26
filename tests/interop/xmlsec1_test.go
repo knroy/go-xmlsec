@@ -104,9 +104,6 @@ func newKeypair(t *testing.T, signer crypto.Signer) keypair {
 		keyPEM:   filepath.Join(dir, "key.pem"),
 		certPEM:  filepath.Join(dir, "cert.pem"),
 	}
-	if d, ok := signer.(crypto.Decrypter); ok {
-		kp.provider.Decrypter = d
-	}
 	write(t, kp.keyPEM, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: pk}))
 	write(t, kp.certPEM, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
 	return kp
@@ -235,7 +232,7 @@ func TestWeVerifyXmlsec1EnvelopedSignature(t *testing.T) {
 				t.Fatal(err)
 			}
 			doc := parse(t, signed)
-			cov, err := dsig.Verify(doc, find(doc, dsig.NSDSig, "Signature"), dsig.VerifyOptions{
+			cov, err := dsig.Verify(doc, find(doc, xmlsec.NSDSig, "Signature"), dsig.VerifyOptions{
 				AllowedSignatureAlgorithms:        []string{c.sigAlg},
 				AllowedCanonicalizationAlgorithms: []string{string(c.c14n)},
 			})
@@ -257,7 +254,7 @@ const envelope = `<S:Envelope xmlns:S="http://www.w3.org/2003/05/soap-envelope" 
 // --id-attr. It matches the attribute by local name.
 var idAttrs = []string{
 	"--id-attr:Id", "urn:example:eb:Messaging",
-	"--id-attr:Id", wss.NSSOAP12 + ":Body",
+	"--id-attr:Id", xmlsec.NSSOAP12 + ":Body",
 }
 
 // xmlsec1 accepts our detached WS-Security signature over #id references,
@@ -275,7 +272,7 @@ func TestXmlsec1VerifiesOurDetachedSignature(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hdr, err := wss.NewHeader(doc, wss.NSSOAP12, "", true)
+	hdr, err := wss.NewHeader(doc, xmlsec.NSSOAP12, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,9 +308,9 @@ func TestWeVerifyXmlsec1DetachedSignature(t *testing.T) {
 		return `<ds:Reference URI="#` + id + `"><ds:Transforms><ds:Transform Algorithm="` + exc + `"/></ds:Transforms>` +
 			`<ds:DigestMethod Algorithm="` + xmlsec.DigestSHA256 + `"/><ds:DigestValue/></ds:Reference>`
 	}
-	tmpl := `<S:Envelope xmlns:S="http://www.w3.org/2003/05/soap-envelope" xmlns:eb="urn:example:eb" xmlns:wsu="` + wss.NSWSU + `">` +
+	tmpl := `<S:Envelope xmlns:S="http://www.w3.org/2003/05/soap-envelope" xmlns:eb="urn:example:eb" xmlns:wsu="` + xmlsec.NSWSU + `">` +
 		`<S:Header><eb:Messaging wsu:Id="msg"><eb:MessageId>m1</eb:MessageId></eb:Messaging>` +
-		`<wsse:Security xmlns:wsse="` + wss.NSWSSE + `">` +
+		`<wsse:Security xmlns:wsse="` + xmlsec.NSWSSE + `">` +
 		`<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:SignedInfo>` +
 		`<ds:CanonicalizationMethod Algorithm="` + exc + `"/>` +
 		`<ds:SignatureMethod Algorithm="` + xmlsec.SigRSASHA256 + `"/>` +
@@ -328,7 +325,7 @@ func TestWeVerifyXmlsec1DetachedSignature(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc := parse(t, signed)
-	cov, err := dsig.Verify(doc, find(doc, dsig.NSDSig, "Signature"), dsig.VerifyOptions{
+	cov, err := dsig.Verify(doc, find(doc, xmlsec.NSDSig, "Signature"), dsig.VerifyOptions{
 		Certificate:                       kp.provider.Certificate,
 		AllowedSignatureAlgorithms:        []string{xmlsec.SigRSASHA256},
 		AllowedDigestAlgorithms:           []string{xmlsec.DigestSHA256},
@@ -389,9 +386,9 @@ func encryptWithKeyInfo(t *testing.T, kp keypair) []byte {
 	}
 
 	edoc := parse(t, encrypted)
-	ed := find(edoc, xenc.NSXEnc, "EncryptedData")
-	ki := xmltree.Element(nil, "ds", dsig.NSDSig, "KeyInfo")
-	ki.AddNamespace("ds", dsig.NSDSig)
+	ed := find(edoc, xmlsec.NSXEnc, "EncryptedData")
+	ki := xmltree.Element(nil, "ds", xmlsec.NSDSig, "KeyInfo")
+	ki.AddNamespace("ds", xmlsec.NSDSig)
 	ki.AppendChild(ek.Element)
 	// ds:KeyInfo belongs between EncryptionMethod and CipherData.
 	ed.AppendChild(ki)
@@ -417,12 +414,12 @@ func assertDecryptedEnvelope(t *testing.T, decrypted []byte) {
 func TestWeDecryptXmlsec1Encryption(t *testing.T) {
 	key := rsaKey(t)
 	kp := newKeypair(t, key)
-	tmpl := `<xenc:EncryptedData xmlns:xenc="` + xenc.NSXEnc + `" Type="` + xenc.TypeElement + `">` +
+	tmpl := `<xenc:EncryptedData xmlns:xenc="` + xmlsec.NSXEnc + `" Type="` + xenc.TypeElement + `">` +
 		`<xenc:EncryptionMethod Algorithm="` + xmlsec.EncAES128GCM + `"/>` +
 		`<ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#">` +
 		`<xenc:EncryptedKey><xenc:EncryptionMethod Algorithm="` + xmlsec.KeyTransportRSAOAEP + `">` +
 		`<ds:DigestMethod Algorithm="` + xmlsec.DigestSHA256 + `"/>` +
-		`<xenc11:MGF xmlns:xenc11="` + xenc.NSXEnc11 + `" Algorithm="` + xmlsec.MGF1SHA256 + `"/>` +
+		`<xenc11:MGF xmlns:xenc11="` + xmlsec.NSXEnc11 + `" Algorithm="` + xmlsec.MGF1SHA256 + `"/>` +
 		`</xenc:EncryptionMethod><xenc:CipherData><xenc:CipherValue/></xenc:CipherData></xenc:EncryptedKey>` +
 		`</ds:KeyInfo><xenc:CipherData><xenc:CipherValue/></xenc:CipherData></xenc:EncryptedData>`
 	out := filepath.Join(t.TempDir(), "out.xml")
@@ -436,12 +433,11 @@ func TestWeDecryptXmlsec1Encryption(t *testing.T) {
 	}
 
 	doc := parse(t, encrypted)
-	sessionKey, err := xenc.DecryptEncryptedKey(find(doc, xenc.NSXEnc, "EncryptedKey"), key,
-		[]string{xmlsec.KeyTransportRSAOAEP}, []string{xmlsec.MGF1SHA256}, []string{xmlsec.DigestSHA256})
+	sessionKey, err := xenc.DecryptEncryptedKey(find(doc, xmlsec.NSXEnc, "EncryptedKey"), key, xenc.DecryptOptions{AllowedKeyTransportAlgorithms: []string{xmlsec.KeyTransportRSAOAEP}, AllowedMGFAlgorithms: []string{xmlsec.MGF1SHA256}, AllowedDigestAlgorithms: []string{xmlsec.DigestSHA256}})
 	if err != nil {
 		t.Fatalf("%v\n%s", err, encrypted)
 	}
-	plain, err := xenc.DecryptData(find(doc, xenc.NSXEnc, "EncryptedData"), sessionKey, []string{xmlsec.EncAES128GCM})
+	plain, err := xenc.DecryptData(find(doc, xmlsec.NSXEnc, "EncryptedData"), sessionKey, xenc.DecryptOptions{AllowedDataAlgorithms: []string{xmlsec.EncAES128GCM}})
 	if err != nil {
 		t.Fatal(err)
 	}

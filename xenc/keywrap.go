@@ -109,7 +109,7 @@ func keyWrap(ek *xdm.Node, key []byte, opts EncryptOptions) ([]byte, error) {
 // implemented key wrap algorithm, whose EncryptionMethod may hold only a
 // consistent KeySize, and returns the algorithm.
 func wrapMethod(el *xdm.Node, allowedKeyWrap []string) (string, error) {
-	if el == nil || !el.IsElement(NSXEnc, "EncryptedKey") {
+	if el == nil || !el.IsElement(xmlsec.NSXEnc, "EncryptedKey") {
 		return "", malformed("not an xenc:EncryptedKey")
 	}
 	alg, m, err := parseEncryptionMethod(el)
@@ -157,14 +157,14 @@ func unwrap(el *xdm.Node, alg string, kek []byte) ([]byte, error) {
 // the EncryptedKey's ds:KeyName. The EncryptedKey's ds:KeyInfo is not read.
 // For a KEK from key agreement use DecryptAgreedKey.
 //
-// allowedKeyWrap restricts the accepted algorithms; empty means the default
-// set, AES key wrap. The legacy xmlsec.KeyWrapTripleDES, the RFC 3217 CMS
-// Triple DES key wrap of section 5.7.1 with a 24-octet kek, is unwrapped
-// only when allowedKeyWrap names it; its integrity check is a truncated
+// opts.AllowedKeyWrapAlgorithms restricts the accepted algorithms; empty
+// means the default set, AES key wrap. The legacy xmlsec.KeyWrapTripleDES,
+// the RFC 3217 CMS Triple DES key wrap of section 5.7.1 with a 24-octet
+// kek, is unwrapped only when named there; its integrity check is a truncated
 // SHA-1 of the key. kek must be the algorithm's size. A failed integrity
 // check is reported without detail.
-func UnwrapEncryptedKey(el *xdm.Node, kek []byte, allowedKeyWrap []string) ([]byte, error) {
-	alg, err := wrapMethod(el, allowedKeyWrap)
+func UnwrapEncryptedKey(el *xdm.Node, kek []byte, opts DecryptOptions) ([]byte, error) {
+	alg, err := wrapMethod(el, opts.AllowedKeyWrapAlgorithms)
 	if err != nil {
 		return nil, err
 	}

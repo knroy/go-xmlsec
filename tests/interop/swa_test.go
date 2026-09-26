@@ -4,6 +4,7 @@ package interop
 
 import (
 	"bytes"
+	"crypto"
 	"encoding/base64"
 	"path/filepath"
 	"strings"
@@ -101,7 +102,7 @@ func swaFiles(t *testing.T, parts []swaPart) []string {
 func swaSigned(t *testing.T, kp keypair, transform string) []byte {
 	t.Helper()
 	doc := parse(t, []byte(envelope))
-	hdr, err := wss.NewHeader(doc, wss.NSSOAP12, "", true)
+	hdr, err := wss.NewHeader(doc, xmlsec.NSSOAP12, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +190,7 @@ func TestWeVerifyWSS4JAttachmentSignatures(t *testing.T) {
 			signed := readFile(t, outPath)
 
 			doc := parse(t, signed)
-			cov, err := dsig.Verify(doc, find(doc, dsig.NSDSig, "Signature"), dsig.VerifyOptions{
+			cov, err := dsig.Verify(doc, find(doc, xmlsec.NSDSig, "Signature"), dsig.VerifyOptions{
 				Certificate: kp.provider.Certificate,
 				Attachments: swaSet(t, swaParts),
 			})
@@ -217,7 +218,7 @@ func TestWSS4JDecryptsOurAttachmentEncryption(t *testing.T) {
 	for _, typ := range []string{xmlsec.TransformAttachmentContentOnly, xmlsec.TransformAttachmentComplete} {
 		t.Run(typ[strings.Index(typ, "#")+1:], func(t *testing.T) {
 			doc := parse(t, []byte(envelope))
-			hdr, err := wss.NewHeader(doc, wss.NSSOAP12, "", true)
+			hdr, err := wss.NewHeader(doc, xmlsec.NSSOAP12, "", true)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -321,26 +322,25 @@ func TestWeDecryptWSS4JAttachmentEncryption(t *testing.T) {
 			mustSantuario(t, append(args, swaFiles(t, swaParts)...)...)
 			doc := parse(t, readFile(t, outPath))
 
-			key, err := xenc.DecryptEncryptedKey(find(doc, xenc.NSXEnc, "EncryptedKey"), recipient.provider.Decrypter,
-				[]string{xmlsec.KeyTransportRSAOAEP}, []string{xmlsec.MGF1SHA256}, []string{xmlsec.DigestSHA256})
+			key, err := xenc.DecryptEncryptedKey(find(doc, xmlsec.NSXEnc, "EncryptedKey"), recipient.provider.Signer.(crypto.Decrypter), xenc.DecryptOptions{AllowedKeyTransportAlgorithms: []string{xmlsec.KeyTransportRSAOAEP}, AllowedMGFAlgorithms: []string{xmlsec.MGF1SHA256}, AllowedDigestAlgorithms: []string{xmlsec.DigestSHA256}})
 			if err != nil {
 				t.Fatal(err)
 			}
 			n := 0
 			xmltree.Walk(doc, func(ed *xdm.Node) {
-				if !ed.IsElement(xenc.NSXEnc, "EncryptedData") {
+				if !ed.IsElement(xmlsec.NSXEnc, "EncryptedData") {
 					return
 				}
 				n++
 				if ed.AttrValue("Type") != typ {
 					t.Errorf("Type %q", ed.AttrValue("Type"))
 				}
-				ref := find(ed, xenc.NSXEnc, "CipherReference").AttrValue("URI")
+				ref := find(ed, xmlsec.NSXEnc, "CipherReference").AttrValue("URI")
 				part := readFile(t, filepath.Join(dir, strings.TrimPrefix(ref, "cid:")))
 				// WSS4J moves every listed header into an Attachment-Complete
 				// ciphertext, so a part may have no headers at all.
 				_, ct, _ := bytes.Cut(append([]byte("\r\n"), part...), []byte("\r\n\r\n"))
-				att, err := xenc.DecryptAttachment(ed, ct, key, []string{xmlsec.EncAES128GCM})
+				att, err := xenc.DecryptAttachment(ed, ct, key, xenc.DecryptOptions{AllowedDataAlgorithms: []string{xmlsec.EncAES128GCM}})
 				if err != nil {
 					t.Fatalf("%s: %v", ref, err)
 				}

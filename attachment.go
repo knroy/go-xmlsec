@@ -2,6 +2,7 @@ package xmlsec
 
 import (
 	"fmt"
+	"net/textproto"
 	"net/url"
 	"strings"
 )
@@ -26,7 +27,7 @@ type Attachment struct {
 	// Names match case-insensitively. Content-Type selects the content
 	// canonicalization of the SwA signature transforms, and the headers the
 	// SwA profile lists are what Attachment-Complete signs and encrypts.
-	MIMEHeaders map[string][]string
+	MIMEHeaders textproto.MIMEHeader
 
 	Body []byte
 }

@@ -7,12 +7,6 @@ import (
 	"github.com/knroy/go-xmlsec"
 )
 
-// Namespace URIs.
-const (
-	NSDSig    = "http://www.w3.org/2000/09/xmldsig#"
-	NSExcC14N = "http://www.w3.org/2001/10/xml-exc-c14n#"
-)
-
 // Common ID attributes for SignOptions.IDAttributes and
 // VerifyOptions.IDAttributes. Neither counts unless named there: each one
 // added widens what an attacker can use to duplicate an ID.
@@ -80,12 +74,12 @@ type TransformSpec struct {
 	InclusiveNamespacePrefixes []string
 }
 
-// KeyInfoSpec selects the ds:KeyInfo form.
-type KeyInfoSpec int
+// KeyInfoForm selects the ds:KeyInfo form.
+type KeyInfoForm int
 
 const (
 	// KeyInfoNone emits no ds:KeyInfo. The verifier must already know the key.
-	KeyInfoNone KeyInfoSpec = iota
+	KeyInfoNone KeyInfoForm = iota
 
 	// KeyInfoX509Data emits ds:X509Data/ds:X509Certificate with the
 	// base64 DER of the signing certificate.

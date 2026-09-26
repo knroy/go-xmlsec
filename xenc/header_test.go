@@ -6,10 +6,9 @@ import (
 	"testing"
 
 	"github.com/knroy/go-xml/xdm"
+	"github.com/knroy/go-xmlsec"
 	"github.com/knroy/go-xmlsec/xenc"
 )
-
-const nsWSSE = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"
 
 // WS-Security 1.1.1 section 9.4.3: the block becomes a
 // wsse11:EncryptedHeader holding the EncryptedData, carrying the
@@ -19,14 +18,14 @@ func TestEncryptHeader(t *testing.T) {
 	for _, c := range []struct {
 		name, ns, secAttrs, want string
 	}{
-		{"SOAP 1.1", soap11, `S:mustUnderstand="1" S:actor="urn:next"`, `<wsse11:EncryptedHeader xmlns:wsse11="` + xenc.NSWSSE11 + `" S:actor="urn:next" S:mustUnderstand="1">`},
-		{"SOAP 1.2", soap12, `S:mustUnderstand="true" S:role="urn:r" S:relay="true" other="x"`, `<wsse11:EncryptedHeader xmlns:wsse11="` + xenc.NSWSSE11 + `" S:mustUnderstand="true" S:relay="true" S:role="urn:r">`},
-		{"prefix declared on Security", soap12, `xmlns:e="` + soap12 + `" e:mustUnderstand="true"`, `<wsse11:EncryptedHeader xmlns:e="` + soap12 + `" xmlns:wsse11="` + xenc.NSWSSE11 + `" e:mustUnderstand="true">`},
-		{"no attributes", soap12, ``, `<wsse11:EncryptedHeader xmlns:wsse11="` + xenc.NSWSSE11 + `">`},
+		{"SOAP 1.1", soap11, `S:mustUnderstand="1" S:actor="urn:next"`, `<wsse11:EncryptedHeader xmlns:wsse11="` + xmlsec.NSWSSE11 + `" S:actor="urn:next" S:mustUnderstand="1">`},
+		{"SOAP 1.2", soap12, `S:mustUnderstand="true" S:role="urn:r" S:relay="true" other="x"`, `<wsse11:EncryptedHeader xmlns:wsse11="` + xmlsec.NSWSSE11 + `" S:mustUnderstand="true" S:relay="true" S:role="urn:r">`},
+		{"prefix declared on Security", soap12, `xmlns:e="` + soap12 + `" e:mustUnderstand="true"`, `<wsse11:EncryptedHeader xmlns:e="` + soap12 + `" xmlns:wsse11="` + xmlsec.NSWSSE11 + `" e:mustUnderstand="true">`},
+		{"no attributes", soap12, ``, `<wsse11:EncryptedHeader xmlns:wsse11="` + xmlsec.NSWSSE11 + `">`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			doc := covParse(t, `<S:Envelope xmlns:S="`+c.ns+`"><S:Header>`+
-				`<wsse:Security xmlns:wsse="`+nsWSSE+`" `+c.secAttrs+`></wsse:Security>`+
+				`<wsse:Security xmlns:wsse="`+xmlsec.NSWSSE+`" `+c.secAttrs+`></wsse:Security>`+
 				`<m:Block xmlns:m="urn:m" S:mustUnderstand="1" secret="s">v</m:Block></S:Header><S:Body/></S:Envelope>`)
 			hdr := doc.ChildElements()[0]
 			sec, block := hdr.ChildElements()[0], hdr.ChildElements()[1]
@@ -37,7 +36,7 @@ func TestEncryptHeader(t *testing.T) {
 				t.Fatal(err)
 			}
 			s := string(out)
-			if !strings.Contains(s, c.want+`<xenc:EncryptedData xmlns:xenc="`+xenc.NSXEnc+`" Id="ED-h" Type="`+xenc.TypeElement+`">`) ||
+			if !strings.Contains(s, c.want+`<xenc:EncryptedData xmlns:xenc="`+xmlsec.NSXEnc+`" Id="ED-h" Type="`+xenc.TypeElement+`">`) ||
 				strings.Contains(s, "secret") || strings.Contains(s, "Block") {
 				t.Fatalf("encrypted:\n%s", s)
 			}
@@ -54,12 +53,12 @@ func TestEncryptHeader(t *testing.T) {
 func TestEncryptHeaderErrors(t *testing.T) {
 	key := bytes.Repeat([]byte{7}, 16)
 	doc := covParse(t, `<S:Envelope xmlns:S="`+soap12+`" xmlns:x="urn:x"><S:Header>`+
-		`<wsse:Security xmlns:wsse="`+nsWSSE+`"/>`+
-		`<wsse:Security xmlns:wsse="`+nsWSSE+`" xmlns:x="`+soap12+`" x:mustUnderstand="true"/>`+
+		`<wsse:Security xmlns:wsse="`+xmlsec.NSWSSE+`"/>`+
+		`<wsse:Security xmlns:wsse="`+xmlsec.NSWSSE+`" xmlns:x="`+soap12+`" x:mustUnderstand="true"/>`+
 		`<b>v</b></S:Header><S:Body><c/></S:Body></S:Envelope>`)
 	hdr := doc.ChildElements()[0]
 	sec, clash, block := hdr.ChildElements()[0], hdr.ChildElements()[1], hdr.ChildElements()[2]
-	other := covParse(t, `<wsse:Security xmlns:wsse="`+nsWSSE+`"/>`)
+	other := covParse(t, `<wsse:Security xmlns:wsse="`+xmlsec.NSWSSE+`"/>`)
 	for name, c := range map[string]struct {
 		block, sec *xdm.Node
 		dataAlg    string

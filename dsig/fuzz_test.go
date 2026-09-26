@@ -16,6 +16,7 @@ import (
 	"github.com/knroy/go-xml/xdm"
 	"github.com/knroy/go-xmlsec"
 	"github.com/knroy/go-xmlsec/dsig"
+	"github.com/knroy/go-xmlsec/internal/hashes"
 	"github.com/knroy/go-xmlsec/internal/xmltree"
 	"github.com/knroy/go-xmlsec/wss"
 )
@@ -43,7 +44,7 @@ func fuzzSigned(key xmlsec.KeyProvider) (detached, enveloped []byte) {
 	env := xmltree.DocumentElement(doc)
 	msgID := must(wss.AssignID(doc, env.ChildElements()[0].ChildElements()[0]))
 	bodyID := must(wss.AssignID(doc, env.ChildElements()[1]))
-	hdr := must(wss.NewHeader(doc, wss.NSSOAP12, "", true))
+	hdr := must(wss.NewHeader(doc, xmlsec.NSSOAP12, "", true))
 	tok := must(hdr.AddBinarySecurityToken(key.Certificate, nil, xmlsec.BSTValueTypeX509v3))
 	atts := must(xmlsec.NewAttachmentSet(&xmlsec.Attachment{ID: "att-1@example.com", Body: []byte("payload")}))
 	sig := must(dsig.Sign(doc, key, dsig.SignOptions{
@@ -68,7 +69,7 @@ func fuzzSigned(key xmlsec.KeyProvider) (detached, enveloped []byte) {
 
 // fuzzEnveloped returns an enveloped signature, as signEnveloped builds, with
 // ds:KeyInfo in the given form.
-func fuzzEnveloped(key xmlsec.KeyProvider, form dsig.KeyInfoSpec) []byte {
+func fuzzEnveloped(key xmlsec.KeyProvider, form dsig.KeyInfoForm) []byte {
 	return must(dsig.SignEnveloped(must(xmlsec.Parse([]byte(metadata))).Root, key, dsig.SignOptions{
 		SignatureAlgorithm:        xmlsec.SigRSASHA256,
 		CanonicalizationAlgorithm: string(c14n.Inclusive10),
@@ -89,7 +90,7 @@ func fuzzEnveloped(key xmlsec.KeyProvider, form dsig.KeyInfoSpec) []byte {
 // could.
 func resign(sig *xdm.Node) bool {
 	kids := sig.ChildElements()
-	if len(kids) < 2 || !kids[0].IsElement(dsig.NSDSig, "SignedInfo") {
+	if len(kids) < 2 || !kids[0].IsElement(xmlsec.NSDSig, "SignedInfo") {
 		return false
 	}
 	si := kids[0].ChildElements()
@@ -100,7 +101,7 @@ func resign(sig *xdm.Node) bool {
 	if in := si[0].ChildElements(); len(in) == 1 {
 		opts.InclusiveNamespacePrefixes = c14n.ParsePrefixList(in[0].AttrValue("PrefixList"))
 	}
-	h, ok := xmlsec.SignatureHash(si[1].AttrValue("Algorithm"))
+	h, ok := hashes.Signature(si[1].AttrValue("Algorithm"))
 	if !ok || !strings.Contains(si[1].AttrValue("Algorithm"), "#rsa-") {
 		return false
 	}

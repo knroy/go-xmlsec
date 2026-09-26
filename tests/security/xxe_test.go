@@ -205,7 +205,7 @@ func TestVerifyDereferencesNothingExternal(t *testing.T) {
 
 func elements(root *xdm.Node) (sig, si, ref, value *xdm.Node) {
 	xmltree.Walk(root, func(e *xdm.Node) {
-		if e.Name.URI != dsig.NSDSig {
+		if e.Name.URI != xmlsec.NSDSig {
 			return
 		}
 		switch e.Name.Local {

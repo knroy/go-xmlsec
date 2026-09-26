@@ -60,7 +60,7 @@ func TestEncryptAttachmentMimeType(t *testing.T) {
 			if ed.Attr("", "MimeType") != nil {
 				t.Fatal("MimeType emitted without a Content-Type")
 			}
-			pt, err := xenc.DecryptAttachment(reparse(t, ed), ct, key, nil)
+			pt, err := xenc.DecryptAttachment(reparse(t, ed), ct, key, xenc.DecryptOptions{})
 			if err != nil || !bytes.Equal(pt.Body, att.Body) || pt.MIMEHeaders != nil {
 				t.Fatalf("round trip %q, %v", pt, err)
 			}
@@ -82,7 +82,7 @@ func TestDecryptAttachmentErrors(t *testing.T) {
 		key  []byte
 		want error // nil: any error
 	}{
-		{"not EncryptedData", `<xenc:EncryptedKey xmlns:xenc="` + xenc.NSXEnc + `"/>`, make([]byte, 40), key, xmlsec.ErrMalformed},
+		{"not EncryptedData", `<xenc:EncryptedKey xmlns:xenc="` + xmlsec.NSXEnc + `"/>`, make([]byte, 40), key, xmlsec.ErrMalformed},
 		{"unknown algorithm", covED(typ, covEM("urn:x")+ref("cid:a")), make([]byte, 40), key, xmlsec.ErrAlgorithmNotAllowed},
 		{"no Type", covED(``, em+ref("cid:a")), make([]byte, 40), key, xmlsec.ErrUnsupportedAlgorithm},
 		{"Element Type", covED(`Type="`+xenc.TypeElement+`"`, em+ref("cid:a")), make([]byte, 40), key, xmlsec.ErrUnsupportedAlgorithm},
@@ -97,7 +97,7 @@ func TestDecryptAttachmentErrors(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			pt, err := xenc.DecryptAttachment(covParse(t, c.el), c.ct, c.key, nil)
+			pt, err := xenc.DecryptAttachment(covParse(t, c.el), c.ct, c.key, xenc.DecryptOptions{})
 			if err == nil || c.want != nil && !errors.Is(err, c.want) {
 				t.Fatalf("got %v, want %v", err, c.want)
 			}
@@ -132,7 +132,7 @@ func TestEncryptAttachmentComplete(t *testing.T) {
 		t.Fatalf("plaintext %q, want %q", got, want)
 	}
 
-	got, err := xenc.DecryptAttachment(ed, ct, key, nil)
+	got, err := xenc.DecryptAttachment(ed, ct, key, xenc.DecryptOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestCipherReferenceCIDEncoding(t *testing.T) {
 		if cr.AttrValue("URI") != uri {
 			t.Errorf("%q: URI %q, want %q", id, cr.AttrValue("URI"), uri)
 		}
-		got, err := xenc.DecryptAttachment(ed, ct, key, nil)
+		got, err := xenc.DecryptAttachment(ed, ct, key, xenc.DecryptOptions{})
 		if err != nil || got.ID != id {
 			t.Errorf("%q: decrypted ID %q, %v", id, got.ID, err)
 		}
@@ -193,12 +193,12 @@ func TestDecryptAttachmentTransforms(t *testing.T) {
 	tr := func(algs ...string) string {
 		s := `<xenc:Transforms>`
 		for _, a := range algs {
-			s += `<ds:Transform xmlns:ds="` + xenc.NSDSig + `" Algorithm="` + a + `"/>`
+			s += `<ds:Transform xmlns:ds="` + xmlsec.NSDSig + `" Algorithm="` + a + `"/>`
 		}
 		return s + `</xenc:Transforms>`
 	}
-	for _, ok := range []string{``, tr(xenc.TransformAttachmentCiphertext)} {
-		if got, err := xenc.DecryptAttachment(el(ok), ct, key, nil); err != nil || string(got.Body) != "body" {
+	for _, ok := range []string{``, tr(xmlsec.TransformAttachmentCiphertext)} {
+		if got, err := xenc.DecryptAttachment(el(ok), ct, key, xenc.DecryptOptions{}); err != nil || string(got.Body) != "body" {
 			t.Fatalf("%s: %v", ok, err)
 		}
 	}
@@ -207,16 +207,16 @@ func TestDecryptAttachmentTransforms(t *testing.T) {
 		want       error
 	}{
 		"XSLT":           {tr(xmlsec.TransformXSLT), xmlsec.ErrTransformRefused},
-		"XPath":          {`<xenc:Transforms><ds:Transform xmlns:ds="` + xenc.NSDSig + `" Algorithm="` + xmlsec.TransformXPath + `"><ds:XPath>1</ds:XPath></ds:Transform></xenc:Transforms>`, xmlsec.ErrTransformRefused},
-		"XPath after":    {tr(xenc.TransformAttachmentCiphertext, xmlsec.TransformXPathFilter2), xmlsec.ErrTransformRefused},
+		"XPath":          {`<xenc:Transforms><ds:Transform xmlns:ds="` + xmlsec.NSDSig + `" Algorithm="` + xmlsec.TransformXPath + `"><ds:XPath>1</ds:XPath></ds:Transform></xenc:Transforms>`, xmlsec.ErrTransformRefused},
+		"XPath after":    {tr(xmlsec.TransformAttachmentCiphertext, xmlsec.TransformXPathFilter2), xmlsec.ErrTransformRefused},
 		"base64":         {tr(xmlsec.TransformBase64), xmlsec.ErrUnsupportedAlgorithm},
-		"twice":          {tr(xenc.TransformAttachmentCiphertext, xenc.TransformAttachmentCiphertext), xmlsec.ErrUnsupportedAlgorithm},
+		"twice":          {tr(xmlsec.TransformAttachmentCiphertext, xmlsec.TransformAttachmentCiphertext), xmlsec.ErrUnsupportedAlgorithm},
 		"signature form": {tr(xmlsec.TransformAttachmentContentSignature), xmlsec.ErrUnsupportedAlgorithm},
-		"ds:Transforms":  {`<ds:Transforms xmlns:ds="` + xenc.NSDSig + `"/>`, xmlsec.ErrMalformed},
+		"ds:Transforms":  {`<ds:Transforms xmlns:ds="` + xmlsec.NSDSig + `"/>`, xmlsec.ErrMalformed},
 		"two Transforms": {tr() + tr(), xmlsec.ErrMalformed},
 	} {
 		t.Run(name, func(t *testing.T) {
-			got, err := xenc.DecryptAttachment(el(c.transforms), ct, key, nil)
+			got, err := xenc.DecryptAttachment(el(c.transforms), ct, key, xenc.DecryptOptions{})
 			if !errors.Is(err, c.want) || got != nil {
 				t.Fatalf("got %v, want %v", err, c.want)
 			}
@@ -250,11 +250,11 @@ func TestDecryptAttachmentComplete(t *testing.T) {
 	el := covParse(t, covED(`Type="`+xmlsec.TransformAttachmentComplete+`"`,
 		covEM(xmlsec.EncAES128GCM)+`<xenc:CipherData><xenc:CipherReference URI="cid:a%40x"/></xenc:CipherData>`))
 
-	got, err := xenc.DecryptAttachment(el, sealGCM(key, "\r\nbody"), key, nil)
+	got, err := xenc.DecryptAttachment(el, sealGCM(key, "\r\nbody"), key, xenc.DecryptOptions{})
 	if err != nil || got.ID != "a@x" || string(got.Body) != "body" || len(got.MIMEHeaders) != 0 {
 		t.Fatalf("no headers: %+v, %v", got, err)
 	}
-	got, err = xenc.DecryptAttachment(el, sealGCM(key, "Content-Type:text/plain\r\nContent-Description: a\r\n b\r\n\r\n\r\nbody"), key, nil)
+	got, err = xenc.DecryptAttachment(el, sealGCM(key, "Content-Type:text/plain\r\nContent-Description: a\r\n b\r\n\r\n\r\nbody"), key, xenc.DecryptOptions{})
 	if err != nil || string(got.Body) != "\r\nbody" || got.MIMEHeaders["Content-Description"][0] != "a b" {
 		t.Fatalf("folded header: %+v, %v", got, err)
 	}
@@ -265,7 +265,7 @@ func TestDecryptAttachmentComplete(t *testing.T) {
 		"header twice":    "Content-Type: text/plain\r\ncontent-type: text/xml\r\n\r\nbody",
 	} {
 		t.Run(name, func(t *testing.T) {
-			got, err := xenc.DecryptAttachment(el, sealGCM(key, pt), key, nil)
+			got, err := xenc.DecryptAttachment(el, sealGCM(key, pt), key, xenc.DecryptOptions{})
 			if !errors.Is(err, xmlsec.ErrMalformed) || got != nil {
 				t.Fatalf("got %+v, %v", got, err)
 			}

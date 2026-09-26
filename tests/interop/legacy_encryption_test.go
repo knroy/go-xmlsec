@@ -33,7 +33,7 @@ var legacyCases = []struct {
 // legacyTemplate is an xmlsec1 encryption template for data under the
 // EncryptedKey method em.
 func legacyTemplate(data, em string) string {
-	return `<xenc:EncryptedData xmlns:xenc="` + xenc.NSXEnc + `" Type="` + xenc.TypeElement + `">` +
+	return `<xenc:EncryptedData xmlns:xenc="` + xmlsec.NSXEnc + `" Type="` + xenc.TypeElement + `">` +
 		`<xenc:EncryptionMethod Algorithm="` + data + `"/>` +
 		`<ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#">` +
 		`<xenc:EncryptedKey>` + em + `<xenc:CipherData><xenc:CipherValue/></xenc:CipherData></xenc:EncryptedKey>` +
@@ -45,28 +45,28 @@ func legacyTemplate(data, em string) string {
 // algorithms.
 func legacyUnwrap(t *testing.T, doc *xdm.Node, priv *rsa.PrivateKey, transport, data string) []byte {
 	t.Helper()
-	ek, ed := find(doc, xenc.NSXEnc, "EncryptedKey"), find(doc, xenc.NSXEnc, "EncryptedData")
+	ek, ed := find(doc, xmlsec.NSXEnc, "EncryptedKey"), find(doc, xmlsec.NSXEnc, "EncryptedData")
 	named := []string{transport}
 	if transport == xmlsec.KeyTransportRSA15 {
-		if _, err := xenc.DecryptEncryptedKeyPKCS1v15(ek, ed, priv, nil, nil); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
+		if _, err := xenc.DecryptEncryptedKeyPKCS1v15(ek, ed, priv, xenc.DecryptOptions{}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
 			t.Fatalf("default set: %v", err)
 		}
-		if _, err := xenc.DecryptEncryptedKeyPKCS1v15(ek, ed, priv, named, nil); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
+		if _, err := xenc.DecryptEncryptedKeyPKCS1v15(ek, ed, priv, xenc.DecryptOptions{AllowedKeyTransportAlgorithms: named}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
 			t.Fatalf("default data set: %v", err)
 		}
-		key, err := xenc.DecryptEncryptedKeyPKCS1v15(ek, ed, priv, named, []string{data})
+		key, err := xenc.DecryptEncryptedKeyPKCS1v15(ek, ed, priv, xenc.DecryptOptions{AllowedKeyTransportAlgorithms: named, AllowedDataAlgorithms: []string{data}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		return key
 	}
-	if _, err := xenc.DecryptEncryptedKey(ek, priv, nil, nil, nil); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
+	if _, err := xenc.DecryptEncryptedKey(ek, priv, xenc.DecryptOptions{}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
 		t.Fatalf("default set: %v", err)
 	}
-	if _, err := xenc.DecryptEncryptedKey(ek, priv, named, nil, []string{xmlsec.DigestSHA1}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
+	if _, err := xenc.DecryptEncryptedKey(ek, priv, xenc.DecryptOptions{AllowedKeyTransportAlgorithms: named, AllowedDigestAlgorithms: []string{xmlsec.DigestSHA1}}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
 		t.Fatalf("default MGF set: %v", err)
 	}
-	key, err := xenc.DecryptEncryptedKey(ek, priv, named, []string{xmlsec.MGF1SHA1}, []string{xmlsec.DigestSHA1})
+	key, err := xenc.DecryptEncryptedKey(ek, priv, xenc.DecryptOptions{AllowedKeyTransportAlgorithms: named, AllowedMGFAlgorithms: []string{xmlsec.MGF1SHA1}, AllowedDigestAlgorithms: []string{xmlsec.DigestSHA1}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,11 +77,11 @@ func legacyUnwrap(t *testing.T, doc *xdm.Node, priv *rsa.PrivateKey, transport, 
 // default set, and checks the payload.
 func legacyOpen(t *testing.T, doc *xdm.Node, key []byte, data string) {
 	t.Helper()
-	ed := find(doc, xenc.NSXEnc, "EncryptedData")
-	if _, err := xenc.DecryptData(ed, key, nil); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
+	ed := find(doc, xmlsec.NSXEnc, "EncryptedData")
+	if _, err := xenc.DecryptData(ed, key, xenc.DecryptOptions{}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
 		t.Fatalf("default data set: %v", err)
 	}
-	plain, err := xenc.DecryptData(ed, key, []string{data})
+	plain, err := xenc.DecryptData(ed, key, xenc.DecryptOptions{AllowedDataAlgorithms: []string{data}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,11 +136,11 @@ func TestWeUnwrapXmlsec1TripleDESKeyWrap(t *testing.T) {
 // EncryptedData, checking the default sets refuse both.
 func legacyKW(t *testing.T, doc *xdm.Node, kek []byte, data string) {
 	t.Helper()
-	ek := find(doc, xenc.NSXEnc, "EncryptedKey")
-	if _, err := xenc.UnwrapEncryptedKey(ek, kek, nil); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
+	ek := find(doc, xmlsec.NSXEnc, "EncryptedKey")
+	if _, err := xenc.UnwrapEncryptedKey(ek, kek, xenc.DecryptOptions{}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
 		t.Fatalf("default set: %v", err)
 	}
-	key, err := xenc.UnwrapEncryptedKey(ek, kek, []string{xmlsec.KeyWrapTripleDES})
+	key, err := xenc.UnwrapEncryptedKey(ek, kek, xenc.DecryptOptions{AllowedKeyWrapAlgorithms: []string{xmlsec.KeyWrapTripleDES}})
 	if err != nil {
 		t.Fatal(err)
 	}

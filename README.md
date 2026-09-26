@@ -97,7 +97,8 @@ and encryption in full.
 2. **Check `Coverage`.** Confirm it includes every element and attachment you
    are about to read (`Covers`, `CoversAttachments`, `SignedElements`). A
    valid signature over the wrong element is how XML Signature Wrapping works.
-3. **Pass allow-lists** naming exactly the algorithms your profile permits.
+3. **Pass allow-lists** (`dsig.VerifyOptions`, `xenc.DecryptOptions`) naming
+   exactly the algorithms your profile permits.
 4. **Parse with `xmlsec.Parse`**, or `xmlsec.ParseWithLimits` to tighten the
    limits to what your profile needs.
 

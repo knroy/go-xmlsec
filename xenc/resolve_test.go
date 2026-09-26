@@ -8,7 +8,7 @@ import (
 	"github.com/knroy/go-xmlsec/xenc"
 )
 
-const resolveNS = `xmlns:xenc="` + xenc.NSXEnc + `" xmlns:ds="` + xenc.NSDSig + `" xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd"`
+const resolveNS = `xmlns:xenc="` + xmlsec.NSXEnc + `" xmlns:ds="` + xmlsec.NSDSig + `" xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd"`
 
 // resolveEK is an EncryptedKey with the given attributes and trailing
 // children.

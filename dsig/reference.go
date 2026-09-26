@@ -93,7 +93,7 @@ func digestReference(h hash.Hash, doc, sig *xdm.Node, uri string, transforms []T
 			in.ns = c14n.Document(doc)
 			out.whole = true
 		} else {
-			el, err := wss.FindByIDAttributes(doc, id, idAttrs...)
+			el, err := wss.FindByID(doc, id, idAttrs...)
 			if err != nil {
 				return out, err
 			}

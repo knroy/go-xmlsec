@@ -5,10 +5,10 @@
 //
 // # Allow-lists
 //
-// Every Decrypt and Unwrap function takes allow-lists, checked before any
-// cryptographic work. An empty list means the default set: every secure
-// algorithm this package implements. A list can never enable an algorithm
-// this package does not implement.
+// Every Decrypt and Unwrap function takes a DecryptOptions whose allow-lists
+// are checked before any cryptographic work. An empty list means the
+// default set: every secure algorithm this package implements. A list can
+// never enable an algorithm this package does not implement.
 //
 // # Legacy algorithms, decryption only
 //
@@ -40,42 +40,18 @@ import (
 
 	"github.com/knroy/go-xml/xdm"
 	"github.com/knroy/go-xmlsec"
+	"github.com/knroy/go-xmlsec/internal/hashes"
 	"github.com/knroy/go-xmlsec/internal/xmltree"
 )
 
-// Namespaces this package needs but does not export.
+// Type URIs.
 const (
-	nsDSig11 = "http://www.w3.org/2009/xmldsig11#"
-	nsWSSE   = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"
-	nsSOAP11 = "http://schemas.xmlsoap.org/soap/envelope/"
-	nsSOAP12 = "http://www.w3.org/2003/05/soap-envelope"
-)
-
-// Namespace and type URIs.
-const (
-	NSXEnc   = "http://www.w3.org/2001/04/xmlenc#"
-	NSXEnc11 = "http://www.w3.org/2009/xmlenc11#"
-	NSDSig   = "http://www.w3.org/2000/09/xmldsig#"
-
-	// NSWSSE11 is the WS-Security 1.1 namespace of wsse11:EncryptedHeader.
-	NSWSSE11 = "http://docs.oasis-open.org/wss/oasis-wss-wssecurity-secext-1.1.xsd"
-
 	TypeElement = "http://www.w3.org/2001/04/xmlenc#Element"
 	TypeContent = "http://www.w3.org/2001/04/xmlenc#Content"
 
 	// TypeEncryptedKey is the ds:RetrievalMethod Type of a reference to an
 	// xenc:EncryptedKey (section 3.5.1).
 	TypeEncryptedKey = "http://www.w3.org/2001/04/xmlenc#EncryptedKey"
-
-	// TransformAttachmentCiphertext is the CipherReference transform the
-	// SwA profile requires on every encrypted attachment.
-	TransformAttachmentCiphertext = "http://docs.oasis-open.org/wss/oasis-wss-SwAProfile-1.1#Attachment-Ciphertext-Transform"
-
-	// DigestSHA384XMLEnc is XML Encryption's own SHA-384 identifier
-	// (section 5.8.3). It is accepted on decryption as the OAEP and
-	// ConcatKDF digest, alongside xmlsec.DigestSHA384, which is what this
-	// package emits because xmlsec1 and Santuario recognise only that one.
-	DigestSHA384XMLEnc = "http://www.w3.org/2001/04/xmlenc#sha384"
 )
 
 // EncryptOptions configures encryption.
@@ -125,8 +101,11 @@ type EncryptOptions struct {
 	// attribute: an application-defined hint naming whom the key is for.
 	RecipientHint string
 
-	// SessionKey, if non-nil, is used instead of a freshly generated key.
-	// For tests only. Never set in production.
+	// SessionKey, if non-nil, is the key GenerateEncryptedKey wraps instead
+	// of a fresh random one; it must be DataAlgorithm's size. Set it to an
+	// earlier EncryptedKey's SessionKey to wrap one key for several
+	// recipients (XML Encryption 1.1 section 3.5.1). Never set it to
+	// anything but a key from crypto/rand.
 	SessionKey []byte
 
 	// DataID, if set, becomes the Id of the xenc:EncryptedData produced,
@@ -149,6 +128,40 @@ var wrapSizes = map[string]int{
 	xmlsec.KeyWrapAES256: 32,
 }
 
+// DecryptOptions restricts the algorithms the Decrypt and Unwrap functions
+// accept. Every list is checked before any cryptographic work. An empty list
+// means the default set: every secure algorithm this package implements in
+// that role. A list can never enable an algorithm this package does not
+// implement, and a legacy algorithm (see the package documentation) is
+// accepted only when named. Each function reads only the lists that apply
+// to it.
+type DecryptOptions struct {
+	// AllowedDataAlgorithms restricts the EncryptedData EncryptionMethod.
+	// Default: the xmlsec.Enc*GCM constants.
+	AllowedDataAlgorithms []string
+
+	// AllowedKeyTransportAlgorithms restricts the EncryptionMethod of an
+	// RSA EncryptedKey. Default: xmlsec.KeyTransportRSAOAEP.
+	AllowedKeyTransportAlgorithms []string
+
+	// AllowedMGFAlgorithms restricts the RSA-OAEP mask generation function.
+	// Default: the xmlsec.MGF1SHA256, 384 and 512 constants.
+	AllowedMGFAlgorithms []string
+
+	// AllowedDigestAlgorithms restricts the RSA-OAEP and ConcatKDF digest.
+	// Default: xmlsec.DigestSHA256, DigestSHA384, DigestSHA384XMLEnc and
+	// DigestSHA512.
+	AllowedDigestAlgorithms []string
+
+	// AllowedKeyWrapAlgorithms restricts the EncryptionMethod of a wrapped
+	// or agreed EncryptedKey. Default: the xmlsec.KeyWrapAES* constants.
+	AllowedKeyWrapAlgorithms []string
+
+	// AllowedKeyAgreementAlgorithms restricts the xenc:AgreementMethod.
+	// Default: xmlsec.KeyAgreementECDHES.
+	AllowedKeyAgreementAlgorithms []string
+}
+
 // The default allow-lists, used when a caller passes an empty one.
 var (
 	defaultData         = []string{xmlsec.EncAES128GCM, xmlsec.EncAES192GCM, xmlsec.EncAES256GCM}
@@ -156,14 +169,8 @@ var (
 	defaultKeyWrap      = []string{xmlsec.KeyWrapAES128, xmlsec.KeyWrapAES192, xmlsec.KeyWrapAES256}
 	defaultAgreement    = []string{xmlsec.KeyAgreementECDHES}
 	defaultMGF          = []string{xmlsec.MGF1SHA256, xmlsec.MGF1SHA384, xmlsec.MGF1SHA512}
-	defaultDigest       = []string{xmlsec.DigestSHA256, xmlsec.DigestSHA384, DigestSHA384XMLEnc, xmlsec.DigestSHA512}
+	defaultDigest       = []string{xmlsec.DigestSHA256, xmlsec.DigestSHA384, xmlsec.DigestSHA384XMLEnc, xmlsec.DigestSHA512}
 )
-
-// ErrNotNFC is returned when an element or element content to be encrypted
-// is not in Unicode Normalization Form C, which XML Encryption 1.1 section
-// 4.3 requires of the plaintext. It is refused rather than normalized:
-// normalizing would change content that may already be signed.
-var ErrNotNFC = errors.New("xenc: plaintext is not in Unicode Normalization Form C")
 
 var errDecrypt = errors.New("xenc: decryption failed")
 
@@ -192,13 +199,13 @@ func digest(kind, v string, list []string) (crypto.Hash, error) {
 		return 0, err
 	}
 	switch v {
-	case DigestSHA384XMLEnc:
+	case xmlsec.DigestSHA384XMLEnc:
 		return crypto.SHA384, nil
 	case xmlsec.DigestSHA1:
 		// Allowed only by name: never in defaultDigest.
 		return crypto.SHA1, nil
 	}
-	h, ok := xmlsec.DigestHash(v)
+	h, ok := hashes.Digest(v)
 	if !ok {
 		return 0, unsupported("%s %q", kind, v)
 	}
@@ -206,7 +213,7 @@ func digest(kind, v string, list []string) (crypto.Hash, error) {
 }
 
 func element(parent *xdm.Node, local string) *xdm.Node {
-	return xmltree.Element(parent, "xenc", NSXEnc, local)
+	return xmltree.Element(parent, "xenc", xmlsec.NSXEnc, local)
 }
 
 // nsElement creates an element in another namespace, declaring its prefix
@@ -219,7 +226,7 @@ func nsElement(parent *xdm.Node, prefix, uri, local string) *xdm.Node {
 
 // newRoot creates a detached xenc root element with its namespace declared.
 func newRoot(local string) *xdm.Node {
-	return nsElement(nil, "xenc", NSXEnc, local)
+	return nsElement(nil, "xenc", xmlsec.NSXEnc, local)
 }
 
 func encryptionMethod(parent *xdm.Node, alg string) *xdm.Node {
@@ -247,7 +254,7 @@ func newEncryptedData(typ string, opts EncryptOptions) (*xdm.Node, error) {
 // which must be its first element child, and the method element itself.
 func parseEncryptionMethod(el *xdm.Node) (string, *xdm.Node, error) {
 	kids := el.ChildElements()
-	if len(kids) == 0 || !kids[0].IsElement(NSXEnc, "EncryptionMethod") {
+	if len(kids) == 0 || !kids[0].IsElement(xmlsec.NSXEnc, "EncryptionMethod") {
 		return "", nil, malformed("%s without xenc:EncryptionMethod", el.Name.Local)
 	}
 	return kids[0].AttrValue("Algorithm"), kids[0], nil
@@ -261,7 +268,7 @@ func methodParams(m *xdm.Node, bits int, permitted ...xdm.QName) (map[string]*xd
 	seen := map[string]*xdm.Node{}
 	for _, k := range m.ChildElements() {
 		switch {
-		case k.IsElement(NSXEnc, "KeySize"):
+		case k.IsElement(xmlsec.NSXEnc, "KeySize"):
 			// xs:integer collapses whitespace.
 			if n, err := strconv.Atoi(strings.TrimSpace(k.StringValue())); err != nil || n != bits {
 				return nil, malformed("xenc:KeySize %q inconsistent with %s, which needs %d", k.StringValue(), m.AttrValue("Algorithm"), bits)
@@ -280,7 +287,7 @@ func methodParams(m *xdm.Node, bits int, permitted ...xdm.QName) (map[string]*xd
 // cipherData returns el's xenc:CipherData child.
 func cipherData(el *xdm.Node) (*xdm.Node, error) {
 	for _, k := range el.ChildElements() {
-		if k.IsElement(NSXEnc, "CipherData") {
+		if k.IsElement(xmlsec.NSXEnc, "CipherData") {
 			return k, nil
 		}
 	}
@@ -294,7 +301,7 @@ func cipherValue(el *xdm.Node) ([]byte, error) {
 		return nil, err
 	}
 	kids := cd.ChildElements()
-	if len(kids) != 1 || !kids[0].IsElement(NSXEnc, "CipherValue") {
+	if len(kids) != 1 || !kids[0].IsElement(xmlsec.NSXEnc, "CipherValue") {
 		return nil, malformed("xenc:CipherData must hold one xenc:CipherValue")
 	}
 	b, err := xmltree.Base64(kids[0])

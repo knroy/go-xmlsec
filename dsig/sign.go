@@ -18,6 +18,7 @@ import (
 	"github.com/knroy/go-xml/c14n"
 	"github.com/knroy/go-xml/xdm"
 	"github.com/knroy/go-xmlsec"
+	"github.com/knroy/go-xmlsec/internal/hashes"
 	"github.com/knroy/go-xmlsec/internal/xmltree"
 	"github.com/knroy/go-xmlsec/wss"
 )
@@ -38,7 +39,7 @@ type SignOptions struct {
 	References []Reference
 
 	// KeyInfo selects how key material is described. Required.
-	KeyInfo KeyInfoSpec
+	KeyInfo KeyInfoForm
 
 	// SecurityTokenID is the wsu:Id of the wsse:BinarySecurityToken, already
 	// in doc, that a KeyInfoSecurityTokenReference points at. Required for
@@ -134,7 +135,7 @@ func sign(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions, parent *xdm.N
 	if err := refuseLegacy(opts.SignatureAlgorithm); err != nil {
 		return nil, err
 	}
-	sigHash, ok := xmlsec.SignatureHash(opts.SignatureAlgorithm)
+	sigHash, ok := hashes.Signature(opts.SignatureAlgorithm)
 	if !ok {
 		return nil, fmt.Errorf("%w: signature %q", xmlsec.ErrUnsupportedAlgorithm, opts.SignatureAlgorithm)
 	}
@@ -166,19 +167,19 @@ func sign(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions, parent *xdm.N
 		}
 	}
 
-	sig := xmltree.Element(parent, "ds", NSDSig, "Signature")
-	if err := xmltree.Declare(sig, "ds", NSDSig); err != nil {
+	sig := xmltree.Element(parent, "ds", xmlsec.NSDSig, "Signature")
+	if err := xmltree.Declare(sig, "ds", xmlsec.NSDSig); err != nil {
 		return nil, err
 	}
 	if opts.SignatureID != "" {
 		xmltree.SetAttr(sig, "", "", "Id", opts.SignatureID)
 	}
-	si := xmltree.Element(sig, "ds", NSDSig, "SignedInfo")
+	si := xmltree.Element(sig, "ds", xmlsec.NSDSig, "SignedInfo")
 	algElement(si, "CanonicalizationMethod", opts.CanonicalizationAlgorithm)
 	algElement(si, "SignatureMethod", opts.SignatureAlgorithm)
 
 	for _, r := range opts.References {
-		dh, ok := xmlsec.DigestHash(r.DigestAlgorithm)
+		dh, ok := hashes.Digest(r.DigestAlgorithm)
 		if !ok {
 			return nil, fmt.Errorf("%w: digest %q", xmlsec.ErrUnsupportedAlgorithm, r.DigestAlgorithm)
 		}
@@ -186,7 +187,7 @@ func sign(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions, parent *xdm.N
 		if _, err := digestReference(h, doc, sig, r.URI, r.Transforms, opts.Attachments, false, opts.IDAttributes); err != nil {
 			return nil, err
 		}
-		ref := xmltree.Element(si, "ds", NSDSig, "Reference")
+		ref := xmltree.Element(si, "ds", xmlsec.NSDSig, "Reference")
 		if r.ID != "" {
 			xmltree.SetAttr(ref, "", "", "Id", r.ID)
 		}
@@ -195,7 +196,7 @@ func sign(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions, parent *xdm.N
 		}
 		xmltree.SetAttr(ref, "", "", "URI", r.URI)
 		if len(r.Transforms) > 0 {
-			ts := xmltree.Element(ref, "ds", NSDSig, "Transforms")
+			ts := xmltree.Element(ref, "ds", xmlsec.NSDSig, "Transforms")
 			for _, t := range r.Transforms {
 				tr := algElement(ts, "Transform", t.Algorithm)
 				if err := inclusiveNamespaces(tr, t); err != nil {
@@ -204,7 +205,7 @@ func sign(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions, parent *xdm.N
 			}
 		}
 		algElement(ref, "DigestMethod", r.DigestAlgorithm)
-		xmltree.Text(xmltree.Element(ref, "ds", NSDSig, "DigestValue"), base64.StdEncoding.EncodeToString(h.Sum(nil)))
+		xmltree.Text(xmltree.Element(ref, "ds", xmlsec.NSDSig, "DigestValue"), base64.StdEncoding.EncodeToString(h.Sum(nil)))
 	}
 
 	h := sigHash.New()
@@ -215,7 +216,7 @@ func sign(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions, parent *xdm.N
 	if err != nil {
 		return nil, err
 	}
-	xmltree.Text(xmltree.Element(sig, "ds", NSDSig, "SignatureValue"), base64.StdEncoding.EncodeToString(value))
+	xmltree.Text(xmltree.Element(sig, "ds", xmlsec.NSDSig, "SignatureValue"), base64.StdEncoding.EncodeToString(value))
 
 	if err := addKeyInfo(sig, doc, key, opts); err != nil {
 		return nil, err
@@ -255,7 +256,7 @@ func checkReference(r Reference) error {
 }
 
 func algElement(parent *xdm.Node, local, alg string) *xdm.Node {
-	e := xmltree.Element(parent, "ds", NSDSig, local)
+	e := xmltree.Element(parent, "ds", xmlsec.NSDSig, local)
 	xmltree.SetAttr(e, "", "", "Algorithm", alg)
 	return e
 }
@@ -264,8 +265,8 @@ func inclusiveNamespaces(tr *xdm.Node, t TransformSpec) error {
 	if !c14n.Algorithm(t.Algorithm).Exclusive() || len(t.InclusiveNamespacePrefixes) == 0 {
 		return nil
 	}
-	in := xmltree.Element(tr, "ec", NSExcC14N, "InclusiveNamespaces")
-	if err := xmltree.Declare(in, "ec", NSExcC14N); err != nil {
+	in := xmltree.Element(tr, "ec", xmlsec.NSExcC14N, "InclusiveNamespaces")
+	if err := xmltree.Declare(in, "ec", xmlsec.NSExcC14N); err != nil {
 		return err
 	}
 	xmltree.SetAttr(in, "", "", "PrefixList", c14n.FormatPrefixList(t.InclusiveNamespacePrefixes))
@@ -277,9 +278,9 @@ func addKeyInfo(sig, doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions) er
 	case KeyInfoNone:
 		return nil
 	case KeyInfoX509Data:
-		ki := xmltree.Element(sig, "ds", NSDSig, "KeyInfo")
-		xd := xmltree.Element(ki, "ds", NSDSig, "X509Data")
-		xmltree.Text(xmltree.Element(xd, "ds", NSDSig, "X509Certificate"), base64.StdEncoding.EncodeToString(key.Certificate.Raw))
+		ki := xmltree.Element(sig, "ds", xmlsec.NSDSig, "KeyInfo")
+		xd := xmltree.Element(ki, "ds", xmlsec.NSDSig, "X509Data")
+		xmltree.Text(xmltree.Element(xd, "ds", xmlsec.NSDSig, "X509Certificate"), base64.StdEncoding.EncodeToString(key.Certificate.Raw))
 		return nil
 	case KeyInfoSecurityTokenReference:
 		tok, err := wss.FindByID(doc, opts.SecurityTokenID)
@@ -297,22 +298,22 @@ func addKeyInfo(sig, doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions) er
 		if err != nil {
 			return err
 		}
-		xmltree.Element(sig, "ds", NSDSig, "KeyInfo").AppendChild(str)
+		xmltree.Element(sig, "ds", xmlsec.NSDSig, "KeyInfo").AppendChild(str)
 		return nil
 	case KeyInfoKeyValue, KeyInfoDEREncodedKeyValue:
 		return addRawKey(sig, key.Certificate, opts.KeyInfo)
 	}
-	return fmt.Errorf("dsig: unknown KeyInfoSpec %d", opts.KeyInfo)
+	return fmt.Errorf("dsig: unknown KeyInfoForm %d", opts.KeyInfo)
 }
 
 // addRawKey emits the certificate's key, which sign has checked is the
 // signer's, as ds:KeyValue or dsig11:DEREncodedKeyValue. A key the verifier
 // would refuse as a raw key is refused here.
-func addRawKey(sig *xdm.Node, cert *x509.Certificate, form KeyInfoSpec) error {
+func addRawKey(sig *xdm.Node, cert *x509.Certificate, form KeyInfoForm) error {
 	if err := checkRawKey(cert.PublicKey); err != nil {
 		return err
 	}
-	ki := xmltree.Element(sig, "ds", NSDSig, "KeyInfo")
+	ki := xmltree.Element(sig, "ds", xmlsec.NSDSig, "KeyInfo")
 	b64 := base64.StdEncoding.EncodeToString
 	if form == KeyInfoDEREncodedKeyValue {
 		e, err := dsig11Element(ki, "DEREncodedKeyValue")
@@ -322,11 +323,11 @@ func addRawKey(sig *xdm.Node, cert *x509.Certificate, form KeyInfoSpec) error {
 		xmltree.Text(e, b64(cert.RawSubjectPublicKeyInfo))
 		return nil
 	}
-	kv := xmltree.Element(ki, "ds", NSDSig, "KeyValue")
+	kv := xmltree.Element(ki, "ds", xmlsec.NSDSig, "KeyValue")
 	if k, ok := cert.PublicKey.(*rsa.PublicKey); ok {
-		r := xmltree.Element(kv, "ds", NSDSig, "RSAKeyValue")
-		xmltree.Text(xmltree.Element(r, "ds", NSDSig, "Modulus"), b64(k.N.Bytes()))
-		xmltree.Text(xmltree.Element(r, "ds", NSDSig, "Exponent"), b64(big.NewInt(int64(k.E)).Bytes()))
+		r := xmltree.Element(kv, "ds", xmlsec.NSDSig, "RSAKeyValue")
+		xmltree.Text(xmltree.Element(r, "ds", xmlsec.NSDSig, "Modulus"), b64(k.N.Bytes()))
+		xmltree.Text(xmltree.Element(r, "ds", xmlsec.NSDSig, "Exponent"), b64(big.NewInt(int64(k.E)).Bytes()))
 		return nil
 	}
 	k := cert.PublicKey.(*ecdsa.PublicKey) // checkRawKey admits only RSA and ECDSA
@@ -334,16 +335,16 @@ func addRawKey(sig *xdm.Node, cert *x509.Certificate, form KeyInfoSpec) error {
 	if err != nil {
 		return err
 	}
-	xmltree.SetAttr(xmltree.Element(ec, "dsig11", nsDSig11, "NamedCurve"), "", "", "URI", namedCurves[k.Curve])
+	xmltree.SetAttr(xmltree.Element(ec, "dsig11", xmlsec.NSDSig11, "NamedCurve"), "", "", "URI", namedCurves[k.Curve])
 	pt, _ := k.Bytes() // cannot fail on a curve in namedCurves
-	xmltree.Text(xmltree.Element(ec, "dsig11", nsDSig11, "PublicKey"), b64(pt))
+	xmltree.Text(xmltree.Element(ec, "dsig11", xmlsec.NSDSig11, "PublicKey"), b64(pt))
 	return nil
 }
 
 // dsig11Element appends a dsig11 element to parent, declaring the prefix.
 func dsig11Element(parent *xdm.Node, local string) (*xdm.Node, error) {
-	e := xmltree.Element(parent, "dsig11", nsDSig11, local)
-	return e, xmltree.Declare(e, "dsig11", nsDSig11)
+	e := xmltree.Element(parent, "dsig11", xmlsec.NSDSig11, local)
+	return e, xmltree.Declare(e, "dsig11", xmlsec.NSDSig11)
 }
 
 // signDigest signs in the XML-DSig encoding: PKCS#1 v1.5 for RSA, and the

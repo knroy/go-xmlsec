@@ -106,7 +106,7 @@ func TestGenerateEncryptedKeyFixedSessionKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	key, err := xenc.DecryptEncryptedKey(reparse(t, ek.Element), recipientKey, nil, nil, nil)
+	key, err := xenc.DecryptEncryptedKey(reparse(t, ek.Element), recipientKey, xenc.DecryptOptions{})
 	if err != nil || !bytes.Equal(key, opts.SessionKey) {
 		t.Fatalf("unwrapped %x, %v", key, err)
 	}
@@ -115,7 +115,7 @@ func TestGenerateEncryptedKeyFixedSessionKey(t *testing.T) {
 // covEK is an xenc:EncryptedKey with the given EncryptionMethod content and
 // trailing content.
 func covEK(alg, method, rest string) string {
-	return `<xenc:EncryptedKey xmlns:xenc="` + xenc.NSXEnc + `" xmlns:xenc11="` + xenc.NSXEnc11 + `" xmlns:ds="` + xenc.NSDSig + `">` +
+	return `<xenc:EncryptedKey xmlns:xenc="` + xmlsec.NSXEnc + `" xmlns:xenc11="` + xmlsec.NSXEnc11 + `" xmlns:ds="` + xmlsec.NSDSig + `">` +
 		`<xenc:EncryptionMethod Algorithm="` + alg + `">` + method + `</xenc:EncryptionMethod>` + rest + `</xenc:EncryptedKey>`
 }
 
@@ -144,8 +144,8 @@ func TestDecryptEncryptedKeyErrors(t *testing.T) {
 		allow lists
 		want  error // nil: any error
 	}{
-		{"not an EncryptedKey", covParse(t, `<xenc:EncryptedData xmlns:xenc="`+xenc.NSXEnc+`"/>`), recipientKey, lists{}, xmlsec.ErrMalformed},
-		{"no EncryptionMethod", covParse(t, `<xenc:EncryptedKey xmlns:xenc="`+xenc.NSXEnc+`">`+cd+`</xenc:EncryptedKey>`), recipientKey, lists{}, xmlsec.ErrMalformed},
+		{"not an EncryptedKey", covParse(t, `<xenc:EncryptedData xmlns:xenc="`+xmlsec.NSXEnc+`"/>`), recipientKey, lists{}, xmlsec.ErrMalformed},
+		{"no EncryptionMethod", covParse(t, `<xenc:EncryptedKey xmlns:xenc="`+xmlsec.NSXEnc+`">`+cd+`</xenc:EncryptedKey>`), recipientKey, lists{}, xmlsec.ErrMalformed},
 		{"unexpected method child", covParse(t, covEK(kt, good+`<xenc:KeySize>128</xenc:KeySize>`, cd)), recipientKey, lists{}, xmlsec.ErrMalformed},
 		{"OAEPparams not base64", covParse(t, covEK(kt, `<xenc:OAEPparams>!!</xenc:OAEPparams>`+good, cd)), recipientKey, lists{}, xmlsec.ErrMalformed},
 		{"implicit SHA-1 digest", covParse(t, covEK(kt, `<xenc11:MGF Algorithm="`+xmlsec.MGF1SHA256+`"/>`, cd)), recipientKey, lists{}, xmlsec.ErrAlgorithmNotAllowed},
@@ -164,7 +164,7 @@ func TestDecryptEncryptedKeyErrors(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			key, err := xenc.DecryptEncryptedKey(c.el, c.dec, c.allow.kt, c.allow.mgf, c.allow.digest)
+			key, err := xenc.DecryptEncryptedKey(c.el, c.dec, xenc.DecryptOptions{AllowedKeyTransportAlgorithms: c.allow.kt, AllowedMGFAlgorithms: c.allow.mgf, AllowedDigestAlgorithms: c.allow.digest})
 			if err == nil || c.want != nil && !errors.Is(err, c.want) {
 				t.Fatalf("got %v, want %v", err, c.want)
 			}
@@ -206,7 +206,7 @@ func TestEncryptedKeyComposition(t *testing.T) {
 		t.Fatalf("references %d", len(refs))
 	}
 	// Still unwraps: KeyInfo and ReferenceList do not disturb decryption.
-	if _, err := xenc.DecryptEncryptedKey(reparse(t, ek.Element), recipientKey, nil, nil, nil); err != nil {
+	if _, err := xenc.DecryptEncryptedKey(reparse(t, ek.Element), recipientKey, xenc.DecryptOptions{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -255,8 +255,8 @@ func TestDecryptEncryptedKeyMethod(t *testing.T) {
 	}
 	b, _ := c14n.Bytes(ek.Element, c14n.Options{Algorithm: c14n.Exclusive10})
 	good := string(b)
-	const dm = `<ds:DigestMethod xmlns:ds="` + xenc.NSDSig + `" Algorithm="` + xmlsec.DigestSHA256 + `"></ds:DigestMethod>`
-	const mgf = `<xenc11:MGF xmlns:xenc11="` + xenc.NSXEnc11 + `" Algorithm="` + xmlsec.MGF1SHA256 + `"></xenc11:MGF>`
+	const dm = `<ds:DigestMethod xmlns:ds="` + xmlsec.NSDSig + `" Algorithm="` + xmlsec.DigestSHA256 + `"></ds:DigestMethod>`
+	const mgf = `<xenc11:MGF xmlns:xenc11="` + xmlsec.NSXEnc11 + `" Algorithm="` + xmlsec.MGF1SHA256 + `"></xenc11:MGF>`
 	if !strings.Contains(good, dm) || !strings.Contains(good, mgf) {
 		t.Fatalf("method:\n%s", good)
 	}
@@ -265,7 +265,7 @@ func TestDecryptEncryptedKeyMethod(t *testing.T) {
 	// Section 3.2: KeySize is always permitted and, for RSA-OAEP, must be
 	// the modulus size of the decrypting key.
 	for _, ks := range []string{"2048", " 2048\n"} {
-		if key, err := xenc.DecryptEncryptedKey(edit(dm, `<xenc:KeySize>`+ks+`</xenc:KeySize>`+dm), recipientKey, nil, nil, nil); err != nil || !bytes.Equal(key, ek.SessionKey) {
+		if key, err := xenc.DecryptEncryptedKey(edit(dm, `<xenc:KeySize>`+ks+`</xenc:KeySize>`+dm), recipientKey, xenc.DecryptOptions{}); err != nil || !bytes.Equal(key, ek.SessionKey) {
 			t.Fatalf("KeySize %q: %v", ks, err)
 		}
 	}
@@ -277,13 +277,13 @@ func TestDecryptEncryptedKeyMethod(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ = c14n.Bytes(ek384.Element, c14n.Options{Algorithm: c14n.Exclusive10})
-	alias := covParse(t, strings.Replace(string(b), xmlsec.DigestSHA384, xenc.DigestSHA384XMLEnc, 1))
-	for _, list := range [][]string{nil, {xenc.DigestSHA384XMLEnc}} {
-		if key, err := xenc.DecryptEncryptedKey(alias, recipientKey, nil, nil, list); err != nil || !bytes.Equal(key, ek384.SessionKey) {
+	alias := covParse(t, strings.Replace(string(b), xmlsec.DigestSHA384, xmlsec.DigestSHA384XMLEnc, 1))
+	for _, list := range [][]string{nil, {xmlsec.DigestSHA384XMLEnc}} {
+		if key, err := xenc.DecryptEncryptedKey(alias, recipientKey, xenc.DecryptOptions{AllowedDigestAlgorithms: list}); err != nil || !bytes.Equal(key, ek384.SessionKey) {
 			t.Fatalf("xmlenc#sha384 %v: %v", list, err)
 		}
 	}
-	if _, err := xenc.DecryptEncryptedKey(alias, recipientKey, nil, nil, []string{xmlsec.DigestSHA384}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
+	if _, err := xenc.DecryptEncryptedKey(alias, recipientKey, xenc.DecryptOptions{AllowedDigestAlgorithms: []string{xmlsec.DigestSHA384}}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
 		t.Fatalf("aliases are distinct allow-list entries: %v", err)
 	}
 
@@ -307,7 +307,7 @@ func TestDecryptEncryptedKeyMethod(t *testing.T) {
 		{"SHA-1 digest", edit(xmlsec.DigestSHA256, "http://www.w3.org/2000/09/xmldsig#sha1"), recipientKey, [3][]string{}, xmlsec.ErrAlgorithmNotAllowed},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			key, err := xenc.DecryptEncryptedKey(c.el, c.dec, c.lists[0], c.lists[1], c.lists[2])
+			key, err := xenc.DecryptEncryptedKey(c.el, c.dec, xenc.DecryptOptions{AllowedKeyTransportAlgorithms: c.lists[0], AllowedMGFAlgorithms: c.lists[1], AllowedDigestAlgorithms: c.lists[2]})
 			if !errors.Is(err, c.want) || key != nil {
 				t.Fatalf("got %v, want %v", err, c.want)
 			}

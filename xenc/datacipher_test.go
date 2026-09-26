@@ -16,7 +16,7 @@ import (
 
 // covED is an xenc:EncryptedData with the given attributes and content.
 func covED(attrs, content string) string {
-	return `<xenc:EncryptedData xmlns:xenc="` + xenc.NSXEnc + `" ` + attrs + `>` + content + `</xenc:EncryptedData>`
+	return `<xenc:EncryptedData xmlns:xenc="` + xmlsec.NSXEnc + `" ` + attrs + `>` + content + `</xenc:EncryptedData>`
 }
 
 func TestDecryptDataErrors(t *testing.T) {
@@ -32,7 +32,7 @@ func TestDecryptDataErrors(t *testing.T) {
 		allowed []string
 		want    error // nil: any error
 	}{
-		{"not EncryptedData", `<xenc:EncryptedKey xmlns:xenc="` + xenc.NSXEnc + `"/>`, key, nil, xmlsec.ErrMalformed},
+		{"not EncryptedData", `<xenc:EncryptedKey xmlns:xenc="` + xmlsec.NSXEnc + `"/>`, key, nil, xmlsec.ErrMalformed},
 		{"no EncryptionMethod", covED(``, cv(make([]byte, 40))), key, nil, xmlsec.ErrMalformed},
 		{"EncryptionMethod not first", covED(``, cv(make([]byte, 40))+em), key, nil, xmlsec.ErrMalformed},
 		{"unknown algorithm", covED(``, covEM("urn:x")+cv(make([]byte, 40))), key, nil, xmlsec.ErrAlgorithmNotAllowed},
@@ -48,7 +48,7 @@ func TestDecryptDataErrors(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			pt, err := xenc.DecryptData(covParse(t, c.el), c.key, c.allowed)
+			pt, err := xenc.DecryptData(covParse(t, c.el), c.key, xenc.DecryptOptions{AllowedDataAlgorithms: c.allowed})
 			if err == nil || c.want != nil && !errors.Is(err, c.want) {
 				t.Fatalf("got %v, want %v", err, c.want)
 			}
@@ -115,10 +115,10 @@ func TestNilInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	checks := map[string]error{}
-	_, checks["DecryptEncryptedKey(nil)"] = xenc.DecryptEncryptedKey(nil, recipientKey, nil, nil, nil)
-	_, checks["DecryptEncryptedKey(el, nil)"] = xenc.DecryptEncryptedKey(reparse(t, ek.Element), nil, nil, nil, nil)
-	_, checks["DecryptData(nil)"] = xenc.DecryptData(nil, key, nil)
-	_, checks["DecryptAttachment(nil)"] = xenc.DecryptAttachment(nil, nil, key, nil)
+	_, checks["DecryptEncryptedKey(nil)"] = xenc.DecryptEncryptedKey(nil, recipientKey, xenc.DecryptOptions{})
+	_, checks["DecryptEncryptedKey(el, nil)"] = xenc.DecryptEncryptedKey(reparse(t, ek.Element), nil, xenc.DecryptOptions{})
+	_, checks["DecryptData(nil)"] = xenc.DecryptData(nil, key, xenc.DecryptOptions{})
+	_, checks["DecryptAttachment(nil)"] = xenc.DecryptAttachment(nil, nil, key, xenc.DecryptOptions{})
 	_, checks["EncryptElement(nil, nil)"] = xenc.EncryptElement(nil, nil, key, as4Opts(t))
 	_, checks["EncryptElement(doc, nil)"] = xenc.EncryptElement(tree.Root, nil, key, as4Opts(t))
 	_, _, checks["EncryptAttachment(nil)"] = xenc.EncryptAttachment(nil, key, xmlsec.TransformAttachmentContentOnly, as4Opts(t))
@@ -145,7 +145,7 @@ func firstNamed(n *xdm.Node, local string) *xdm.Node {
 func decryptIn(t *testing.T, out, key []byte) string {
 	t.Helper()
 	doc := covParse(t, string(out))
-	pt, err := xenc.DecryptData(firstNamed(doc, "EncryptedData"), key, nil)
+	pt, err := xenc.DecryptData(firstNamed(doc, "EncryptedData"), key, xenc.DecryptOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,10 +192,10 @@ func TestNotNFCRefused(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			doc := covParse(t, src)
-			if _, err := xenc.EncryptElement(doc, doc.ChildElements()[0], key, as4Opts(t)); !errors.Is(err, xenc.ErrNotNFC) {
+			if _, err := xenc.EncryptElement(doc, doc.ChildElements()[0], key, as4Opts(t)); !errors.Is(err, xmlsec.ErrNotNFC) {
 				t.Fatalf("element: %v", err)
 			}
-			if _, err := xenc.EncryptContent(doc, doc, key, as4Opts(t)); !errors.Is(err, xenc.ErrNotNFC) {
+			if _, err := xenc.EncryptContent(doc, doc, key, as4Opts(t)); !errors.Is(err, xmlsec.ErrNotNFC) {
 				t.Fatalf("content: %v", err)
 			}
 		})
@@ -224,7 +224,7 @@ func TestEncryptContent(t *testing.T) {
 	enc := covParse(t, string(out))
 	ebody := enc.ChildElements()[0]
 	// The Body keeps its attributes and holds only the EncryptedData.
-	if ebody.AttrValue("") != "" || len(ebody.Children) != 1 || !ebody.Children[0].IsElement(xenc.NSXEnc, "EncryptedData") ||
+	if ebody.AttrValue("") != "" || len(ebody.Children) != 1 || !ebody.Children[0].IsElement(xmlsec.NSXEnc, "EncryptedData") ||
 		ebody.Children[0].AttrValue("Type") != xenc.TypeContent || ebody.Children[0].AttrValue("Id") != "ED-c" ||
 		!strings.Contains(string(out), `wsu:Id="b"`) {
 		t.Fatalf("encrypted:\n%s", out)
@@ -347,19 +347,19 @@ func TestDataEncryptionMethodChildren(t *testing.T) {
 		"KeySize not a int": `<xenc:KeySize>x</xenc:KeySize>`,
 		"KeySize twice":     `<xenc:KeySize>128</xenc:KeySize><xenc:KeySize>128</xenc:KeySize>`,
 		"OAEPparams":        `<xenc:OAEPparams>AA==</xenc:OAEPparams>`,
-		"DigestMethod":      `<ds:DigestMethod xmlns:ds="` + xenc.NSDSig + `" Algorithm="` + xmlsec.DigestSHA256 + `"/>`,
+		"DigestMethod":      `<ds:DigestMethod xmlns:ds="` + xmlsec.NSDSig + `" Algorithm="` + xmlsec.DigestSHA256 + `"/>`,
 		"unknown":           `<x:Y xmlns:x="urn:x"/>`,
 	} {
-		if _, err := xenc.DecryptData(with(children), key, nil); !errors.Is(err, xmlsec.ErrMalformed) {
+		if _, err := xenc.DecryptData(with(children), key, xenc.DecryptOptions{}); !errors.Is(err, xmlsec.ErrMalformed) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
 	for _, ks := range []string{"128", " 128 ", "+128", "0128"} {
-		if _, err := xenc.DecryptData(with(`<xenc:KeySize>`+ks+`</xenc:KeySize>`), key, nil); err != nil && !strings.Contains(err.Error(), "KeySize") {
+		if _, err := xenc.DecryptData(with(`<xenc:KeySize>`+ks+`</xenc:KeySize>`), key, xenc.DecryptOptions{}); err != nil && !strings.Contains(err.Error(), "KeySize") {
 			t.Errorf("KeySize %q: %v", ks, err)
 		}
 	}
-	if pt, err := xenc.DecryptData(with(`<xenc:KeySize>128</xenc:KeySize>`), key, nil); err != nil || string(pt) != "<a>x</a>" {
+	if pt, err := xenc.DecryptData(with(`<xenc:KeySize>128</xenc:KeySize>`), key, xenc.DecryptOptions{}); err != nil || string(pt) != "<a>x</a>" {
 		t.Fatalf("consistent KeySize: %s, %v", pt, err)
 	}
 }
@@ -377,7 +377,7 @@ func TestSameDocumentCipherReference(t *testing.T) {
 	tr := func(algs ...string) string {
 		s := `<xenc:Transforms>`
 		for _, a := range algs {
-			s += `<ds:Transform xmlns:ds="` + xenc.NSDSig + `" Algorithm="` + a + `"/>`
+			s += `<ds:Transform xmlns:ds="` + xmlsec.NSDSig + `" Algorithm="` + a + `"/>`
 		}
 		return s + `</xenc:Transforms>`
 	}
@@ -392,7 +392,7 @@ func TestSameDocumentCipherReference(t *testing.T) {
 		"inline value": `<r>` + covED(``, covEM(xmlsec.EncAES128GCM)+`<xenc:CipherData><xenc:CipherValue>`+b64+`</xenc:CipherValue></xenc:CipherData>`) + `</r>`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			pt, err := xenc.DecryptData(firstNamed(covParse(t, doc), "EncryptedData"), key, nil)
+			pt, err := xenc.DecryptData(firstNamed(covParse(t, doc), "EncryptedData"), key, xenc.DecryptOptions{})
 			if err != nil || string(pt) != "secret" {
 				t.Fatalf("%s, %v", pt, err)
 			}
@@ -416,12 +416,12 @@ func TestSameDocumentCipherReference(t *testing.T) {
 		"cid":                {wrap(ref("cid:a", base64T)), xmlsec.ErrMalformed},
 		"not base64":         {`<r><v Id="cv">!!</v>` + ref("#cv", base64T) + `</r>`, xmlsec.ErrMalformed},
 		"other child":        {wrap(ref("#cv", `<x:Y xmlns:x="urn:x"/>`)), xmlsec.ErrMalformed},
-		"transform params":   {wrap(ref("#cv", `<xenc:Transforms><ds:Transform xmlns:ds="`+xenc.NSDSig+`" Algorithm="`+xmlsec.TransformBase64+`"><p/></ds:Transform></xenc:Transforms>`)), xmlsec.ErrMalformed},
+		"transform params":   {wrap(ref("#cv", `<xenc:Transforms><ds:Transform xmlns:ds="`+xmlsec.NSDSig+`" Algorithm="`+xmlsec.TransformBase64+`"><p/></ds:Transform></xenc:Transforms>`)), xmlsec.ErrMalformed},
 		"not ds:Transform":   {wrap(ref("#cv", `<xenc:Transforms><xenc:Transform Algorithm="`+xmlsec.TransformBase64+`"/></xenc:Transforms>`)), xmlsec.ErrMalformed},
 		"two CipherRef kids": {wrap(ref("#cv", base64T+base64T)), xmlsec.ErrMalformed},
 	} {
 		t.Run(name, func(t *testing.T) {
-			pt, err := xenc.DecryptData(firstNamed(covParse(t, c.doc), "EncryptedData"), key, nil)
+			pt, err := xenc.DecryptData(firstNamed(covParse(t, c.doc), "EncryptedData"), key, xenc.DecryptOptions{})
 			if !errors.Is(err, c.want) || pt != nil {
 				t.Fatalf("got %s, %v; want %v", pt, err, c.want)
 			}

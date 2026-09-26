@@ -38,7 +38,7 @@ import (
 // CipherReference names. This split exists because this library does not
 // own MIME.
 //
-// The CipherReference always carries TransformAttachmentCiphertext, and
+// The CipherReference always carries xmlsec.TransformAttachmentCiphertext, and
 // names the attachment by "cid:" and its ID percent-encoded per RFC 2392,
 // as DecryptAttachment and AttachmentSet.Lookup decode it. The
 // EncryptedData MimeType is the attachment's Content-Type, when it has one.
@@ -77,8 +77,8 @@ func EncryptAttachment(att *xmlsec.Attachment, sessionKey []byte, transform stri
 	}
 	cr := element(element(ed, "CipherData"), "CipherReference")
 	xmltree.SetAttr(cr, "", "", "URI", "cid:"+cidEscape(att.ID))
-	tr := nsElement(element(cr, "Transforms"), "ds", NSDSig, "Transform")
-	xmltree.SetAttr(tr, "", "", "Algorithm", TransformAttachmentCiphertext)
+	tr := nsElement(element(cr, "Transforms"), "ds", xmlsec.NSDSig, "Transform")
+	xmltree.SetAttr(tr, "", "", "Algorithm", xmlsec.TransformAttachmentCiphertext)
 	return ct, ed, nil
 }
 
@@ -106,7 +106,7 @@ func cidEscape(id string) string {
 func transforms(cr *xdm.Node) ([]string, error) {
 	var algs []string
 	for i, k := range cr.ChildElements() {
-		if i > 0 || !k.IsElement(NSXEnc, "Transforms") {
+		if i > 0 || !k.IsElement(xmlsec.NSXEnc, "Transforms") {
 			return nil, malformed("xenc:CipherReference may hold only one xenc:Transforms")
 		}
 		for _, t := range k.ChildElements() {
@@ -114,7 +114,7 @@ func transforms(cr *xdm.Node) ([]string, error) {
 			switch {
 			case alg == xmlsec.TransformXSLT || alg == xmlsec.TransformXPath || alg == xmlsec.TransformXPathFilter2:
 				return nil, fmt.Errorf("%w: %s", xmlsec.ErrTransformRefused, alg)
-			case !t.IsElement(NSDSig, "Transform") || len(t.ChildElements()) > 0:
+			case !t.IsElement(xmlsec.NSDSig, "Transform") || len(t.ChildElements()) > 0:
 				return nil, malformed("xenc:Transforms must hold ds:Transform elements without parameters")
 			}
 			algs = append(algs, alg)
@@ -139,7 +139,7 @@ func contentType(att *xmlsec.Attachment) string {
 //
 // It returns the attachment as it was before encryption, identified by the
 // CipherReference's cid: URI. The CipherReference may carry no transform or
-// exactly TransformAttachmentCiphertext; XSLT and XPath are
+// exactly xmlsec.TransformAttachmentCiphertext; XSLT and XPath are
 // xmlsec.ErrTransformRefused, any other transform
 // xmlsec.ErrUnsupportedAlgorithm. What replaces what in the received MIME part
 // depends on the EncryptedData Type (SwA profile section 5.5.3):
@@ -150,8 +150,8 @@ func contentType(att *xmlsec.Attachment) string {
 //   - Attachment-Complete: Body replaces the body and MIMEHeaders the
 //     part's headers of the same names. A decrypted header the profile does
 //     not list, or one present twice, is refused.
-func DecryptAttachment(el *xdm.Node, ciphertext []byte, sessionKey []byte, allowedData []string) (*xmlsec.Attachment, error) {
-	alg, err := dataAlgorithm(el, allowedData)
+func DecryptAttachment(el *xdm.Node, ciphertext []byte, sessionKey []byte, opts DecryptOptions) (*xmlsec.Attachment, error) {
+	alg, err := dataAlgorithm(el, opts.AllowedDataAlgorithms)
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +164,7 @@ func DecryptAttachment(el *xdm.Node, ciphertext []byte, sessionKey []byte, allow
 		return nil, err
 	}
 	kids := cd.ChildElements()
-	if len(kids) != 1 || !kids[0].IsElement(NSXEnc, "CipherReference") ||
+	if len(kids) != 1 || !kids[0].IsElement(xmlsec.NSXEnc, "CipherReference") ||
 		!strings.HasPrefix(kids[0].AttrValue("URI"), "cid:") {
 		return nil, malformed("xenc:CipherData must hold one cid: xenc:CipherReference")
 	}
@@ -176,8 +176,8 @@ func DecryptAttachment(el *xdm.Node, ciphertext []byte, sessionKey []byte, allow
 	if err != nil {
 		return nil, err
 	}
-	if len(algs) > 1 || len(algs) == 1 && algs[0] != TransformAttachmentCiphertext {
-		return nil, unsupported("attachment CipherReference transforms %q: only %s is supported", algs, TransformAttachmentCiphertext)
+	if len(algs) > 1 || len(algs) == 1 && algs[0] != xmlsec.TransformAttachmentCiphertext {
+		return nil, unsupported("attachment CipherReference transforms %q: only %s is supported", algs, xmlsec.TransformAttachmentCiphertext)
 	}
 	pt, err := open(alg, sessionKey, ciphertext)
 	if err != nil {

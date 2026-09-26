@@ -62,7 +62,7 @@ func parse(t *testing.T, b []byte) *xdm.Node {
 func findSignature(doc *xdm.Node) *xdm.Node {
 	var sig *xdm.Node
 	xmltree.Walk(doc, func(e *xdm.Node) {
-		if sig == nil && e.IsElement(dsig.NSDSig, "Signature") {
+		if sig == nil && e.IsElement(xmlsec.NSDSig, "Signature") {
 			sig = e
 		}
 	})
@@ -115,7 +115,7 @@ func signAS4(t *testing.T, key xmlsec.KeyProvider) (signed []byte, msgID, bodyID
 	if bodyID, err = wss.AssignID(doc, body); err != nil {
 		t.Fatal(err)
 	}
-	hdr, err := wss.NewHeader(doc, wss.NSSOAP12, "", true)
+	hdr, err := wss.NewHeader(doc, xmlsec.NSSOAP12, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ func TestVerifyNegative(t *testing.T) {
 	}{
 		{"modified element", strings.Replace(s, ">hello<", ">HELLO<", 1), nil, xmlsec.ErrDigestMismatch},
 		{"duplicate wsu:Id", strings.Replace(s, "</eb:Messaging>",
-			`</eb:Messaging><x wsu:Id="`+bodyID+`" xmlns:wsu="`+wss.NSWSU+`"/>`, 1), nil, xmlsec.ErrAmbiguousID},
+			`</eb:Messaging><x wsu:Id="`+bodyID+`" xmlns:wsu="`+xmlsec.NSWSU+`"/>`, 1), nil, xmlsec.ErrAmbiguousID},
 		{"algorithm outside allow-list", s, func(o *dsig.VerifyOptions) {
 			o.AllowedDigestAlgorithms = []string{xmlsec.DigestSHA512}
 		}, xmlsec.ErrAlgorithmNotAllowed},

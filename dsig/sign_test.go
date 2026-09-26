@@ -39,7 +39,7 @@ func covTokenDoc(t *testing.T, key xmlsec.KeyProvider) (doc *xdm.Node, tokID, bo
 	if bodyID, err = wss.AssignID(doc, body); err != nil {
 		t.Fatal(err)
 	}
-	hdr, err := wss.NewHeader(doc, wss.NSSOAP12, "", false)
+	hdr, err := wss.NewHeader(doc, xmlsec.NSSOAP12, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestSignErrors(t *testing.T) {
 		{"sha1 digest", key, func(o *dsig.SignOptions) {
 			o.References[0].DigestAlgorithm = "http://www.w3.org/2000/09/xmldsig#sha1"
 		}, xmlsec.ErrUnsupportedAlgorithm},
-		{"unknown KeyInfoSpec", key, func(o *dsig.SignOptions) { o.KeyInfo = dsig.KeyInfoSpec(99) }, nil},
+		{"unknown KeyInfoForm", key, func(o *dsig.SignOptions) { o.KeyInfo = dsig.KeyInfoForm(99) }, nil},
 		{"SecurityTokenID missing", key, func(o *dsig.SignOptions) {
 			o.KeyInfo, o.SecurityTokenID = dsig.KeyInfoSecurityTokenReference, "nope"
 		}, xmlsec.ErrIDNotFound},
@@ -246,7 +246,7 @@ func TestSignEnvelopedErrors(t *testing.T) {
 
 // covSignAndPlace signs refs over the envelope, places the signature in the
 // security header, and returns the serialized document.
-func covSignAndPlace(t *testing.T, key xmlsec.KeyProvider, ki dsig.KeyInfoSpec, atts xmlsec.AttachmentSet,
+func covSignAndPlace(t *testing.T, key xmlsec.KeyProvider, ki dsig.KeyInfoForm, atts xmlsec.AttachmentSet,
 	refs func(bodyID string) []dsig.Reference) []byte {
 	t.Helper()
 	doc := parse(t, []byte(envelope))
@@ -255,7 +255,7 @@ func covSignAndPlace(t *testing.T, key xmlsec.KeyProvider, ki dsig.KeyInfoSpec, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	hdr, err := wss.NewHeader(doc, wss.NSSOAP12, "", false)
+	hdr, err := wss.NewHeader(doc, xmlsec.NSSOAP12, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +352,7 @@ func TestSignCanonicalizationFailure(t *testing.T) {
 // A token whose wsu:Id is empty resolves, but cannot be referenced.
 func TestSignEmptyTokenID(t *testing.T) {
 	key := newKey(t, rsaKey)
-	doc := parse(t, []byte(`<r xmlns:wsu="`+wss.NSWSU+`"><wsse:BinarySecurityToken xmlns:wsse="`+wss.NSWSSE+`" wsu:Id=""`+
+	doc := parse(t, []byte(`<r xmlns:wsu="`+xmlsec.NSWSU+`"><wsse:BinarySecurityToken xmlns:wsse="`+xmlsec.NSWSSE+`" wsu:Id=""`+
 		` EncodingType="`+xmlsec.BSTEncodingBase64+`" ValueType="`+xmlsec.BSTValueTypeX509v3+`">`+
 		base64.StdEncoding.EncodeToString(key.Certificate.Raw)+`</wsse:BinarySecurityToken></r>`))
 	_, err := dsig.Sign(doc, key, dsig.SignOptions{
@@ -374,7 +374,7 @@ func TestSignEmptyTokenID(t *testing.T) {
 func TestSignInPlace(t *testing.T) {
 	key := newKey(t, rsaKey)
 	incl := string(c14n.Inclusive10)
-	src := `<S:Envelope xmlns:S="` + wss.NSSOAP12 + `" xmlns:extra="urn:extra" xmlns:wsu="` + wss.NSWSU + `">` +
+	src := `<S:Envelope xmlns:S="` + xmlsec.NSSOAP12 + `" xmlns:extra="urn:extra" xmlns:wsu="` + xmlsec.NSWSU + `">` +
 		`<S:Header><Sec/></S:Header><S:Body wsu:Id="body"><x>1</x></S:Body></S:Envelope>`
 	doc := parse(t, []byte(src))
 	sec := xmltree.DocumentElement(doc).ChildElements()[0].ChildElements()[0]

@@ -22,8 +22,6 @@ import (
 	"github.com/knroy/go-xmlsec/internal/xmltree"
 )
 
-const nsDSig11 = "http://www.w3.org/2009/xmldsig11#"
-
 var (
 	p384Key = mustEC(elliptic.P384())
 	p521Key = mustEC(elliptic.P521())
@@ -38,7 +36,7 @@ func mustEC(c elliptic.Curve) *ecdsa.PrivateKey {
 }
 
 // signRaw signs the metadata document enveloped, with ds:KeyInfo in form.
-func signRaw(t *testing.T, doc string, signer crypto.Signer, sigAlg string, form dsig.KeyInfoSpec) ([]byte, error) {
+func signRaw(t *testing.T, doc string, signer crypto.Signer, sigAlg string, form dsig.KeyInfoForm) ([]byte, error) {
 	t.Helper()
 	return dsig.SignEnveloped(parse(t, []byte(doc)), newKey(t, signer), dsig.SignOptions{
 		SignatureAlgorithm:        sigAlg,
@@ -75,7 +73,7 @@ func TestRawKeyRoundTrip(t *testing.T) {
 	}
 	forms := []struct {
 		name string
-		form dsig.KeyInfoSpec
+		form dsig.KeyInfoForm
 		elem string
 	}{
 		{"KeyValue", dsig.KeyInfoKeyValue, "<ds:KeyValue>"},
@@ -151,12 +149,12 @@ func TestRawKeyInfoStructure(t *testing.T) {
 		return `<ds:KeyValue><ds:RSAKeyValue><ds:Modulus>` + n + `</ds:Modulus><ds:Exponent>` + e + `</ds:Exponent></ds:RSAKeyValue></ds:KeyValue>`
 	}
 	ecKV := func(inner string) string {
-		return `<ds:KeyValue><dsig11:ECKeyValue xmlns:dsig11="` + nsDSig11 + `">` + inner + `</dsig11:ECKeyValue></ds:KeyValue>`
+		return `<ds:KeyValue><dsig11:ECKeyValue xmlns:dsig11="` + xmlsec.NSDSig11 + `">` + inner + `</dsig11:ECKeyValue></ds:KeyValue>`
 	}
 	p256URI := `<dsig11:NamedCurve URI="urn:oid:1.2.840.10045.3.1.7"/>`
 	point := func(b []byte) string { return `<dsig11:PublicKey>` + b64(b) + `</dsig11:PublicKey>` }
 	der := func(s string) string {
-		return `<dsig11:DEREncodedKeyValue xmlns:dsig11="` + nsDSig11 + `">` + s + `</dsig11:DEREncodedKeyValue>`
+		return `<dsig11:DEREncodedKeyValue xmlns:dsig11="` + xmlsec.NSDSig11 + `">` + s + `</dsig11:DEREncodedKeyValue>`
 	}
 	spki := func(pub crypto.PublicKey) string {
 		b, err := x509.MarshalPKIXPublicKey(pub)
@@ -255,7 +253,7 @@ func TestSignRawKeyRefusals(t *testing.T) {
 		doc    string
 		signer crypto.Signer
 		alg    string
-		form   dsig.KeyInfoSpec
+		form   dsig.KeyInfoForm
 		want   error // nil: any error
 	}{
 		{"1024-bit RSA KeyValue", metadata, small, xmlsec.SigRSASHA256, dsig.KeyInfoKeyValue, xmlsec.ErrUnsupportedKeyInfo},
@@ -304,7 +302,7 @@ func TestKeyInfoReference(t *testing.T) {
 	smallKV := strings.Replace(kv, b64(rsaKey.N.Bytes()), b64(small.N.Bytes()), 1)
 	x509Data := `<ds:X509Data><ds:X509Certificate>` + b64(cert.Raw) + `</ds:X509Certificate></ds:X509Data>`
 	kir := func(uri string) string {
-		return `<dsig11:KeyInfoReference xmlns:dsig11="` + nsDSig11 + `" URI="` + uri + `"/>`
+		return `<dsig11:KeyInfoReference xmlns:dsig11="` + xmlsec.NSDSig11 + `" URI="` + uri + `"/>`
 	}
 	target := func(id, inner string) string {
 		return `<ds:Object><ds:KeyInfo Id="` + id + `">` + inner + `</ds:KeyInfo></ds:Object>`
@@ -319,7 +317,7 @@ func TestKeyInfoReference(t *testing.T) {
 		objects string
 		opts    dsig.VerifyOptions
 		want    error
-		form    dsig.KeyInfoSpec
+		form    dsig.KeyInfoForm
 	}{
 		{"to a KeyValue", kir("#k"), target("k", kv), ids, nil, dsig.KeyInfoKeyValue},
 		{"to X509Data", kir("#k"), target("k", x509Data), ids, nil, dsig.KeyInfoX509Data},
@@ -334,8 +332,8 @@ func TestKeyInfoReference(t *testing.T) {
 		{"to another document", kir("http://example.com/k"), "", ids, xmlsec.ErrUnsupportedKeyInfo, 0},
 		{"to the whole document", kir("#xpointer(/)"), "", ids, xmlsec.ErrUnsupportedKeyInfo, 0},
 		{"XPointer expression", kir("#xpointer(//k)"), "", ids, xmlsec.ErrMalformed, 0},
-		{"without URI", `<dsig11:KeyInfoReference xmlns:dsig11="` + nsDSig11 + `"/>`, "", ids, xmlsec.ErrMalformed, 0},
-		{"with a child", `<dsig11:KeyInfoReference xmlns:dsig11="` + nsDSig11 + `" URI="#k"><x/></dsig11:KeyInfoReference>`, target("k", kv), ids, xmlsec.ErrMalformed, 0},
+		{"without URI", `<dsig11:KeyInfoReference xmlns:dsig11="` + xmlsec.NSDSig11 + `"/>`, "", ids, xmlsec.ErrMalformed, 0},
+		{"with a child", `<dsig11:KeyInfoReference xmlns:dsig11="` + xmlsec.NSDSig11 + `" URI="#k"><x/></dsig11:KeyInfoReference>`, target("k", kv), ids, xmlsec.ErrMalformed, 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

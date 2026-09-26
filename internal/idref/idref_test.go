@@ -11,7 +11,7 @@ import (
 )
 
 func TestFind(t *testing.T) {
-	tree, err := xmlsec.Parse([]byte(`<r xmlns:wsu="` + idref.NSWSU + `">` +
+	tree, err := xmlsec.Parse([]byte(`<r xmlns:wsu="` + xmlsec.NSWSU + `">` +
 		`<a wsu:Id="w"/><b xml:id="x"/><c Id="i"/><d Id="dup"/><e xml:id="dup"/><f Id="u"/></r>`))
 	if err != nil {
 		t.Fatal(err)

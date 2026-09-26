@@ -13,11 +13,12 @@ import (
 
 	"github.com/knroy/go-xml/xdm"
 	"github.com/knroy/go-xmlsec"
+	"github.com/knroy/go-xmlsec/internal/hashes"
 )
 
 // The legacy algorithms of XML-DSig 1.1 section 6.1, implemented for
 // verification only. They are outside the default sets (defaultSignature
-// and defaultDigest consult only xmlsec.SignatureHash and xmlsec.DigestHash),
+// and defaultDigest consult only hashes.Signature and hashes.Digest),
 // so Verify accepts one only when an allow-list names it, and Sign refuses
 // every one of them.
 var (
@@ -43,7 +44,7 @@ var (
 // signatureHash returns the hash of any signature algorithm Verify
 // implements, the legacy ones included.
 func signatureHash(alg string) (crypto.Hash, bool) {
-	if h, ok := xmlsec.SignatureHash(alg); ok {
+	if h, ok := hashes.Signature(alg); ok {
 		return h, true
 	}
 	h, ok := legacySignatures[alg]
@@ -52,7 +53,7 @@ func signatureHash(alg string) (crypto.Hash, bool) {
 
 // digestHash returns the hash of any digest algorithm Verify implements.
 func digestHash(alg string) (crypto.Hash, bool) {
-	if h, ok := xmlsec.DigestHash(alg); ok {
+	if h, ok := hashes.Digest(alg); ok {
 		return h, true
 	}
 	h, ok := legacyDigests[alg]
@@ -82,7 +83,7 @@ func hmacOutputLength(sm *xdm.Node, h crypto.Hash) (int, error) {
 	switch {
 	case len(kids) == 0:
 		return h.Size(), nil
-	case len(kids) > 1 || !kids[0].IsElement(NSDSig, "HMACOutputLength"):
+	case len(kids) > 1 || !kids[0].IsElement(xmlsec.NSDSig, "HMACOutputLength"):
 		return 0, malformed("an HMAC ds:SignatureMethod may hold only ds:HMACOutputLength")
 	}
 	bits, err := strconv.Atoi(strings.TrimSpace(kids[0].StringValue()))
@@ -107,7 +108,7 @@ func parseDSAKeyValue(e *xdm.Node) (crypto.PublicKey, error) {
 	v := map[string]*big.Int{}
 	i := 0
 	for _, k := range e.ChildElements() {
-		for i < len(names) && !k.IsElement(NSDSig, names[i]) {
+		for i < len(names) && !k.IsElement(xmlsec.NSDSig, names[i]) {
 			i++
 		}
 		if i == len(names) {

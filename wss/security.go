@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/knroy/go-xml/xdm"
+	"github.com/knroy/go-xmlsec"
 	"github.com/knroy/go-xmlsec/internal/xmltree"
 )
 
@@ -35,7 +36,7 @@ type Header struct {
 // Elements are added ahead of the existing content, as WS-Security
 // specifies; see Prepend.
 func NewHeader(doc *xdm.Node, soapNS string, actor string, mustUnderstand bool) (*Header, error) {
-	if soapNS != NSSOAP11 && soapNS != NSSOAP12 {
+	if soapNS != xmlsec.NSSOAP11 && soapNS != xmlsec.NSSOAP12 {
 		return nil, fmt.Errorf("wss: unknown SOAP namespace %q", soapNS)
 	}
 	env := xmltree.DocumentElement(doc)
@@ -55,36 +56,36 @@ func NewHeader(doc *xdm.Node, soapNS string, actor string, mustUnderstand bool) 
 	}
 
 	actorAttr := "actor"
-	if soapNS == NSSOAP12 {
+	if soapNS == xmlsec.NSSOAP12 {
 		actorAttr = "role"
 	}
 	recipient := func(a string) string {
-		if soapNS == NSSOAP12 && a == roleUltimateReceiver {
+		if soapNS == xmlsec.NSSOAP12 && a == roleUltimateReceiver {
 			return ""
 		}
 		return a
 	}
 	for _, e := range hdr.ChildElements() {
-		if e.IsElement(NSWSSE, "Security") && recipient(xmltree.AttrValue(e, soapNS, actorAttr)) == recipient(actor) {
+		if e.IsElement(xmlsec.NSWSSE, "Security") && recipient(xmltree.AttrValue(e, soapNS, actorAttr)) == recipient(actor) {
 			return nil, fmt.Errorf("wss: a wsse:Security header for actor %q already exists", actor)
 		}
 	}
 
 	// Built detached and attached last, so its own namespace declarations
 	// cannot conflict with an ancestor's.
-	sec := xmltree.Element(nil, "wsse", NSWSSE, "Security")
-	sec.AddNamespace("wsse", NSWSSE)
+	sec := xmltree.Element(nil, "wsse", xmlsec.NSWSSE, "Security")
+	sec.AddNamespace("wsse", xmlsec.NSWSSE)
 	p := env.Name.Prefix
 	if p == "" {
 		p = "soap"
-		if soapNS == NSSOAP12 {
+		if soapNS == xmlsec.NSSOAP12 {
 			p = "env"
 		}
 		sec.AddNamespace(p, soapNS)
 	}
 	if mustUnderstand {
 		v := "1"
-		if soapNS == NSSOAP12 {
+		if soapNS == xmlsec.NSSOAP12 {
 			v = "true"
 		}
 		xmltree.SetAttr(sec, p, soapNS, "mustUnderstand", v)
@@ -123,14 +124,14 @@ func (h *Header) Prepend(el *xdm.Node) error {
 	if el == nil || el.Kind != xdm.KindElement || el.Parent != nil {
 		return errors.New("wss: Prepend needs a detached element")
 	}
-	tokens := refs(el, NSWSSE, "Reference")
+	tokens := refs(el, xmlsec.NSWSSE, "Reference")
 	i := h.front()
 	for j, c := range h.el.Children {
 		if hasAnyID(c, tokens) {
 			i = max(i, j+1)
 		}
 	}
-	data := refs(el, nsXEnc, "DataReference")
+	data := refs(el, xmlsec.NSXEnc, "DataReference")
 	for _, c := range h.el.Children[:i] {
 		if hasAnyID(c, data) {
 			return fmt.Errorf("wss: %s would follow an xenc:EncryptedData it lists", el.Name.Local)
@@ -159,7 +160,7 @@ func (h *Header) Element() *xdm.Node { return h.el }
 func (h *Header) front() int {
 	for i, c := range h.el.Children {
 		if c.Kind == xdm.KindElement {
-			if c.IsElement(NSWSU, "Timestamp") {
+			if c.IsElement(xmlsec.NSWSU, "Timestamp") {
 				return i + 1
 			}
 			break

@@ -28,7 +28,7 @@ func cipherValueOf(t *testing.T, ek *xdm.Node) []byte {
 	t.Helper()
 	var cv *xdm.Node
 	xmltree.Walk(ek, func(e *xdm.Node) {
-		if e.IsElement(xenc.NSXEnc, "CipherValue") {
+		if e.IsElement(xmlsec.NSXEnc, "CipherValue") {
 			cv = e
 		}
 	})
@@ -69,12 +69,12 @@ func TestKeyWrapRFC3394(t *testing.T) {
 			if got := cipherValueOf(t, ek.Element); !bytes.Equal(got, unhex(c.want)) {
 				t.Fatalf("wrapped %X", got)
 			}
-			key, err := xenc.UnwrapEncryptedKey(reparse(t, ek.Element), c.kek, []string{c.wrap})
+			key, err := xenc.UnwrapEncryptedKey(reparse(t, ek.Element), c.kek, xenc.DecryptOptions{AllowedKeyWrapAlgorithms: []string{c.wrap}})
 			if err != nil || !bytes.Equal(key, unhex(c.key)) {
 				t.Fatalf("unwrapped %X, %v", key, err)
 			}
 			// The default allow-list includes every key wrap algorithm.
-			if _, err := xenc.UnwrapEncryptedKey(reparse(t, ek.Element), c.kek, nil); err != nil {
+			if _, err := xenc.UnwrapEncryptedKey(reparse(t, ek.Element), c.kek, xenc.DecryptOptions{}); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -82,7 +82,7 @@ func TestKeyWrapRFC3394(t *testing.T) {
 }
 
 func kwEK(alg, method, rest string) string {
-	return `<xenc:EncryptedKey xmlns:xenc="` + xenc.NSXEnc + `"><xenc:EncryptionMethod Algorithm="` + alg + `">` + method +
+	return `<xenc:EncryptedKey xmlns:xenc="` + xmlsec.NSXEnc + `"><xenc:EncryptionMethod Algorithm="` + alg + `">` + method +
 		`</xenc:EncryptionMethod>` + rest + `</xenc:EncryptedKey>`
 }
 
@@ -109,7 +109,7 @@ func TestUnwrapEncryptedKeyErrors(t *testing.T) {
 		want    error // nil: any error
 	}{
 		{"not an EncryptedKey", covED(``, ``), kek, nil, xmlsec.ErrMalformed},
-		{"no EncryptionMethod", `<xenc:EncryptedKey xmlns:xenc="` + xenc.NSXEnc + `"/>`, kek, nil, xmlsec.ErrMalformed},
+		{"no EncryptionMethod", `<xenc:EncryptedKey xmlns:xenc="` + xmlsec.NSXEnc + `"/>`, kek, nil, xmlsec.ErrMalformed},
 		{"RSA-OAEP", kwEK(xmlsec.KeyTransportRSAOAEP, ``, kwCV(good)), kek, nil, xmlsec.ErrAlgorithmNotAllowed},
 		{"triple DES wrap", kwEK("http://www.w3.org/2001/04/xmlenc#kw-tripledes", ``, kwCV(good)), kek, nil, xmlsec.ErrAlgorithmNotAllowed},
 		{"outside allow-list", kwEK(kw, ``, kwCV(good)), kek, []string{xmlsec.KeyWrapAES256}, xmlsec.ErrAlgorithmNotAllowed},
@@ -126,7 +126,7 @@ func TestUnwrapEncryptedKeyErrors(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			key, err := xenc.UnwrapEncryptedKey(covParse(t, c.el), c.kek, c.allowed)
+			key, err := xenc.UnwrapEncryptedKey(covParse(t, c.el), c.kek, xenc.DecryptOptions{AllowedKeyWrapAlgorithms: c.allowed})
 			if err == nil || c.want != nil && !errors.Is(err, c.want) {
 				t.Fatalf("got %v, want %v", err, c.want)
 			}
@@ -136,16 +136,16 @@ func TestUnwrapEncryptedKeyErrors(t *testing.T) {
 		})
 	}
 	// Every integrity failure reads the same.
-	_, e1 := xenc.UnwrapEncryptedKey(covParse(t, kwEK(kw, ``, kwCV(flipped))), kek, nil)
-	_, e2 := xenc.UnwrapEncryptedKey(covParse(t, kwEK(kw, ``, kwCV(good[:16]))), kek, nil)
+	_, e1 := xenc.UnwrapEncryptedKey(covParse(t, kwEK(kw, ``, kwCV(flipped))), kek, xenc.DecryptOptions{})
+	_, e2 := xenc.UnwrapEncryptedKey(covParse(t, kwEK(kw, ``, kwCV(good[:16]))), kek, xenc.DecryptOptions{})
 	if e1.Error() != e2.Error() {
 		t.Fatalf("distinguishable unwrap failures: %v / %v", e1, e2)
 	}
-	if _, err := xenc.UnwrapEncryptedKey(nil, kek, nil); !errors.Is(err, xmlsec.ErrMalformed) {
+	if _, err := xenc.UnwrapEncryptedKey(nil, kek, xenc.DecryptOptions{}); !errors.Is(err, xmlsec.ErrMalformed) {
 		t.Fatal(err)
 	}
 	// KeySize consistent with the algorithm is permitted.
-	if _, err := xenc.UnwrapEncryptedKey(covParse(t, kwEK(kw, `<xenc:KeySize>128</xenc:KeySize>`, kwCV(good))), kek, nil); err != nil {
+	if _, err := xenc.UnwrapEncryptedKey(covParse(t, kwEK(kw, `<xenc:KeySize>128</xenc:KeySize>`, kwCV(good))), kek, xenc.DecryptOptions{}); err != nil {
 		t.Fatal(err)
 	}
 }

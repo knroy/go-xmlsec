@@ -59,7 +59,7 @@ func TestSantuarioSAMLAssertionByID(t *testing.T) {
 	compareSignatures(t, ours, theirs)
 
 	doc := parse(t, theirs)
-	cov, err := dsig.Verify(doc, find(doc, dsig.NSDSig, "Signature"), dsig.VerifyOptions{
+	cov, err := dsig.Verify(doc, find(doc, xmlsec.NSDSig, "Signature"), dsig.VerifyOptions{
 		Certificate:  kp.provider.Certificate,
 		IDAttributes: []xdm.QName{dsig.IDAttrSAML},
 	})

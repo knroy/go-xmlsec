@@ -74,11 +74,10 @@ func FuzzDecryptEncryptedKey(f *testing.F) {
 		if el == nil {
 			t.Skip()
 		}
-		xenc.DecryptEncryptedKey(el, recipientKey, nil, nil, nil)
-		xenc.DecryptEncryptedKey(el, recipientKey, []string{xmlsec.KeyTransportRSAOAEP},
-			[]string{xmlsec.MGF1SHA256}, []string{xmlsec.DigestSHA256})
-		xenc.UnwrapEncryptedKey(el, fuzzKEK, nil)
-		xenc.DecryptAgreedKey(el, priv, nil, nil, nil)
+		xenc.DecryptEncryptedKey(el, recipientKey, xenc.DecryptOptions{})
+		xenc.DecryptEncryptedKey(el, recipientKey, xenc.DecryptOptions{AllowedKeyTransportAlgorithms: []string{xmlsec.KeyTransportRSAOAEP}, AllowedMGFAlgorithms: []string{xmlsec.MGF1SHA256}, AllowedDigestAlgorithms: []string{xmlsec.DigestSHA256}})
+		xenc.UnwrapEncryptedKey(el, fuzzKEK, xenc.DecryptOptions{})
+		xenc.DecryptAgreedKey(el, priv, xenc.DecryptOptions{})
 	})
 }
 
@@ -140,10 +139,10 @@ func FuzzDecryptData(f *testing.F) {
 			t.Skip()
 		}
 		for _, k := range keys {
-			xenc.DecryptData(el, k, nil)
-			xenc.DecryptAttachment(el, ciphertext, k, nil)
+			xenc.DecryptData(el, k, xenc.DecryptOptions{})
+			xenc.DecryptAttachment(el, ciphertext, k, xenc.DecryptOptions{})
 		}
-		xenc.DecryptData(el, key, []string{xmlsec.EncAES128GCM})
+		xenc.DecryptData(el, key, xenc.DecryptOptions{AllowedDataAlgorithms: []string{xmlsec.EncAES128GCM}})
 		xenc.FindEncryptedKey(el)
 	})
 }

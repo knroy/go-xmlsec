@@ -52,7 +52,7 @@ func TestBinarySecurityTokenRoundTrip(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			doc := parseDoc(t, env11)
-			h, err := NewHeader(doc, NSSOAP11, "", false)
+			h, err := NewHeader(doc, xmlsec.NSSOAP11, "", false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -77,7 +77,7 @@ func TestBinarySecurityTokenRoundTrip(t *testing.T) {
 
 func TestAddBinarySecurityTokenErrors(t *testing.T) {
 	cert := testCert(t, "c")
-	h, err := NewHeader(parseDoc(t, env11), NSSOAP11, "", false)
+	h, err := NewHeader(parseDoc(t, env11), xmlsec.NSSOAP11, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestAddBinarySecurityTokenErrors(t *testing.T) {
 }
 
 func bst(attrs, content string) string {
-	return `<wsse:BinarySecurityToken xmlns:wsse="` + NSWSSE + `" ` + attrs + `>` + content + `</wsse:BinarySecurityToken>`
+	return `<wsse:BinarySecurityToken xmlns:wsse="` + xmlsec.NSWSSE + `" ` + attrs + `>` + content + `</wsse:BinarySecurityToken>`
 }
 
 func TestParseBinarySecurityTokenErrors(t *testing.T) {
@@ -100,7 +100,7 @@ func TestParseBinarySecurityTokenErrors(t *testing.T) {
 		doc  string
 		want error // nil: any error
 	}{
-		{"not a BST", `<wsse:Other xmlns:wsse="` + NSWSSE + `"/>`, xmlsec.ErrUnsupportedKeyInfo},
+		{"not a BST", `<wsse:Other xmlns:wsse="` + xmlsec.NSWSSE + `"/>`, xmlsec.ErrUnsupportedKeyInfo},
 		{"missing EncodingType", bst(v3, "AAAA"), xmlsec.ErrUnsupportedKeyInfo},
 		{"bad EncodingType", bst(`EncodingType="urn:hex" `+v3, "AAAA"), xmlsec.ErrUnsupportedKeyInfo},
 		{"bad base64", bst(enc+v3, "!!!"), xmlsec.ErrMalformed},

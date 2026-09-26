@@ -61,7 +61,7 @@ func ecKey(t *testing.T, name string) *ecdh.PrivateKey {
 func find(n *xdm.Node, local string) *xdm.Node {
 	var found *xdm.Node
 	xmltree.Walk(n, func(e *xdm.Node) {
-		if found == nil && e.IsElement(xenc.NSXEnc, local) {
+		if found == nil && e.IsElement(xmlsec.NSXEnc, local) {
 			found = e
 		}
 	})
@@ -94,9 +94,9 @@ func TestW3CXMLEncryptionVectors(t *testing.T) {
 			}
 			var key []byte
 			if v.key == "" {
-				key, err = xenc.DecryptEncryptedKey(ek, rsaKey, nil, nil, nil)
+				key, err = xenc.DecryptEncryptedKey(ek, rsaKey, xenc.DecryptOptions{})
 			} else {
-				key, err = xenc.DecryptAgreedKey(ek, ecKey(t, v.key), nil, nil, nil)
+				key, err = xenc.DecryptAgreedKey(ek, ecKey(t, v.key), xenc.DecryptOptions{})
 			}
 			if v.want != nil {
 				if !errors.Is(err, v.want) {
@@ -107,7 +107,7 @@ func TestW3CXMLEncryptionVectors(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := xenc.DecryptData(ed, key, nil)
+			got, err := xenc.DecryptData(ed, key, xenc.DecryptOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}

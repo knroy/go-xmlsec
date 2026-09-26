@@ -59,7 +59,7 @@ Named `TestConformance_<ID>_<description>` for the requirement they prove.
 | `TestImplicitCanonicalization` | a received reference ending in a node set verifies through Canonical XML 1.0, and the implied algorithm is refused when outside the allow-list |
 | `TestX509DataDescriptiveElements` | subject name, issuer-serial and SKI beside one certificate are accepted and ignored; a second certificate, a CRL, a `KeyName` or no certificate are refused |
 | `TestFindByID` | duplicate IDs are refused across `wsu:Id` and `xml:id` |
-| `TestFindByIDAttributes`, `TestSAMLAssertionByID`, `TestPlainIdReference`, `TestDefaultIDSetUnchanged` | opt-in `ID`/`Id` resolution; duplicates refused across every counted attribute; an attacker assertion with the signed `ID` refused; the default set unchanged |
+| `TestFindByIDExtraAttributes`, `TestSAMLAssertionByID`, `TestPlainIdReference`, `TestDefaultIDSetUnchanged` | opt-in `ID`/`Id` resolution; duplicates refused across every counted attribute; an attacker assertion with the signed `ID` refused; the default set unchanged |
 | `TestPrefixBoundElsewhere` | a `wsu` or `wsse` prefix bound to another namespace higher up does not corrupt the header |
 | `TestVersionIsReleasedAndDescribed` | the version constant and the changelog agree; see [RELEASE.md](../RELEASE.md) |
 

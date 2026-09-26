@@ -100,7 +100,7 @@ func Example_wsSecurity() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	hdr, err := wss.NewHeader(doc, wss.NSSOAP12, "", true)
+	hdr, err := wss.NewHeader(doc, xmlsec.NSSOAP12, "", true)
 	if err != nil {
 		log.Fatal(err)
 	}

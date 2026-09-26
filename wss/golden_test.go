@@ -195,7 +195,7 @@ func signGoldenEnvelope(t *testing.T) signedEnvelope {
 	fixedIDs(t)
 	s := signedEnvelope{doc: parseDoc(t, []byte(goldenEnvelope)), atts: goldenAttachments(t)}
 	s.key, s.priv = goldenKey(t)
-	s.body = mustFind(t, s.doc, wss.NSSOAP12, "Body")
+	s.body = mustFind(t, s.doc, xmlsec.NSSOAP12, "Body")
 	var err error
 	if s.msgID, err = wss.AssignID(s.doc, mustFind(t, s.doc, "urn:example:eb", "Messaging")); err != nil {
 		t.Fatal(err)
@@ -203,7 +203,7 @@ func signGoldenEnvelope(t *testing.T) signedEnvelope {
 	if s.bodyID, err = wss.AssignID(s.doc, s.body); err != nil {
 		t.Fatal(err)
 	}
-	if s.hdr, err = wss.NewHeader(s.doc, wss.NSSOAP12, "", true); err != nil {
+	if s.hdr, err = wss.NewHeader(s.doc, xmlsec.NSSOAP12, "", true); err != nil {
 		t.Fatal(err)
 	}
 	if s.tokID, err = s.hdr.AddBinarySecurityToken(s.key.Certificate, nil, xmlsec.BSTValueTypeX509v3); err != nil {
@@ -239,7 +239,7 @@ func signGoldenEnvelope(t *testing.T) signedEnvelope {
 func verifyGoldenEnvelope(t *testing.T, received []byte, s signedEnvelope) {
 	t.Helper()
 	doc := parseDoc(t, received)
-	cov, err := dsig.Verify(doc, mustFind(t, doc, dsig.NSDSig, "Signature"), dsig.VerifyOptions{
+	cov, err := dsig.Verify(doc, mustFind(t, doc, xmlsec.NSDSig, "Signature"), dsig.VerifyOptions{
 		Certificate:                       s.key.Certificate,
 		AllowedSignatureAlgorithms:        []string{xmlsec.SigRSASHA256},
 		AllowedDigestAlgorithms:           []string{xmlsec.DigestSHA256},
@@ -320,12 +320,11 @@ func TestGoldenSignedEncryptedEnvelope(t *testing.T) {
 
 	// As the receiver: unwrap the session key, decrypt, restore, verify.
 	doc := parseDoc(t, out)
-	key, err := xenc.DecryptEncryptedKey(mustFind(t, doc, xenc.NSXEnc, "EncryptedKey"), s.priv,
-		[]string{xmlsec.KeyTransportRSAOAEP}, []string{xmlsec.MGF1SHA256}, []string{xmlsec.DigestSHA256})
+	key, err := xenc.DecryptEncryptedKey(mustFind(t, doc, xmlsec.NSXEnc, "EncryptedKey"), s.priv, xenc.DecryptOptions{AllowedKeyTransportAlgorithms: []string{xmlsec.KeyTransportRSAOAEP}, AllowedMGFAlgorithms: []string{xmlsec.MGF1SHA256}, AllowedDigestAlgorithms: []string{xmlsec.DigestSHA256}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	plain, err := xenc.DecryptData(mustFind(t, doc, xenc.NSXEnc, "EncryptedData"), key, []string{xmlsec.EncAES128GCM})
+	plain, err := xenc.DecryptData(mustFind(t, doc, xmlsec.NSXEnc, "EncryptedData"), key, xenc.DecryptOptions{AllowedDataAlgorithms: []string{xmlsec.EncAES128GCM}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +358,7 @@ func signEnvelopedGolden(t *testing.T, name, src string, alg c14n.Algorithm) {
 		t.Fatal(err)
 	}
 	doc := parseDoc(t, signed)
-	cov, err := dsig.Verify(doc, mustFind(t, doc, dsig.NSDSig, "Signature"), dsig.VerifyOptions{
+	cov, err := dsig.Verify(doc, mustFind(t, doc, xmlsec.NSDSig, "Signature"), dsig.VerifyOptions{
 		Certificate:                       key.Certificate,
 		AllowedSignatureAlgorithms:        []string{xmlsec.SigRSASHA256},
 		AllowedDigestAlgorithms:           []string{xmlsec.DigestSHA256},

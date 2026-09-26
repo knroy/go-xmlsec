@@ -84,7 +84,7 @@ func TestNewKeyIdentifierReference(t *testing.T) {
 				t.Fatal(err)
 			}
 			ki := str.ChildElements()[0]
-			if !ki.IsElement(NSWSSE, "KeyIdentifier") || ki.AttrValue("ValueType") != c.valueType ||
+			if !ki.IsElement(xmlsec.NSWSSE, "KeyIdentifier") || ki.AttrValue("ValueType") != c.valueType ||
 				ki.AttrValue("EncodingType") != xmlsec.BSTEncodingBase64 ||
 				ki.StringValue() != base64.StdEncoding.EncodeToString(c.value) {
 				t.Fatalf("%v ValueType %q EncodingType %q value %q", ki.Name, ki.AttrValue("ValueType"), ki.AttrValue("EncodingType"), ki.StringValue())
@@ -119,7 +119,7 @@ func TestNewIssuerSerialReference(t *testing.T) {
 	}
 	xd := str.ChildElements()[0]
 	is := xd.ChildElements()[0].ChildElements()
-	if !xd.IsElement(nsDSig, "X509Data") || len(is) != 2 {
+	if !xd.IsElement(xmlsec.NSDSig, "X509Data") || len(is) != 2 {
 		t.Fatalf("structure %v", xd.Name)
 	}
 	if got := is[0].StringValue(); got != `CN=Test CA,O=Acme\, Inc.,C=NO` {
@@ -177,7 +177,7 @@ func TestMatchSecurityTokenReference(t *testing.T) {
 		{"direct reference", `<wsse:Reference URI="#t"/>`, false},
 		{"two references", ki(vt(valueTypeSKI)+enc, ski) + ki(vt(valueTypeSKI)+enc, ski), false},
 	} {
-		doc := parseDoc(t, `<wsse:SecurityTokenReference xmlns:wsse="`+NSWSSE+`" xmlns:ds="`+nsDSig+`">`+c.inner+`</wsse:SecurityTokenReference>`)
+		doc := parseDoc(t, `<wsse:SecurityTokenReference xmlns:wsse="`+xmlsec.NSWSSE+`" xmlns:ds="`+xmlsec.NSDSig+`">`+c.inner+`</wsse:SecurityTokenReference>`)
 		str := xmltree.DocumentElement(doc)
 		if got := MatchSecurityTokenReference(str, cert); got != c.want {
 			t.Errorf("%s: %v", c.name, got)
@@ -212,7 +212,7 @@ func newStrictFixture(t *testing.T) strictFixture {
 	t.Helper()
 	f := strictFixture{doc: parseDoc(t, env11), cert: testCert(t, "c"), otherCert: testCert(t, "o")}
 	var err error
-	if f.h, err = NewHeader(f.doc, NSSOAP11, "", false); err != nil {
+	if f.h, err = NewHeader(f.doc, xmlsec.NSSOAP11, "", false); err != nil {
 		t.Fatal(err)
 	}
 	if f.v3, err = f.h.AddBinarySecurityToken(f.cert, nil, xmlsec.BSTValueTypeX509v3); err != nil {
@@ -221,7 +221,7 @@ func newStrictFixture(t *testing.T) strictFixture {
 	if f.pki, err = f.h.AddBinarySecurityToken(f.cert, nil, xmlsec.BSTValueTypeX509PKIPath); err != nil {
 		t.Fatal(err)
 	}
-	h2, err := NewHeader(f.doc, NSSOAP11, "urn:other", false)
+	h2, err := NewHeader(f.doc, xmlsec.NSSOAP11, "urn:other", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,15 +235,15 @@ func newStrictFixture(t *testing.T) strictFixture {
 // strTo builds a ds:KeyInfo holding an STR to id, with the given Reference
 // ValueType and wsse11:TokenType, each omitted when empty.
 func strTo(id, valueType, tokenType string) *xdm.Node {
-	ki := xmltree.Element(nil, "ds", nsDSig, "KeyInfo")
-	ki.AddNamespace("ds", nsDSig)
+	ki := xmltree.Element(nil, "ds", xmlsec.NSDSig, "KeyInfo")
+	ki.AddNamespace("ds", xmlsec.NSDSig)
 	str := newSTR()
 	ki.AppendChild(str)
 	if tokenType != "" {
-		str.AddNamespace("wsse11", NSWSSE11)
-		xmltree.SetAttr(str, "wsse11", NSWSSE11, "TokenType", tokenType)
+		str.AddNamespace("wsse11", xmlsec.NSWSSE11)
+		xmltree.SetAttr(str, "wsse11", xmlsec.NSWSSE11, "TokenType", tokenType)
 	}
-	ref := xmltree.Element(str, "wsse", NSWSSE, "Reference")
+	ref := xmltree.Element(str, "wsse", xmlsec.NSWSSE, "Reference")
 	xmltree.SetAttr(ref, "", "", "URI", "#"+id)
 	if valueType != "" {
 		xmltree.SetAttr(ref, "", "", "ValueType", valueType)
@@ -281,8 +281,8 @@ func TestResolveSecurityTokenReferenceStrict(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			f := newStrictFixture(t)
-			tok := xmltree.Element(f.body, "wsse", NSWSSE, "BinarySecurityToken")
-			xmltree.SetAttr(tok, "wsu", NSWSU, "Id", "bodytoken")
+			tok := xmltree.Element(f.body, "wsse", xmlsec.NSWSSE, "BinarySecurityToken")
+			xmltree.SetAttr(tok, "wsu", xmlsec.NSWSU, "Id", "bodytoken")
 			xmltree.SetAttr(tok, "", "", "ValueType", v3)
 
 			ki := strTo(c.id(f), c.valueType, c.tokenType)
@@ -323,7 +323,7 @@ func TestNewSecurityTokenReference(t *testing.T) {
 	if _, err := NewSecurityTokenReference(nil, "tok", ""); !errors.Is(err, xmlsec.ErrIDNotFound) {
 		t.Fatalf("no ValueType, no document: %v", err)
 	}
-	doc := parseDoc(t, `<r xmlns:wsse="`+NSWSSE+`" xmlns:wsu="`+NSWSU+`">`+
+	doc := parseDoc(t, `<r xmlns:wsse="`+xmlsec.NSWSSE+`" xmlns:wsu="`+xmlsec.NSWSU+`">`+
 		`<wsse:BinarySecurityToken wsu:Id="pki" ValueType="`+xmlsec.BSTValueTypeX509PKIPath+`"/>`+
 		`<wsse:BinarySecurityToken wsu:Id="none"/></r>`)
 	if _, err := NewSecurityTokenReference(doc, "none", ""); !errors.Is(err, xmlsec.ErrUnsupportedKeyInfo) {
@@ -346,12 +346,12 @@ func TestNewSecurityTokenReference(t *testing.T) {
 			if ref.AttrValue("URI") != "#"+c.id || ref.AttrValue("ValueType") != c.wantVT {
 				t.Errorf("URI %q, ValueType %q", ref.AttrValue("URI"), ref.AttrValue("ValueType"))
 			}
-			if got := xmltree.AttrValue(str, NSWSSE11, "TokenType"); got != c.wantTT {
+			if got := xmltree.AttrValue(str, xmlsec.NSWSSE11, "TokenType"); got != c.wantTT {
 				t.Errorf("TokenType %q, want %q", got, c.wantTT)
 			}
 			// The wsse11 prefix is declared on the element itself.
-			if tt := str.Attr(NSWSSE11, "TokenType"); tt != nil {
-				if uri, _ := str.LookupPrefix(tt.Name.Prefix); uri != NSWSSE11 {
+			if tt := str.Attr(xmlsec.NSWSSE11, "TokenType"); tt != nil {
+				if uri, _ := str.LookupPrefix(tt.Name.Prefix); uri != xmlsec.NSWSSE11 {
 					t.Errorf("prefix %q bound to %q", tt.Name.Prefix, uri)
 				}
 			}
@@ -361,7 +361,7 @@ func TestNewSecurityTokenReference(t *testing.T) {
 
 func TestResolveSecurityTokenReferenceErrors(t *testing.T) {
 	str := func(inner string) string {
-		return `<soap:Envelope xmlns:soap="` + NSSOAP11 + `" xmlns:wsse="` + NSWSSE + `" xmlns:wsu="` + NSWSU + `">` +
+		return `<soap:Envelope xmlns:soap="` + xmlsec.NSSOAP11 + `" xmlns:wsse="` + xmlsec.NSWSSE + `" xmlns:wsu="` + xmlsec.NSWSU + `">` +
 			`<soap:Body><wsse:SecurityTokenReference>` + inner + `</wsse:SecurityTokenReference>` +
 			`<x wsu:Id="dup"/><y wsu:Id="dup"/><z wsu:Id="notbst"/></soap:Body></soap:Envelope>`
 	}

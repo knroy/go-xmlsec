@@ -10,7 +10,7 @@ import (
 )
 
 func TestAddTimestampWithoutExpiry(t *testing.T) {
-	h, err := NewHeader(parseDoc(t, env11), NSSOAP11, "", false)
+	h, err := NewHeader(parseDoc(t, env11), xmlsec.NSSOAP11, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func TestAddTimestampWithoutExpiry(t *testing.T) {
 // At most one timestamp per header (R3227), never a negative ttl, and the
 // timestamp goes first whenever it is added.
 func TestAddTimestampRules(t *testing.T) {
-	h, err := NewHeader(parseDoc(t, env11), NSSOAP11, "", false)
+	h, err := NewHeader(parseDoc(t, env11), xmlsec.NSSOAP11, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestAddTimestampRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first := h.Element().ChildElements()[0]; xmltree.AttrValue(first, NSWSU, "Id") != id {
+	if first := h.Element().ChildElements()[0]; xmltree.AttrValue(first, xmlsec.NSWSU, "Id") != id {
 		t.Fatalf("timestamp is not first: %v", childNames(h))
 	}
 	if _, err := h.AddTimestamp(time.Unix(0, 0), time.Minute); err == nil {
@@ -55,7 +55,7 @@ func TestAddTimestampRules(t *testing.T) {
 
 // What AddTimestamp writes, ParseTimestamp reads back.
 func TestTimestampRoundTrip(t *testing.T) {
-	h, err := NewHeader(parseDoc(t, env11), NSSOAP11, "", false)
+	h, err := NewHeader(parseDoc(t, env11), xmlsec.NSSOAP11, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestTimestampRoundTrip(t *testing.T) {
 
 func timestampEl(t *testing.T, inner string) string {
 	t.Helper()
-	return `<wsu:Timestamp xmlns:wsu="` + NSWSU + `">` + inner + `</wsu:Timestamp>`
+	return `<wsu:Timestamp xmlns:wsu="` + xmlsec.NSWSU + `">` + inner + `</wsu:Timestamp>`
 }
 
 func TestParseTimestamp(t *testing.T) {
@@ -104,7 +104,7 @@ func TestParseTimestamp(t *testing.T) {
 	}
 
 	for _, bad := range []struct{ name, doc string }{
-		{"not a timestamp", `<wsu:Created xmlns:wsu="` + NSWSU + `">` + c + `</wsu:Created>`},
+		{"not a timestamp", `<wsu:Created xmlns:wsu="` + xmlsec.NSWSU + `">` + c + `</wsu:Created>`},
 		{"empty (R3203)", timestampEl(t, ``)},
 		{"Expires only (R3203)", timestampEl(t, expires(e))},
 		{"Expires first (R3221)", timestampEl(t, expires(e)+created(c))},

@@ -31,7 +31,7 @@ func TestWSS4JProcessesOurSecurityHeader(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hdr, err := wss.NewHeader(doc, wss.NSSOAP12, "", true)
+	hdr, err := wss.NewHeader(doc, xmlsec.NSSOAP12, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestWSS4JProcessesSignThenEncrypt(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			hdr, err := wss.NewHeader(doc, wss.NSSOAP12, "", true)
+			hdr, err := wss.NewHeader(doc, xmlsec.NSSOAP12, "", true)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -205,7 +205,7 @@ func TestWSS4JProcessesSignThenEncrypt(t *testing.T) {
 				// in the output, under the same key.
 				doc2 := parse(t, out)
 				opts.DataID = "ED-2"
-				if out, err = xenc.EncryptElement(doc2, find(doc2, dsig.NSDSig, "Signature"), ek.SessionKey, opts); err != nil {
+				if out, err = xenc.EncryptElement(doc2, find(doc2, xmlsec.NSDSig, "Signature"), ek.SessionKey, opts); err != nil {
 					t.Fatal(err)
 				}
 				if strings.Contains(string(out), "SignatureValue") {
@@ -259,7 +259,7 @@ func TestWSS4JDecryptsOurEncryption(t *testing.T) {
 	doc := parse(t, []byte(envelope))
 	payload := xmltree.DocumentElement(doc).ChildElements()[1].ChildElements()[0]
 
-	hdr, err := wss.NewHeader(doc, wss.NSSOAP12, "", true)
+	hdr, err := wss.NewHeader(doc, xmlsec.NSSOAP12, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}

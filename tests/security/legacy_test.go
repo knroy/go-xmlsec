@@ -27,7 +27,7 @@ func resignWith(t *testing.T, doc *xdm.Node, method, outputLength string, sign f
 	sm := si.ChildElements()[1]
 	sm.Attr("", "Algorithm").Value = method
 	if outputLength != "" {
-		xmltree.Text(xmltree.Element(sm, "ds", dsig.NSDSig, "HMACOutputLength"), outputLength)
+		xmltree.Text(xmltree.Element(sm, "ds", xmlsec.NSDSig, "HMACOutputLength"), outputLength)
 	}
 	b, err := c14n.Bytes(si, c14n.Options{Algorithm: c14n.Exclusive10})
 	if err != nil {

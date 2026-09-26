@@ -165,7 +165,7 @@ func TestHMAC(t *testing.T) {
 		sign     func([]byte) []byte
 		opts     dsig.VerifyOptions
 		want     error
-		wantForm dsig.KeyInfoSpec
+		wantForm dsig.KeyInfoForm
 	}{
 		{"full length", sigMethod(xmlsec.SigHMACSHA256, ""), "", full, dsig.VerifyOptions{HMACKey: hmacSecret}, nil, dsig.KeyInfoNone},
 		{"HMACOutputLength 256", sigMethod(xmlsec.SigHMACSHA256, hmacLen(256)), "", full, dsig.VerifyOptions{HMACKey: hmacSecret}, nil, dsig.KeyInfoNone},
@@ -207,7 +207,7 @@ func TestHMAC(t *testing.T) {
 			sign     func([]byte) []byte
 			opts     dsig.VerifyOptions
 			want     error
-			wantForm dsig.KeyInfoSpec
+			wantForm dsig.KeyInfoForm
 		}{"CVE-2009-0217 " + c.alg + " " + strconv.Itoa(c.bits), sigMethod(c.alg, hmacLen(c.bits)), "", hmacSigner(c.h, hmacSecret, octets),
 			dsig.VerifyOptions{HMACKey: hmacSecret, AllowedSignatureAlgorithms: []string{c.alg}}, xmlsec.ErrSignatureInvalid, 0})
 	}

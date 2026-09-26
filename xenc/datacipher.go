@@ -101,7 +101,7 @@ func elementPlaintext(e, parent *xdm.Node) ([]byte, error) {
 // nfc refuses plaintext outside Normalization Form C (section 4.3).
 func nfc(b []byte) error {
 	if !norm.NFC.IsNormal(b) {
-		return ErrNotNFC
+		return xmlsec.ErrNotNFC
 	}
 	return nil
 }
@@ -116,7 +116,7 @@ func checkTarget(doc, target *xdm.Node) error {
 
 // isSOAP reports whether e is the SOAP 1.1 or 1.2 element named local.
 func isSOAP(e *xdm.Node, local string) bool {
-	return e.IsElement(nsSOAP11, local) || e.IsElement(nsSOAP12, local)
+	return e.IsElement(xmlsec.NSSOAP11, local) || e.IsElement(xmlsec.NSSOAP12, local)
 }
 
 // encryptedData encrypts plaintext into an xenc:EncryptedData of Type typ.
@@ -174,7 +174,7 @@ func replaceElement(doc, target *xdm.Node, sessionKey []byte, opts EncryptOption
 // namespace in scope on the element, so the decrypted octets parse on their
 // own, plus xmlns="" on target when it has no default namespace and its
 // parent has one (section 4.5.3.1). It must be in Unicode Normalization
-// Form C (section 4.3), or ErrNotNFC is returned. The returned document is
+// Form C (section 4.3), or xmlsec.ErrNotNFC is returned. The returned document is
 // in canonical form (Inclusive10WithComments).
 //
 // A SOAP Envelope, Header or Body, and a header block, a direct child of a
@@ -254,8 +254,8 @@ func EncryptContent(doc *xdm.Node, target *xdm.Node, sessionKey []byte, opts Enc
 // Type Content the content's (see EncryptContent); replacing the
 // EncryptedData with them is the caller's step.
 //
-// allowedData restricts the data algorithm; empty means the default set,
-// AES-GCM. The legacy CBC algorithms (xmlsec.EncAES128CBC, EncAES192CBC,
+// opts.AllowedDataAlgorithms restricts the data algorithm; empty means the
+// default set, AES-GCM. The legacy CBC algorithms (xmlsec.EncAES128CBC, EncAES192CBC,
 // EncAES256CBC, EncTripleDESCBC) are decrypted only when named: the IV is
 // the first block, and of the section 5.2.1 padding only the last octet is
 // checked. Every CBC failure (wrong key, bad length, bad padding) is the
@@ -264,8 +264,8 @@ func EncryptContent(doc *xdm.Node, target *xdm.Node, sessionKey []byte, opts Enc
 // authenticated, and an attacker who can submit altered ciphertext learns
 // from anything that differs afterwards, such as whether the plaintext
 // parses. Only authentication bound to the key closes it: AES-GCM.
-func DecryptData(el *xdm.Node, sessionKey []byte, allowedData []string) ([]byte, error) {
-	alg, err := dataAlgorithm(el, allowedData)
+func DecryptData(el *xdm.Node, sessionKey []byte, opts DecryptOptions) ([]byte, error) {
+	alg, err := dataAlgorithm(el, opts.AllowedDataAlgorithms)
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +284,7 @@ func dataCiphertext(el *xdm.Node) ([]byte, error) {
 		return nil, err
 	}
 	kids := cd.ChildElements()
-	if len(kids) != 1 || !kids[0].IsElement(NSXEnc, "CipherReference") {
+	if len(kids) != 1 || !kids[0].IsElement(xmlsec.NSXEnc, "CipherReference") {
 		return cipherValue(el)
 	}
 	cr := kids[0]
@@ -316,7 +316,7 @@ func dataCiphertext(el *xdm.Node) ([]byte, error) {
 // implemented data algorithm, whose xenc:EncryptionMethod may hold only a
 // consistent KeySize.
 func dataAlgorithm(el *xdm.Node, allowedData []string) (string, error) {
-	if el == nil || !el.IsElement(NSXEnc, "EncryptedData") {
+	if el == nil || !el.IsElement(xmlsec.NSXEnc, "EncryptedData") {
 		return "", malformed("not an xenc:EncryptedData")
 	}
 	alg, m, err := parseEncryptionMethod(el)
