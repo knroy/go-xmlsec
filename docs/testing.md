@@ -10,7 +10,8 @@ go test -run '^$' -fuzz '^FuzzVerify$' -fuzztime 60s ./dsig
 ```
 
 Unit tests touch no network and no filesystem outside the repository, and
-read no clock. Keys and certificates are generated per run.
+read no clock. Keys and certificates are generated per run, except the
+golden-file key.
 
 | Layer | Where | Runs |
 |---|---|---|
@@ -114,13 +115,15 @@ skip; the script and CI set it.
 
 ## Test data
 
-Everything the tests run against, and where it comes from. No key material
-and no third-party document is committed to this repository.
+Everything the tests run against, and where it comes from.
 
 **Keys and certificates.** Generated fresh in every run from `crypto/rand`:
 RSA 2048-bit keys, and ECDSA keys on P-256, P-384 and P-521, each with a
 self-signed X.509 certificate. Tests that write PEM files for the reference
-tools write them to a per-test temporary directory.
+tools write them to a per-test temporary directory. One exception:
+`wss/testdata/golden-key.pem`, a test-only RSA key and self-signed
+certificate committed so that golden signatures are reproducible. It
+protects nothing.
 
 **Documents.** Synthetic, written inline in the tests so each is visible
 beside the assertion that uses it:
@@ -165,6 +168,31 @@ mark, character references and non-ASCII text. The corpus found the two
 behaviours recorded in [todo.md](todo.md) as decided departures: implicit
 Canonical XML 1.0 on verification, and descriptive `X509Data` elements.
 
+## Golden files
+
+`wss/golden_test.go` compares whole documents byte for byte with files in
+`wss/testdata/golden`:
+
+| Golden | Shape |
+|---|---|
+| `signed-envelope-two-attachments.xml` | SOAP 1.2, binary security token, one signature over the messaging header, the body and two `cid:` attachments (Attachment-Content-Only), exclusive C14N, RSA-SHA256, SecurityTokenReference |
+| `signed-encrypted-envelope.masked.xml`, `signed-encrypted-payload.xml` | the same envelope signed, then its body payload encrypted (AES-128-GCM, RSA-OAEP with explicit SHA-256 MGF). Every `CipherValue` is masked, because the IV, session key and OAEP padding are random; the plaintext has its own golden, and the decrypted envelope must verify |
+| `enveloped-metadata.xml` | enveloped, inclusive C14N, X509Data |
+| `enveloped-invoice.xml` | the README quick-start document, exclusive C14N |
+
+Every signed golden is verified, with allow-lists and a coverage check,
+before it is compared, so a golden that does not verify can never be
+written. They are reproducible because the key is fixed, RSA PKCS#1 v1.5
+signing is deterministic, and `wsu:Id` values come from a fixed stream set
+through `SetRandReader` in `wss/export_test.go`. That helper is visible only
+to tests in `wss/`, which is why the goldens live there. `.gitattributes`
+keeps them LF on every system.
+
+**Regenerate only with `go test ./wss -run TestGolden -update`, then review
+`git diff wss/testdata/golden` and say in the commit why the octets
+changed.** An unexplained golden change is serialization drift, not a
+fixture refresh. Only `wss` defines `-update`; do not pass it to `./...`.
+
 ## Fuzzing
 
 | Target | Exercises |
@@ -199,5 +227,3 @@ fail to encode.
 
 * **Gate 2**: byte equality with phase4 over whole captured AS4 messages. The
   signature-level equivalent, byte equality with Santuario, is in place.
-* **Golden files** for a signed envelope with two attachments, a signed and
-  encrypted envelope, and an enveloped metadata document.

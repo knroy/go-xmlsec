@@ -6,7 +6,6 @@
 |---|---|
 | `Attachment-Complete` transform, signing and encryption | Refused with `ErrUnsupportedAlgorithm`. Its MIME header canonicalization is easy to get subtly wrong, and no peer has been seen to require it (open item X-6). |
 | Gate 2 against phase4 | Needs the captured-message corpus (X-5), and the consumer that builds whole AS4 messages: Gate 2 compares a message, not a signature. The signature-level equivalent, byte equality with Santuario, is in place (`tests/interop`). |
-| Golden files, with `-update` | See [testing.md](testing.md#not-tested-yet). |
 | Raw keys in `ds:KeyInfo` (`KeyValue`, `DEREncodedKeyValue`) | `Verify` works from certificates, so the 25 W3C interop vectors that carry raw keys are refused. A caller that pins a key rather than a certificate cannot express it today. |
 | SAML `ID` attributes | `FindByID` resolves `wsu:Id` and `xml:id` only. SAML is the likeliest second consumer. |
 
