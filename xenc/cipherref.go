@@ -75,7 +75,9 @@ func EncryptAttachment(att *xmlsec.Attachment, sessionKey []byte, transform stri
 	if mt := contentType(att); mt != "" {
 		xmltree.SetAttr(ed, "", "", "MimeType", mt)
 	}
-	cr := element(element(ed, "CipherData"), "CipherReference")
+	cd := element(ed, "CipherData")
+	place(ed)
+	cr := element(cd, "CipherReference")
 	xmltree.SetAttr(cr, "", "", "URI", "cid:"+cidEscape(att.ID))
 	tr := nsElement(element(cr, "Transforms"), "ds", xmlsec.NSDSig, "Transform")
 	xmltree.SetAttr(tr, "", "", "Algorithm", xmlsec.TransformAttachmentCiphertext)
@@ -104,23 +106,8 @@ func cidEscape(id string) string {
 // CipherReference's xenc:Transforms, refusing XSLT and XPath with
 // xmlsec.ErrTransformRefused.
 func transforms(cr *xdm.Node) ([]string, error) {
-	var algs []string
-	for i, k := range cr.ChildElements() {
-		if i > 0 || !k.IsElement(xmlsec.NSXEnc, "Transforms") {
-			return nil, malformed("xenc:CipherReference may hold only one xenc:Transforms")
-		}
-		for _, t := range k.ChildElements() {
-			alg := t.AttrValue("Algorithm")
-			switch {
-			case alg == xmlsec.TransformXSLT || alg == xmlsec.TransformXPath || alg == xmlsec.TransformXPathFilter2:
-				return nil, fmt.Errorf("%w: %s", xmlsec.ErrTransformRefused, alg)
-			case !t.IsElement(xmlsec.NSDSig, "Transform") || len(t.ChildElements()) > 0:
-				return nil, malformed("xenc:Transforms must hold ds:Transform elements without parameters")
-			}
-			algs = append(algs, alg)
-		}
-	}
-	return algs, nil
+	algs, _, err := cipherTransforms(cr, nil)
+	return algs, err
 }
 
 // contentType returns the attachment's Content-Type header, matched

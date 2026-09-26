@@ -236,11 +236,7 @@ func (ek *EncryptedKey) SetKeyInfo(el *xdm.Node) error {
 	}
 	ki := nsElement(ek.Element, "ds", xmlsec.NSDSig, "KeyInfo")
 	ki.AppendChild(el)
-	// Schema order: EncryptionMethod, KeyInfo, CipherData, ReferenceList,
-	// CarriedKeyName.
-	kids := ek.Element.Children
-	copy(kids[2:], kids[1:len(kids)-1])
-	kids[1] = ki
+	place(ek.Element)
 	return nil
 }
 
@@ -252,22 +248,15 @@ func (ek *EncryptedKey) AddDataReference(id string) error {
 	if !xdm.IsNCName(id) {
 		return fmt.Errorf("xenc: data reference %q is not an NCName", id)
 	}
-	var list, name *xdm.Node
+	var list *xdm.Node
 	for _, k := range ek.Element.ChildElements() {
-		switch {
-		case k.IsElement(xmlsec.NSXEnc, "ReferenceList"):
+		if k.IsElement(xmlsec.NSXEnc, "ReferenceList") {
 			list = k
-		case k.IsElement(xmlsec.NSXEnc, "CarriedKeyName"):
-			name = k
 		}
 	}
 	if list == nil {
 		list = element(ek.Element, "ReferenceList")
-		if name != nil {
-			// Schema order: ReferenceList before CarriedKeyName.
-			kids := ek.Element.Children
-			kids[len(kids)-2], kids[len(kids)-1] = list, name
-		}
+		place(ek.Element)
 	}
 	xmltree.SetAttr(element(list, "DataReference"), "", "", "URI", "#"+id)
 	return nil

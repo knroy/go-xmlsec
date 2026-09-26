@@ -8,7 +8,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"net/url"
 	"slices"
 	"strings"
 
@@ -131,15 +130,19 @@ func encryptedData(typ string, plaintext, sessionKey []byte, opts EncryptOptions
 	if err != nil {
 		return nil, err
 	}
-	xmltree.Text(element(element(ed, "CipherData"), "CipherValue"), base64.StdEncoding.EncodeToString(ct))
+	cd := element(ed, "CipherData")
+	place(ed)
+	xmltree.Text(element(cd, "CipherValue"), base64.StdEncoding.EncodeToString(ct))
 	return ed, nil
 }
 
 // emitWith returns the canonical octets of doc with parent's children
-// replaced by kids, which include the new node added, and restores parent.
-func emitWith(doc, parent *xdm.Node, kids []*xdm.Node, added *xdm.Node) ([]byte, error) {
+// replaced by kids, which include the new nodes added, and restores parent.
+func emitWith(doc, parent *xdm.Node, kids []*xdm.Node, added ...*xdm.Node) ([]byte, error) {
 	saved := parent.Children
-	parent.AppendChild(added)
+	for _, n := range added {
+		parent.AppendChild(n)
+	}
 	parent.Children = kids
 	defer func() { parent.Children = saved }()
 	return c14n.Bytes(doc.Root(), c14n.Options{Algorithm: c14n.Inclusive10WithComments})
@@ -252,12 +255,20 @@ func EncryptContent(doc *xdm.Node, target *xdm.Node, sessionKey []byte, opts Enc
 // content. With opts.ResolveURI set, a CipherReference to an absolute URI
 // other than cid: is fetched through it (section 3.3.1): its octets are the
 // ciphertext, or, with exactly the base64 transform, its base64 encoding.
-// Any other CipherReference is refused; attachments are
+// A relative URI is first resolved against opts.BaseURI, and refused
+// without one. Any other CipherReference is refused; attachments are
 // DecryptAttachment's.
 //
+// With opts.AllowedXPathExpressions, an XPath transform the list allows may
+// precede the base64 transform (Example 13). The text nodes for which the
+// expression is true, among those of the named element, of the whole
+// document, or of the resolved octets parsed with xmlsec.Parse, are
+// concatenated in document order and decoded as the ciphertext. The
+// expression is checked before ResolveURI is called.
+//
 // For an encrypted element the result is the element's octets, and for
-// Type Content the content's (see EncryptContent); replacing the
-// EncryptedData with them is the caller's step.
+// Type Content the content's (see EncryptContent); DecryptAndReplace puts
+// them in place of the EncryptedData.
 //
 // opts.AllowedDataAlgorithms restricts the data algorithm; empty means the
 // default set, AES-GCM. The legacy CBC algorithms (xmlsec.EncAES128CBC, EncAES192CBC,
@@ -274,7 +285,7 @@ func DecryptData(el *xdm.Node, sessionKey []byte, opts DecryptOptions) ([]byte, 
 	if err != nil {
 		return nil, err
 	}
-	ct, err := dataCiphertext(el, opts.ResolveURI)
+	ct, err := dataCiphertext(el, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -283,8 +294,8 @@ func DecryptData(el *xdm.Node, sessionKey []byte, opts DecryptOptions) ([]byte, 
 
 // dataCiphertext returns the ciphertext of an EncryptedData, inline, by
 // same-document CipherReference, or by external CipherReference through
-// resolve.
-func dataCiphertext(el *xdm.Node, resolve xmlsec.URIResolver) ([]byte, error) {
+// opts.ResolveURI.
+func dataCiphertext(el *xdm.Node, opts DecryptOptions) ([]byte, error) {
 	cd, err := cipherData(el)
 	if err != nil {
 		return nil, err
@@ -295,26 +306,28 @@ func dataCiphertext(el *xdm.Node, resolve xmlsec.URIResolver) ([]byte, error) {
 	}
 	cr := kids[0]
 	uri := cr.AttrValue("URI")
-	if resolve != nil && !strings.HasPrefix(uri, "cid:") {
-		if u, err := url.Parse(uri); err == nil && u.IsAbs() {
-			return externalCiphertext(cr, uri, resolve)
-		}
-	}
-	if uri != "" && uri[0] != '#' {
-		return nil, malformed("CipherReference URI %q: only a same-document reference is dereferenced here", uri)
-	}
-	algs, err := transforms(cr)
+	ext, err := externalURI(uri, opts)
 	if err != nil {
 		return nil, err
 	}
-	if !slices.Equal(algs, []string{xmlsec.TransformBase64}) {
-		return nil, unsupported("same-document CipherReference transforms %q: exactly the base64 transform is supported", algs)
+	algs, xp, err := cipherTransforms(cr, opts.AllowedXPathExpressions)
+	if err != nil {
+		return nil, err
+	}
+	if ext != "" {
+		return externalCiphertext(ext, algs, xp, opts.ResolveURI)
+	}
+	if !slices.Equal(algs, []string{xmlsec.TransformBase64}) && !slices.Equal(algs, xpathBase64) {
+		return nil, unsupported("same-document CipherReference transforms %q: the base64 transform, optionally after an allowed XPath, is supported", algs)
 	}
 	src := el.Root()
 	if uri != "" {
 		if src, err = idref.Find(el, uri[1:], idAttr); err != nil {
 			return nil, err
 		}
+	}
+	if xp != nil {
+		return xp.decode(src)
 	}
 	b, err := xmltree.Base64(src)
 	if err != nil {
@@ -324,24 +337,34 @@ func dataCiphertext(el *xdm.Node, resolve xmlsec.URIResolver) ([]byte, error) {
 }
 
 // externalCiphertext fetches the octets of an external CipherReference
-// through resolve, after checking its transforms: none, for the ciphertext
-// itself, or exactly base64, for its encoding.
-func externalCiphertext(cr *xdm.Node, uri string, resolve xmlsec.URIResolver) ([]byte, error) {
-	algs, err := transforms(cr)
-	if err != nil {
-		return nil, err
-	}
-	if len(algs) > 1 || len(algs) == 1 && algs[0] != xmlsec.TransformBase64 {
-		return nil, unsupported("external CipherReference transforms %q: none or exactly the base64 transform is supported", algs)
+// through resolve, once its transforms are accepted: none, for the
+// ciphertext itself, base64, for its encoding, or an allowed XPath and then
+// base64, for an encoding held in the text of an XML document.
+func externalCiphertext(uri string, algs []string, xp *xpathStep, resolve xmlsec.URIResolver) ([]byte, error) {
+	if len(algs) > 1 && !slices.Equal(algs, xpathBase64) || len(algs) == 1 && algs[0] != xmlsec.TransformBase64 {
+		return nil, unsupported("external CipherReference transforms %q: none, base64, or an allowed XPath then base64 is supported", algs)
 	}
 	b, err := resolve(uri)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %q: %w", xmlsec.ErrDereference, uri, err)
 	}
-	if len(algs) == 0 {
+	switch {
+	case len(algs) == 0:
 		return b, nil
+	case xp != nil:
+		tree, err := xmlsec.Parse(b)
+		if err != nil {
+			return nil, fmt.Errorf("%w: CipherReference content for XPath: %w", xmlsec.ErrMalformed, err)
+		}
+		return xp.decode(tree.Root)
 	}
-	if b, err = base64.StdEncoding.DecodeString(strings.Join(strings.Fields(string(b)), "")); err != nil {
+	return decode64(string(b))
+}
+
+// decode64 decodes base64 text, ignoring whitespace.
+func decode64(s string) ([]byte, error) {
+	b, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(s), ""))
+	if err != nil {
 		return nil, malformed("CipherReference content: %v", err)
 	}
 	return b, nil

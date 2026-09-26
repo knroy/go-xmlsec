@@ -53,6 +53,7 @@ import (
 
 	"github.com/knroy/go-xml/xdm"
 	"github.com/knroy/go-xmlsec"
+	"github.com/knroy/go-xmlsec/dsig"
 	"github.com/knroy/go-xmlsec/internal/hashes"
 	"github.com/knroy/go-xmlsec/internal/xmltree"
 )
@@ -147,6 +148,39 @@ type EncryptOptions struct {
 	// MinPBKDF2Iterations to MaxPBKDF2Iterations. Zero means
 	// DefaultPBKDF2Iterations.
 	PBKDF2Iterations int
+
+	// Type, if set, is the Type attribute of the xenc:EncryptedData that
+	// EncryptOctets produces: a URI telling the recipient what the octets
+	// are (section 3.1). The other Encrypt functions set Type themselves
+	// and refuse any other value.
+	Type string
+
+	// MimeType, if set, is the EncryptedData MimeType attribute, such as
+	// "image/png" or, for an element, "text/xml" (section 3.1). It is
+	// advisory: nothing checks it. EncryptAttachment refuses it, since it
+	// takes MimeType from the attachment's Content-Type.
+	MimeType string
+
+	// Encoding, if set, is the EncryptedData Encoding attribute, a URI such
+	// as xmlsec.TransformBase64 naming the transfer encoding of the
+	// plaintext (section 3.1). It is advisory: nothing is encoded.
+	Encoding string
+
+	// EncryptionProperties, if any, are copied into an
+	// xenc:EncryptionProperties after the EncryptedData's CipherData
+	// (section 3.7): additional information about its generation, such as
+	// a date. Each must be an xenc:EncryptionProperty element. It is copied
+	// in inclusive canonical form, so it keeps the namespaces in scope
+	// where it stands; the node itself is never modified. Only
+	// EncryptedData carries them: GenerateEncryptedKey ignores this field.
+	EncryptionProperties []*xdm.Node
+
+	// CipherReferenceURI, if set, makes EncryptOctets emit an
+	// xenc:CipherReference to this URI in place of an inline CipherValue,
+	// and return the ciphertext for the caller to store there, as raw
+	// octets (section 3.3.1). It must not be a same-document reference.
+	// The other Encrypt functions refuse it.
+	CipherReferenceURI string
 }
 
 // keySizes maps each data algorithm to its AES key length.
@@ -204,7 +238,8 @@ type DecryptOptions struct {
 	// CipherReference transforms are accepted. This library never fetches
 	// anything itself; see xmlsec.URIResolver. An error it returns is
 	// wrapped with xmlsec.ErrDereference. When nil, such a CipherReference
-	// is refused, and a relative URI is always refused.
+	// is refused, and so is a relative one; with ResolveURI set, a relative
+	// URI is resolved against BaseURI, and refused without one.
 	ResolveURI xmlsec.URIResolver
 
 	// AllowedKeyDerivationAlgorithms restricts the
@@ -216,6 +251,28 @@ type DecryptOptions struct {
 	// xmlsec.SigHMACSHA256, 384 and 512. The legacy xmlsec.SigHMACSHA1,
 	// the PKCS #5 default, is accepted only when named.
 	AllowedPRFAlgorithms []string
+
+	// BaseURI is the absolute URI a relative xenc:CipherReference URI,
+	// such as "ct/1.bin", is resolved against (RFC 3986 section 5) before
+	// ResolveURI is called with the result, as XML Signature resolves a
+	// relative ds:Reference URI (section 3.3.1). It is never taken from
+	// the document: xml:base is ignored. Empty, a relative URI is refused.
+	// A same-document reference, "" or "#id", is never resolved against it.
+	BaseURI string
+
+	// AllowedXPathExpressions opts in to an XPath transform
+	// (xmlsec.TransformXPath) on an xenc:CipherReference, followed by the
+	// base64 transform (section 3.3.1, Example 13), for exactly the
+	// expressions listed. The matching is dsig.VerifyOptions'
+	// AllowedXPathExpressions': a received expression is accepted when,
+	// with surrounding whitespace trimmed, it equals an entry's Expr and
+	// each prefix in the entry's Namespaces is bound to the same URI where
+	// it stands, and it is then compiled from the entry, with the entry's
+	// bindings. Empty, the default, refuses the XPath transform with
+	// xmlsec.ErrTransformRefused, as it does any expression not listed,
+	// before ResolveURI is called and before any cryptographic work. XSLT
+	// and XPath Filter 2.0 on a CipherReference stay refused.
+	AllowedXPathExpressions []dsig.XPathExpression
 }
 
 // The default allow-lists, used when a caller passes an empty one.
@@ -303,8 +360,10 @@ func newEncryptedData(typ string, opts EncryptOptions) (*xdm.Node, error) {
 		}
 		xmltree.SetAttr(ed, "", "", "Id", opts.DataID)
 	}
-	xmltree.SetAttr(ed, "", "", "Type", typ)
 	encryptionMethod(ed, opts.DataAlgorithm)
+	if err := dataAttrs(ed, typ, opts); err != nil {
+		return nil, err
+	}
 	return ed, nil
 }
 
