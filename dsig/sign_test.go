@@ -57,6 +57,10 @@ func TestSignErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	otherKey := newKey(t, otherRSA)
+	small, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
 	doc, tokID, bodyID := covTokenDoc(t, otherKey)
 	body := "#" + bodyID
 	atts := attachments(t, "!!not base64")
@@ -115,26 +119,54 @@ func TestSignErrors(t *testing.T) {
 		{"canonicalization of an attachment", key, func(o *dsig.SignOptions) {
 			o.References = ref("cid:att-1@example.com", covExc)
 		}, xmlsec.ErrMalformed},
-		{"canonicalization twice", key, func(o *dsig.SignOptions) { o.References = ref(body, covExc, covExc) }, xmlsec.ErrMalformed},
-		{"base64 of a node set", key, func(o *dsig.SignOptions) { o.References = ref(body, xmlsec.TransformBase64) }, xmlsec.ErrMalformed},
-		{"base64 of non-base64 octets", key, func(o *dsig.SignOptions) {
+		{"cid: without transforms", key, func(o *dsig.SignOptions) { o.References = ref("cid:att-1@example.com") }, xmlsec.ErrMalformed},
+		{"cid: beginning with base64", key, func(o *dsig.SignOptions) {
 			o.References = ref("cid:att-1@example.com", xmlsec.TransformBase64)
 		}, xmlsec.ErrMalformed},
+		{"canonicalization of octets that are not XML", key, func(o *dsig.SignOptions) {
+			o.References = ref("cid:att-1@example.com", xmlsec.TransformAttachmentContentSignature, covExc)
+		}, xmlsec.ErrMalformed},
+		{"enveloped on octets", key, func(o *dsig.SignOptions) {
+			o.References = ref(body, covExc, xmlsec.TransformEnvelopedSignature, covExc)
+		}, xmlsec.ErrMalformed},
+		{"base64 of a node set whose text is not base64", key, func(o *dsig.SignOptions) { o.References = ref(body, xmlsec.TransformBase64) }, xmlsec.ErrMalformed},
+		{"base64 of non-base64 octets", key, func(o *dsig.SignOptions) {
+			o.References = ref("cid:att-1@example.com", xmlsec.TransformAttachmentContentSignature, xmlsec.TransformBase64)
+		}, xmlsec.ErrMalformed},
 		{"Attachment-Content-Only EncryptedData Type as a transform", key, func(o *dsig.SignOptions) {
-			o.References = ref("cid:att-1@example.com", xmlsec.TransformAttachmentContentOnly)
+			o.References = ref("cid:att-1@example.com", xmlsec.TransformAttachmentContentSignature, xmlsec.TransformAttachmentContentOnly)
 		}, xmlsec.ErrUnsupportedAlgorithm},
 		{"Attachment-Content-Signature on an element", key, func(o *dsig.SignOptions) {
 			o.References = ref(body, xmlsec.TransformAttachmentContentSignature)
 		}, xmlsec.ErrMalformed},
 		{"Attachment-Complete EncryptedData Type as a transform", key, func(o *dsig.SignOptions) {
-			o.References = ref("cid:att-1@example.com", xmlsec.TransformAttachmentComplete)
+			o.References = ref("cid:att-1@example.com", xmlsec.TransformAttachmentCompleteSignature, xmlsec.TransformAttachmentComplete)
 		}, xmlsec.ErrUnsupportedAlgorithm},
 		{"Attachment-Complete-Signature on an element", key, func(o *dsig.SignOptions) {
 			o.References = ref(body, xmlsec.TransformAttachmentCompleteSignature)
 		}, xmlsec.ErrMalformed},
 		{"Attachment-Content-Signature not first", key, func(o *dsig.SignOptions) {
-			o.References = ref("cid:att-1@example.com", xmlsec.TransformBase64, xmlsec.TransformAttachmentContentSignature)
+			o.References = ref("cid:att-1@example.com", xmlsec.TransformAttachmentContentSignature, xmlsec.TransformAttachmentContentSignature)
 		}, xmlsec.ErrMalformed},
+
+		// XML-DSig 6.4.2: at least 2048-bit RSA keys for creating signatures.
+		{"1024-bit RSA signer", newKey(t, small), nil, xmlsec.ErrUnsupportedKeyInfo},
+
+		// XML-DSig 4.2: a laxly schema-valid ds:Signature.
+		{"SignatureID not an NCName", key, func(o *dsig.SignOptions) { o.SignatureID = "1sig" }, xmlsec.ErrMalformed},
+		{"SignatureID with a colon", key, func(o *dsig.SignOptions) { o.SignatureID = "a:b" }, xmlsec.ErrMalformed},
+		{"Reference.ID not an NCName", key, func(o *dsig.SignOptions) { o.References[0].ID = "ref 1" }, xmlsec.ErrMalformed},
+		{"Reference.Type with whitespace", key, func(o *dsig.SignOptions) { o.References[0].Type = "urn:a b" }, xmlsec.ErrMalformed},
+		{"Reference.Type not a URI", key, func(o *dsig.SignOptions) { o.References[0].Type = "%zz" }, xmlsec.ErrMalformed},
+
+		// XPointer: only #xpointer(/) and #xpointer(id('ID')).
+		{"#xpointer(/) without enveloped", key, func(o *dsig.SignOptions) { o.References = ref("#xpointer(/)", covExc) }, xmlsec.ErrMalformed},
+		{"XPointer expression", key, func(o *dsig.SignOptions) { o.References = ref("#xpointer(//*)", covExc) }, xmlsec.ErrMalformed},
+		{"XPointer id() not an NCName", key, func(o *dsig.SignOptions) { o.References = ref("#xpointer(id('1'))", covExc) }, xmlsec.ErrMalformed},
+		{"XPointer id() with mixed quotes", key, func(o *dsig.SignOptions) {
+			o.References = ref("#xpointer(id('"+bodyID+`"))`, covExc)
+		}, xmlsec.ErrMalformed},
+		{"XPointer id() not found", key, func(o *dsig.SignOptions) { o.References = ref("#xpointer(id('nope'))", covExc) }, xmlsec.ErrIDNotFound},
 		{"Attachment-Complete-Signature over a malformed header", key, func(o *dsig.SignOptions) {
 			o.References = ref("cid:att-1@example.com", xmlsec.TransformAttachmentCompleteSignature)
 			o.Attachments, _ = xmlsec.NewAttachmentSet(&xmlsec.Attachment{ID: "att-1@example.com",

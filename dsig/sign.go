@@ -11,6 +11,9 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net/url"
+	"strings"
+	"unicode"
 
 	"github.com/knroy/go-xml/c14n"
 	"github.com/knroy/go-xml/xdm"
@@ -40,7 +43,8 @@ type SignOptions struct {
 	// that form, ignored otherwise.
 	SecurityTokenID string
 
-	// SignatureID, if set, becomes the Id attribute of ds:Signature.
+	// SignatureID, if set, becomes the Id attribute of ds:Signature. It must
+	// be an NCName.
 	SignatureID string
 
 	// Attachments resolves cid: references. Required if any reference uses
@@ -64,6 +68,9 @@ type SignOptions struct {
 }
 
 // Sign creates a ds:Signature over the references in opts.
+//
+// An RSA signing key must have at least 2048 bits (XML-DSig 6.4.2); a
+// smaller one is refused with xmlsec.ErrUnsupportedKeyInfo.
 //
 // With opts.Parent set, the signature is appended to that element first and
 // computed in place, and any canonicalization algorithm may be used; the
@@ -138,9 +145,19 @@ func sign(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions, parent *xdm.N
 	if pub, ok := key.Signer.Public().(interface{ Equal(crypto.PublicKey) bool }); !ok || !pub.Equal(key.Certificate.PublicKey) {
 		return nil, errors.New("dsig: Signer does not match Certificate")
 	}
+	// XML-DSig 6.4.2: implementations "MUST use at least 2048-bit keys for
+	// creating signatures".
+	if k, ok := key.Signer.Public().(*rsa.PublicKey); ok {
+		if err := checkRSASize(k); err != nil {
+			return nil, err
+		}
+	}
+	if opts.SignatureID != "" && !xdm.IsNCName(opts.SignatureID) {
+		return nil, fmt.Errorf("%w: SignatureID %q is not an NCName", xmlsec.ErrMalformed, opts.SignatureID)
+	}
 	for _, r := range opts.References {
-		if r.URI == "" && (len(r.Transforms) == 0 || r.Transforms[0].Algorithm != xmlsec.TransformEnvelopedSignature) {
-			return nil, fmt.Errorf("%w: a reference to the whole document must begin with enveloped-signature", xmlsec.ErrMalformed)
+		if err := checkReference(r); err != nil {
+			return nil, err
 		}
 	}
 
@@ -199,6 +216,34 @@ func sign(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions, parent *xdm.N
 		return nil, err
 	}
 	return sig, nil
+}
+
+// checkReference refuses a Reference that would make the ds:Signature
+// schema invalid (XML-DSig 4.2: implementations "MUST generate laxly schema
+// valid Signature elements"), or that no peer would accept.
+func checkReference(r Reference) error {
+	if r.ID != "" && !xdm.IsNCName(r.ID) {
+		return fmt.Errorf("%w: Reference.ID %q is not an NCName", xmlsec.ErrMalformed, r.ID)
+	}
+	if r.Type != "" {
+		if _, err := url.Parse(r.Type); err != nil || strings.ContainsFunc(r.Type, unicode.IsSpace) {
+			return fmt.Errorf("%w: Reference.Type %q is not a URI", xmlsec.ErrMalformed, r.Type)
+		}
+	}
+	first := ""
+	if len(r.Transforms) > 0 {
+		first = r.Transforms[0].Algorithm
+	}
+	switch {
+	case (r.URI == "" || r.URI == "#xpointer(/)") && first != xmlsec.TransformEnvelopedSignature:
+		return fmt.Errorf("%w: a reference to the whole document must begin with enveloped-signature", xmlsec.ErrMalformed)
+	case strings.HasPrefix(r.URI, "cid:") && first != xmlsec.TransformAttachmentContentSignature && first != xmlsec.TransformAttachmentCompleteSignature:
+		// SwA profile 5.3 and WS-I BSP R6101: an attachment is signed
+		// through one of the SwA signature transforms, never as raw octets.
+		return fmt.Errorf("%w: a cid: reference must begin with %s or %s", xmlsec.ErrMalformed,
+			xmlsec.TransformAttachmentContentSignature, xmlsec.TransformAttachmentCompleteSignature)
+	}
+	return nil
 }
 
 func algElement(parent *xdm.Node, local, alg string) *xdm.Node {

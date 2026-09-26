@@ -24,6 +24,7 @@ type parsedSignature struct {
 type parsedReference struct {
 	el         *xdm.Node
 	uri, typ   string
+	omitted    bool // no URI attribute: XML-DSig 4.4.3.1
 	transforms []TransformSpec
 	digestAlg  string
 	digest     []byte
@@ -90,11 +91,11 @@ func parseReference(r *xdm.Node) (parsedReference, error) {
 	if !r.IsElement(NSDSig, "Reference") {
 		return ref, malformed("unexpected %s in ds:SignedInfo", r.Name.Local)
 	}
-	uri := r.Attr("", "URI")
-	if uri == nil {
-		return ref, malformed("ds:Reference without URI")
+	if uri := r.Attr("", "URI"); uri != nil {
+		ref.uri = uri.Value
+	} else {
+		ref.omitted = true
 	}
-	ref.uri = uri.Value
 
 	kids := r.ChildElements()
 	if len(kids) > 0 && kids[0].IsElement(NSDSig, "Transforms") {

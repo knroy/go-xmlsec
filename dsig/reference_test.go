@@ -1,18 +1,24 @@
 package dsig_test
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"strings"
 	"testing"
 
 	"github.com/knroy/go-xml/c14n"
+	"github.com/knroy/go-xml/xdm"
 	"github.com/knroy/go-xmlsec"
 	"github.com/knroy/go-xmlsec/dsig"
+	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xmlsec/wss"
 )
 
-// Transform chains that end in octets: canonicalization then base64 is not
-// possible over XML, but base64 over an attachment is, and #WithComments
-// canonicalization renders as its plain form.
+// Transform chains that end in octets: base64 over an attachment's SwA
+// canonical form; a canonicalization of canonical octets, which parses them
+// again (XML-DSig 4.4.3.2); and #WithComments canonicalization, which
+// renders as its plain form.
 func TestTransformChains(t *testing.T) {
 	key := newKey(t, rsaKey)
 	atts := attachments(t, "aGVs\r\nbG8=")
@@ -21,8 +27,9 @@ func TestTransformChains(t *testing.T) {
 			{URI: "#" + id, DigestAlgorithm: xmlsec.DigestSHA384,
 				Transforms: []dsig.TransformSpec{{Algorithm: string(c14n.Exclusive10WithComments)}}},
 			{URI: "cid:att-1@example.com", DigestAlgorithm: xmlsec.DigestSHA512,
-				Transforms: []dsig.TransformSpec{{Algorithm: xmlsec.TransformBase64}}},
-			{URI: "cid:att-1@example.com", DigestAlgorithm: xmlsec.DigestSHA256},
+				Transforms: []dsig.TransformSpec{{Algorithm: xmlsec.TransformAttachmentContentSignature}, {Algorithm: xmlsec.TransformBase64}}},
+			{URI: "#" + id, DigestAlgorithm: xmlsec.DigestSHA256,
+				Transforms: []dsig.TransformSpec{{Algorithm: string(c14n.Exclusive10)}, {Algorithm: string(c14n.Inclusive10)}}},
 		}
 	})
 	doc := parse(t, signed)
@@ -30,15 +37,17 @@ func TestTransformChains(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cov.SignedElementIDs) != 1 || !cov.CoversAttachments("att-1@example.com") {
+	if len(cov.SignedElementIDs) != 2 || !cov.CoversAttachments("att-1@example.com") {
 		t.Fatalf("coverage %+v", cov)
 	}
 
 	// The base64 transform digests the decoded octets, so a change in
-	// whitespace alone does not alter it, but the untransformed reference does.
-	doc = parse(t, signed)
-	if _, err := dsig.Verify(doc, findSignature(doc), dsig.VerifyOptions{Attachments: attachments(t, "aGVsbG8=")}); !errors.Is(err, xmlsec.ErrDigestMismatch) {
+	// whitespace alone does not alter it; a change in content does.
+	if _, err := dsig.Verify(doc, findSignature(doc), dsig.VerifyOptions{Attachments: attachments(t, "aGVsbG8=")}); err != nil {
 		t.Fatalf("whitespace change: %v", err)
+	}
+	if _, err := dsig.Verify(doc, findSignature(doc), dsig.VerifyOptions{Attachments: attachments(t, "aGVsbG9v")}); !errors.Is(err, xmlsec.ErrDigestMismatch) {
+		t.Fatalf("content change: %v", err)
 	}
 	if _, err := dsig.Verify(doc, findSignature(doc), dsig.VerifyOptions{}); !errors.Is(err, xmlsec.ErrAttachmentNotFound) {
 		t.Fatalf("no attachments: %v", err)
@@ -121,5 +130,119 @@ func TestSwASignatureTransforms(t *testing.T) {
 				t.Fatalf("changed Content-Description: %v", err)
 			}
 		})
+	}
+}
+
+// XML-DSig 6.6.2: base64 over a node set decodes the concatenated text
+// nodes, in document order, skipping comments and markup. Such a chain ends
+// in octets, so it does not rely on implicit canonicalization.
+func TestBase64OfNodeSet(t *testing.T) {
+	key := newKey(t, rsaKey)
+	doc := parse(t, []byte(`<r xmlns:wsu="`+wss.NSWSU+`"><d wsu:Id="d">aGVs<!-- c -->bG8<i>h</i></d></r>`))
+	sig, err := dsig.Sign(doc, key, dsig.SignOptions{
+		SignatureAlgorithm:        xmlsec.SigRSASHA256,
+		CanonicalizationAlgorithm: string(c14n.Exclusive10),
+		References: []dsig.Reference{{URI: "#d", DigestAlgorithm: xmlsec.DigestSHA256,
+			Transforms: []dsig.TransformSpec{{Algorithm: xmlsec.TransformBase64}}}},
+		Parent: xmltree.DocumentElement(doc),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := sha256.Sum256([]byte("hello!"))
+	if got := sig.ChildElements()[0].ChildElements()[2].ChildElements()[2].StringValue(); got != base64.StdEncoding.EncodeToString(want[:]) {
+		t.Fatalf("DigestValue %s, want the digest of %q", got, "hello!")
+	}
+	cov, err := dsig.Verify(doc, sig, dsig.VerifyOptions{
+		Certificate:                       key.Certificate,
+		RequireExplicitCanonicalization:   true,
+		AllowedCanonicalizationAlgorithms: []string{string(c14n.Exclusive10)},
+	})
+	if err != nil || !cov.Covers("d") {
+		t.Fatalf("verify: %v", err)
+	}
+}
+
+// #xpointer(/) and #xpointer(id('ID')) keep comments (XML-DSig 4.4.3.3), so
+// a #WithComments canonicalization covers them; "" and "#id" do not.
+func TestXPointerReferences(t *testing.T) {
+	key := newKey(t, rsaKey)
+	const src = `<r xmlns:wsu="` + wss.NSWSU + `"><!-- top --><d wsu:Id="d" ID="s">x<!-- inner --></d></r>`
+	incWC := string(c14n.Inclusive10WithComments)
+
+	signIn := func(t *testing.T, uri, alg string, ids ...xdm.QName) *xdm.Node {
+		t.Helper()
+		doc := parse(t, []byte(src))
+		var ts []dsig.TransformSpec
+		if uri == "" || uri == "#xpointer(/)" {
+			ts = append(ts, dsig.TransformSpec{Algorithm: xmlsec.TransformEnvelopedSignature})
+		}
+		if _, err := dsig.Sign(doc, key, dsig.SignOptions{
+			SignatureAlgorithm:        xmlsec.SigRSASHA256,
+			CanonicalizationAlgorithm: string(c14n.Inclusive10),
+			References: []dsig.Reference{{URI: uri, DigestAlgorithm: xmlsec.DigestSHA256,
+				Transforms: append(ts, dsig.TransformSpec{Algorithm: alg})}},
+			Parent:       xmltree.DocumentElement(doc),
+			IDAttributes: ids,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return parse(t, serialize(t, doc))
+	}
+	verify := func(doc *xdm.Node, ids ...xdm.QName) (*dsig.Coverage, error) {
+		return dsig.Verify(doc, findSignature(doc), dsig.VerifyOptions{Certificate: key.Certificate, IDAttributes: ids})
+	}
+	edit := func(t *testing.T, doc *xdm.Node, old, new string) *xdm.Node {
+		t.Helper()
+		return parse(t, []byte(strings.Replace(string(serialize(t, doc)), old, new, 1)))
+	}
+
+	cases := []struct {
+		name, uri, alg string
+		ids            []xdm.QName
+		wantID         string // "": the whole document
+		comment        string
+		covered        bool // the comment is in the digest
+	}{
+		{"#xpointer(/) with comments", "#xpointer(/)", incWC, nil, "", "top", true},
+		{"#xpointer(/) without comments", "#xpointer(/)", string(c14n.Inclusive10), nil, "", "top", false},
+		{"empty URI with comments", "", incWC, nil, "", "top", false},
+		{"#xpointer(id('d')) with comments", "#xpointer(id('d'))", incWC, nil, "d", "inner", true},
+		{`#xpointer(id("d")) with comments`, `#xpointer(id("d"))`, incWC, nil, "d", "inner", true},
+		{"#xpointer(id('s')) by IDAttributes", "#xpointer(id('s'))", incWC, []xdm.QName{dsig.IDAttrSAML}, "s", "inner", true},
+		{"#d with comments", "#d", incWC, nil, "d", "inner", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			doc := signIn(t, c.uri, c.alg, c.ids...)
+			cov, err := verify(doc, c.ids...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.wantID == "" && !cov.WholeDocumentSigned ||
+				c.wantID != "" && (!cov.Covers(c.wantID) || len(cov.SignedElements) != 1 || cov.SignedElements[0].Name.Local != "d") {
+				t.Fatalf("coverage %+v", cov)
+			}
+			_, err = verify(edit(t, doc, "<!-- "+c.comment+" -->", "<!-- changed -->"), c.ids...)
+			if c.covered != errors.Is(err, xmlsec.ErrDigestMismatch) || !c.covered && err != nil {
+				t.Fatalf("comment changed: %v", err)
+			}
+		})
+	}
+
+	// Duplicate IDs are refused through an XPointer as through "#id".
+	doc := signIn(t, "#xpointer(id('d'))", incWC)
+	if _, err := verify(edit(t, doc, "<!-- top -->", `<e xmlns:wsu="`+wss.NSWSU+`" wsu:Id="d"/>`)); !errors.Is(err, xmlsec.ErrAmbiguousID) {
+		t.Fatalf("duplicate wsu:Id: %v", err)
+	}
+	if _, err := verify(edit(t, doc, "<!-- top -->", `<e ID="d"/>`), dsig.IDAttrSAML); !errors.Is(err, xmlsec.ErrAmbiguousID) {
+		t.Fatalf("duplicate across wsu:Id and ID: %v", err)
+	}
+	// Any other XPointer is refused when verifying too.
+	sig := findSignature(doc)
+	sig.ChildElements()[0].ChildElements()[2].Attr("", "URI").Value = "#xpointer(id('d')/..)"
+	resignSI(t, sig, c14n.Inclusive10)
+	if _, err := verify(doc); !errors.Is(err, xmlsec.ErrMalformed) {
+		t.Fatalf("XPointer expression: %v", err)
 	}
 }

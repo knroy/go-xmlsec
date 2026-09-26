@@ -7,6 +7,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"errors"
@@ -15,8 +16,10 @@ import (
 	"testing"
 
 	"github.com/knroy/go-xml/c14n"
+	"github.com/knroy/go-xml/xdm"
 	"github.com/knroy/go-xmlsec"
 	"github.com/knroy/go-xmlsec/dsig"
+	"github.com/knroy/go-xmlsec/internal/xmltree"
 )
 
 const nsDSig11 = "http://www.w3.org/2009/xmldsig11#"
@@ -207,7 +210,7 @@ func TestRawKeyInfoStructure(t *testing.T) {
 		{"Exponent 1", rsaKV(n, b64([]byte{1})), dsig.VerifyOptions{}, xmlsec.ErrMalformed},
 		{"Modulus even", rsaKV(even, e), dsig.VerifyOptions{}, xmlsec.ErrMalformed},
 		{"1024-bit RSA", rsaKV(b64(small.N.Bytes()), e), dsig.VerifyOptions{}, xmlsec.ErrUnsupportedKeyInfo},
-		{"1024-bit RSA with a pinned key", rsaKV(b64(small.N.Bytes()), e), dsig.VerifyOptions{PublicKey: &rsaKey.PublicKey}, xmlsec.ErrUnsupportedKeyInfo},
+		{"1024-bit RSA ignored beside a pinned key", rsaKV(b64(small.N.Bytes()), e), dsig.VerifyOptions{PublicKey: &rsaKey.PublicKey}, xmlsec.ErrSignatureInvalid},
 		{"valid RSAKeyValue reaches the signature check", rsaKV(n, e), dsig.VerifyOptions{}, xmlsec.ErrSignatureInvalid},
 		{"Modulus with a leading zero octet", rsaKV(b64(append([]byte{0}, rsaKey.N.Bytes()...)), e), dsig.VerifyOptions{}, xmlsec.ErrSignatureInvalid},
 
@@ -265,6 +268,116 @@ func TestSignRawKeyRefusals(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			if _, err := signRaw(t, c.doc, c.signer, c.alg, c.form); err == nil || c.want != nil && !errors.Is(err, c.want) {
 				t.Fatalf("got %v, want %v", err, c.want)
+			}
+		})
+	}
+}
+
+// signedCovDoc is covDoc with sigContent, whose first Reference is covRef,
+// made authentic: that Reference's digest is correct and SignedInfo is
+// signed with rsaKey. Only ds:KeyInfo then decides the outcome.
+func signedCovDoc(t *testing.T, sigContent string) (doc, sig *xdm.Node) {
+	t.Helper()
+	doc = parse(t, []byte(covDoc(sigContent)))
+	sig = findSignature(doc)
+	h := sha256.New()
+	if _, err := c14n.Digest(h, xmltree.DocumentElement(doc).ChildElements()[0], c14n.Options{Algorithm: c14n.Exclusive10}); err != nil {
+		t.Fatal(err)
+	}
+	sig.ChildElements()[0].ChildElements()[2].ChildElements()[2].Children[0].Value = base64.StdEncoding.EncodeToString(h.Sum(nil))
+	resignSI(t, sig, c14n.Exclusive10)
+	return doc, sig
+}
+
+// XML-DSig 4.5.10: a dsig11:KeyInfoReference names a ds:KeyInfo in the same
+// document by ID, refusing duplicates; a reference to a reference is not
+// followed.
+func TestKeyInfoReference(t *testing.T) {
+	cert := newKey(t, rsaKey).Certificate
+	b64 := base64.StdEncoding.EncodeToString
+	kv := `<ds:KeyValue><ds:RSAKeyValue><ds:Modulus>` + b64(rsaKey.N.Bytes()) + `</ds:Modulus><ds:Exponent>` +
+		b64(big.NewInt(int64(rsaKey.E)).Bytes()) + `</ds:Exponent></ds:RSAKeyValue></ds:KeyValue>`
+	small, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	smallKV := strings.Replace(kv, b64(rsaKey.N.Bytes()), b64(small.N.Bytes()), 1)
+	x509Data := `<ds:X509Data><ds:X509Certificate>` + b64(cert.Raw) + `</ds:X509Certificate></ds:X509Data>`
+	kir := func(uri string) string {
+		return `<dsig11:KeyInfoReference xmlns:dsig11="` + nsDSig11 + `" URI="` + uri + `"/>`
+	}
+	target := func(id, inner string) string {
+		return `<ds:Object><ds:KeyInfo Id="` + id + `">` + inner + `</ds:KeyInfo></ds:Object>`
+	}
+	ids := dsig.VerifyOptions{IDAttributes: []xdm.QName{dsig.IDAttrDSig}}
+	pinned := ids
+	pinned.Certificate = cert
+
+	cases := []struct {
+		name    string
+		ki      string // the ds:KeyInfo content
+		objects string
+		opts    dsig.VerifyOptions
+		want    error
+		form    dsig.KeyInfoSpec
+	}{
+		{"to a KeyValue", kir("#k"), target("k", kv), ids, nil, dsig.KeyInfoKeyValue},
+		{"to X509Data", kir("#k"), target("k", x509Data), ids, nil, dsig.KeyInfoX509Data},
+		{"by XPointer", kir("#xpointer(id('k'))"), target("k", kv), ids, nil, dsig.KeyInfoKeyValue},
+		{"Id not an ID attribute", kir("#k"), target("k", kv), dsig.VerifyOptions{}, xmlsec.ErrIDNotFound, 0},
+		{"duplicate ID", kir("#k"), target("k", kv) + target("k", kv), ids, xmlsec.ErrAmbiguousID, 0},
+		{"duplicate ID with a pinned key", kir("#k"), target("k", kv) + target("k", kv), pinned, xmlsec.ErrAmbiguousID, 0},
+		{"to an element that is not ds:KeyInfo", kir("#a"), "", ids, xmlsec.ErrMalformed, 0},
+		{"to a KeyInfoReference", kir("#k"), target("k", kir("#k2")) + target("k2", kv), ids, xmlsec.ErrUnsupportedKeyInfo, 0},
+		{"to a KeyInfoReference with a pinned key", kir("#k"), target("k", kir("#k2")) + target("k2", kv), pinned, nil, dsig.KeyInfoNone},
+		{"to a 1024-bit key", kir("#k"), target("k", smallKV), ids, xmlsec.ErrUnsupportedKeyInfo, 0},
+		{"to another document", kir("http://example.com/k"), "", ids, xmlsec.ErrUnsupportedKeyInfo, 0},
+		{"to the whole document", kir("#xpointer(/)"), "", ids, xmlsec.ErrUnsupportedKeyInfo, 0},
+		{"XPointer expression", kir("#xpointer(//k)"), "", ids, xmlsec.ErrMalformed, 0},
+		{"without URI", `<dsig11:KeyInfoReference xmlns:dsig11="` + nsDSig11 + `"/>`, "", ids, xmlsec.ErrMalformed, 0},
+		{"with a child", `<dsig11:KeyInfoReference xmlns:dsig11="` + nsDSig11 + `" URI="#k"><x/></dsig11:KeyInfoReference>`, target("k", kv), ids, xmlsec.ErrMalformed, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			doc, sig := signedCovDoc(t, covKI(c.ki)+c.objects)
+			cov, err := dsig.Verify(doc, sig, c.opts)
+			if !errors.Is(err, c.want) {
+				t.Fatalf("got %v, want %v", err, c.want)
+			}
+			if err == nil && (cov.KeyInfoForm != c.form || !equalKey(cov.PublicKey, &rsaKey.PublicKey)) {
+				t.Fatalf("coverage %+v", cov)
+			}
+		})
+	}
+}
+
+// XML-DSig 3.2.2: the key comes "from KeyInfo or from an external source".
+// With the key pinned, a ds:KeyInfo form this library does not accept is
+// ignored; a malformed one is still refused.
+func TestPinnedKeyIgnoresUnsupportedKeyInfo(t *testing.T) {
+	cert := newKey(t, rsaKey).Certificate
+	cases := []struct {
+		name string
+		ki   string
+		opts dsig.VerifyOptions
+		want error
+	}{
+		{"KeyName, pinned certificate", `<ds:KeyName>k</ds:KeyName>`, dsig.VerifyOptions{Certificate: cert}, nil},
+		{"KeyName, pinned key", `<ds:KeyName>k</ds:KeyName>`, dsig.VerifyOptions{PublicKey: &rsaKey.PublicKey}, nil},
+		{"foreign element, pinned certificate", `<x:Key xmlns:x="urn:x"/>`, dsig.VerifyOptions{Certificate: cert}, nil},
+		{"KeyName, nothing pinned", `<ds:KeyName>k</ds:KeyName>`, dsig.VerifyOptions{}, xmlsec.ErrUnsupportedKeyInfo},
+		{"malformed X509Certificate, pinned certificate", `<ds:X509Data><ds:X509Certificate>!!</ds:X509Certificate></ds:X509Data>`, dsig.VerifyOptions{Certificate: cert}, xmlsec.ErrMalformed},
+		{"STR to a missing token, pinned certificate", `<wsse:SecurityTokenReference><wsse:Reference URI="#missing"/></wsse:SecurityTokenReference>`, dsig.VerifyOptions{Certificate: cert}, xmlsec.ErrIDNotFound},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			doc, sig := signedCovDoc(t, covKI(c.ki))
+			cov, err := dsig.Verify(doc, sig, c.opts)
+			if !errors.Is(err, c.want) {
+				t.Fatalf("got %v, want %v", err, c.want)
+			}
+			if err == nil && (cov.KeyInfoForm != dsig.KeyInfoNone || !equalKey(cov.PublicKey, &rsaKey.PublicKey)) {
+				t.Fatalf("coverage %+v", cov)
 			}
 		})
 	}

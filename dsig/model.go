@@ -39,18 +39,27 @@ type Reference struct {
 	//   ""            the whole document (only valid with an enveloped transform)
 	//   "#id"         a same-document element by wsu:Id or xml:id, or an
 	//                 attribute named in SignOptions.IDAttributes
-	//   "cid:..."     a MIME attachment, requiring an AttachmentSet
+	//   "#xpointer(/)", "#xpointer(id('id'))"
+	//                 as "" and "#id", but comments are kept, so a
+	//                 #WithComments canonicalization covers them (XML-DSig
+	//                 4.4.3.3); any other XPointer is refused
+	//   "cid:..."     a MIME attachment, requiring an AttachmentSet; the
+	//                 first transform must be an SwA signature transform
 	URI string
 
-	// ID, if set, becomes the Id attribute of the ds:Reference element.
+	// ID, if set, becomes the Id attribute of the ds:Reference element. It
+	// must be an NCName.
 	ID string
 
-	// Type, if set, becomes the Type attribute.
+	// Type, if set, becomes the Type attribute. It must be a URI.
 	Type string
 
 	// Transforms are applied in order. The final transform's output must be
 	// an octet stream: for same-document references the last transform is
-	// a canonicalization; for cid: references it is an SwA transform.
+	// a canonicalization or base64; for cid: references the first is an SwA
+	// signature transform. Octets followed by a canonicalization are parsed
+	// with xmlsec.Parse (XML-DSig 4.4.3.2); base64 of a node set decodes its
+	// text (XML-DSig 6.6.2).
 	// (Verify also accepts a received reference that ends in a node set,
 	// completing it with Canonical XML 1.0 as XML-DSig 4.4.3.2 requires;
 	// Sign never produces one.)

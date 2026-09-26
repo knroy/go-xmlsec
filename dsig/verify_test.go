@@ -448,3 +448,60 @@ func TestAttachmentCanonicalizationAllowList(t *testing.T) {
 		t.Fatalf("with Exclusive C14N allowed: %v", err)
 	}
 }
+
+// XML-DSig 4.4.3.1: a Reference may omit URI, on at most one Reference, when
+// the application knows the data object. ResolveOmittedURI supplies it; its
+// octets go through the Reference's transforms.
+func TestOmittedURI(t *testing.T) {
+	digest := func(s string) string {
+		d := sha256.Sum256([]byte(s))
+		return base64.StdEncoding.EncodeToString(d[:])
+	}
+	ref := func(digestOf string, algs ...string) string {
+		ts := ""
+		if len(algs) > 0 {
+			ts = `<ds:Transforms>` + covTransforms(algs...) + `</ds:Transforms>`
+		}
+		return `<ds:Reference>` + ts + `<ds:DigestMethod Algorithm="` + xmlsec.DigestSHA256 + `"/><ds:DigestValue>` +
+			digest(digestOf) + `</ds:DigestValue></ds:Reference>`
+	}
+	octets := func(s string) func() ([]byte, error) { return func() ([]byte, error) { return []byte(s), nil } }
+	errResolve := errors.New("no such object")
+
+	cases := []struct {
+		name    string
+		refs    string
+		resolve func() ([]byte, error)
+		want    error // nil: success
+	}{
+		{"no transforms", ref("hello!"), octets("hello!"), nil},
+		{"base64", ref("hello!", xmlsec.TransformBase64), octets("aGVs bG8h"), nil},
+		{"canonicalization parses the octets", ref(`<a b="1"></a>`, covExc), octets(`<a  b='1'/>`), nil},
+		{"beside a URI reference", ref("hello!") + `<ds:Reference URI="#a">` + covTr + covDigest + `</ds:Reference>`, octets("hello!"), xmlsec.ErrDigestMismatch},
+		{"other octets", ref("hello!"), octets("hello?"), xmlsec.ErrDigestMismatch},
+		{"no resolver", ref("hello!"), nil, xmlsec.ErrMalformed},
+		{"resolver fails", ref("hello!"), func() ([]byte, error) { return nil, errResolve }, errResolve},
+		{"two omitted URIs", ref("hello!") + ref("hello!"), octets("hello!"), xmlsec.ErrMalformed},
+		{"enveloped on octets", ref("hello!", xmlsec.TransformEnvelopedSignature), octets("hello!"), xmlsec.ErrMalformed},
+		{"octets with a DOCTYPE", ref("", covExc), octets(`<!DOCTYPE a><a/>`), xmlsec.ErrMalformed},
+		{"SwA transform", ref("", xmlsec.TransformAttachmentContentSignature), octets("x"), xmlsec.ErrMalformed},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			doc := parse(t, []byte(covDoc(covSI(covCM+covSM+c.refs)+covSV)))
+			sig := findSignature(doc)
+			resignSI(t, sig, c14n.Exclusive10)
+			cov, err := dsig.Verify(doc, sig, dsig.VerifyOptions{
+				PublicKey:                       &rsaKey.PublicKey,
+				ResolveOmittedURI:               c.resolve,
+				RequireExplicitCanonicalization: true, // an omitted URI is not a same-document reference
+			})
+			if !errors.Is(err, c.want) {
+				t.Fatalf("got %v, want %v", err, c.want)
+			}
+			if err == nil && (!cov.OmittedURISigned || cov.WholeDocumentSigned || len(cov.References) != 1 || cov.References[0].URI != "") {
+				t.Fatalf("coverage %+v", cov)
+			}
+		})
+	}
+}

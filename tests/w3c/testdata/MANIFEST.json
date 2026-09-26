@@ -60,7 +60,7 @@
   },
   "expect": "refuse",
   "error": "ErrUnsupportedKeyInfo",
-  "reason": "Key given by dsig11:KeyInfoReference, a reference to a key elsewhere, which go-xmlsec does not follow."
+  "reason": "The dsig11:KeyInfoReference is followed (by its Id, with dsig.IDAttrDSig), and the ds:KeyInfo it names holds a 1024-bit RSA key in ds:KeyValue; go-xmlsec requires at least 2048 bits for a raw RSA key."
  },
  {
   "path": "signature-enveloping-p256_sha256.xml",

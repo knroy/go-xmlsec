@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"hash"
+	"regexp"
 	"strings"
 
 	"github.com/knroy/go-xml/c14n"
@@ -14,26 +15,53 @@ import (
 )
 
 // impliesC14N reports whether a reference relies on the implicit Canonical
-// XML 1.0 of XML-DSig 4.4.3.2: a same-document URI and no canonicalization
-// among its transforms, so the chain ends in a node set.
-func impliesC14N(uri string, transforms []TransformSpec) bool {
-	if uri != "" && !strings.HasPrefix(uri, "#") {
-		return false
-	}
+// XML 1.0 of XML-DSig 4.4.3.2: it dereferences to a node set (sameDocument)
+// and no transform of its own turns that into octets. Canonicalization and
+// base64 each yield octets.
+func impliesC14N(sameDocument bool, transforms []TransformSpec) bool {
 	for _, t := range transforms {
-		if isC14N(t.Algorithm) {
+		if isC14N(t.Algorithm) || t.Algorithm == xmlsec.TransformBase64 {
 			return false
 		}
 	}
-	return true
+	return sameDocument
+}
+
+// isSameDocument reports whether uri is a same-document reference (XML-DSig
+// 4.4.3.2): empty, or a fragment.
+func isSameDocument(uri string) bool { return uri == "" || strings.HasPrefix(uri, "#") }
+
+// xpointerID matches #xpointer(id('ID')) and #xpointer(id("ID")).
+var xpointerID = regexp.MustCompile(`^#xpointer\(id\((?:'([^']*)'|"([^"]*)")\)\)$`)
+
+// sameDocumentTarget reads a same-document URI. whole is true for "" and
+// "#xpointer(/)"; otherwise id names an element: the fragment of "#id", or
+// the ID of "#xpointer(id('ID'))". comments is true for the two
+// scheme-based XPointers, whose node set keeps comments (XML-DSig 4.4.3.3).
+// Any other xpointer() expression is refused.
+func sameDocumentTarget(uri string) (id string, whole, comments bool, err error) {
+	switch {
+	case uri == "":
+		return "", true, false, nil
+	case uri == "#xpointer(/)":
+		return "", true, true, nil
+	case strings.HasPrefix(uri, "#xpointer("):
+		m := xpointerID.FindStringSubmatch(uri)
+		if m == nil || !xdm.IsNCName(m[1]+m[2]) {
+			return "", false, false, fmt.Errorf("%w: XPointer %q; only #xpointer(/) and #xpointer(id('ID')) are supported", xmlsec.ErrMalformed, uri)
+		}
+		return m[1] + m[2], false, true, nil
+	}
+	return uri[1:], false, false, nil
 }
 
 // dereferenced is what a reference actually covered, derived while
 // digesting it rather than inferred from its URI.
 type dereferenced struct {
-	element    *xdm.Node          // "#id" target
+	element    *xdm.Node          // "#id" or #xpointer(id('ID')) target
+	id         string             // the ID that resolved to element
 	attachment *xmlsec.Attachment // cid: target
-	whole      bool               // "" target
+	whole      bool               // "" or #xpointer(/) target
 }
 
 // digestReference dereferences uri, applies transforms in order and writes
@@ -52,21 +80,29 @@ func digestReference(h hash.Hash, doc, sig *xdm.Node, uri string, transforms []T
 	atts xmlsec.AttachmentSet, implicit bool, idAttrs []xdm.QName) (dereferenced, error) {
 
 	var (
-		out    dereferenced
-		ns     c14n.NodeSet
-		octets []byte
+		out dereferenced
+		in  data
 	)
 	switch {
-	case uri == "":
-		ns = c14n.Document(doc)
-		out.whole = true
-	case strings.HasPrefix(uri, "#"):
-		el, err := wss.FindByIDAttributes(doc, uri[1:], idAttrs...)
+	case isSameDocument(uri):
+		id, whole, comments, err := sameDocumentTarget(uri)
 		if err != nil {
 			return out, err
 		}
-		ns = c14n.Subtree(el)
-		out.element = el
+		if whole {
+			in.ns = c14n.Document(doc)
+			out.whole = true
+		} else {
+			el, err := wss.FindByIDAttributes(doc, id, idAttrs...)
+			if err != nil {
+				return out, err
+			}
+			in.ns = c14n.Subtree(el)
+			out.element, out.id = el, id
+		}
+		// A bare "" or "#id" dereference removes comments (XML-DSig
+		// 4.4.3.3); a scheme-based XPointer keeps them.
+		in.stripComments = !comments
 	case strings.HasPrefix(uri, "cid:"):
 		if atts == nil {
 			return out, fmt.Errorf("%w: %q, and no attachments supplied", xmlsec.ErrAttachmentNotFound, uri)
@@ -75,37 +111,63 @@ func digestReference(h hash.Hash, doc, sig *xdm.Node, uri string, transforms []T
 		if err != nil {
 			return out, err
 		}
-		octets = att.Body
+		in.octets, in.attachment = att.Body, att
 		out.attachment = att
 	default:
 		return out, fmt.Errorf("%w: reference URI %q", xmlsec.ErrMalformed, uri)
 	}
 
-	if ns != nil && len(transforms) == 0 && !implicit {
+	if in.ns != nil && len(transforms) == 0 && !implicit {
 		return out, fmt.Errorf("%w: same-document reference %q has no canonicalization transform", xmlsec.ErrMalformed, uri)
 	}
-	if len(transforms) > MaxTransformsPerReference {
-		return out, fmt.Errorf("%w: %d transforms on %q", xmlsec.ErrLimitExceeded, len(transforms), uri)
-	}
+	return out, in.digest(h, sig, uri, transforms, implicit)
+}
 
+// data is a reference's data object between transforms (XML-DSig 4.4.3.2):
+// a node set when ns is non-nil, octets otherwise.
+type data struct {
+	ns     c14n.NodeSet
+	octets []byte
+
+	// stripComments marks a node set from a bare "" or "#id" dereference,
+	// which holds no comments: a #WithComments canonicalization of it
+	// renders as its plain form.
+	stripComments bool
+
+	// attachment is the cid: target, for the SwA transforms.
+	attachment *xmlsec.Attachment
+}
+
+// digest applies transforms to d and writes the resulting octets into h;
+// sig, uri and implicit are as for digestReference.
+func (d data) digest(h hash.Hash, sig *xdm.Node, uri string, transforms []TransformSpec, implicit bool) error {
+	if len(transforms) > MaxTransformsPerReference {
+		return fmt.Errorf("%w: %d transforms on %q", xmlsec.ErrLimitExceeded, len(transforms), uri)
+	}
 	for i, t := range transforms {
 		last := i == len(transforms)-1
 		switch alg := t.Algorithm; {
 		case alg == xmlsec.TransformEnvelopedSignature:
-			if ns == nil {
-				return out, fmt.Errorf("%w: enveloped-signature needs a node set", xmlsec.ErrMalformed)
+			// XML-DSig 6.6.4: its input is a node set. Octets are not parsed
+			// for it: the parsed tree would hold no signature to remove.
+			if d.ns == nil {
+				return fmt.Errorf("%w: enveloped-signature needs a node set", xmlsec.ErrMalformed)
 			}
-			ns = c14n.ExcludeSubtree(ns.Root(), sig)
+			d.ns = c14n.ExcludeSubtree(d.ns.Root(), sig)
 
 		case isC14N(alg):
-			if ns == nil {
-				return out, fmt.Errorf("%w: canonicalization needs a node set", xmlsec.ErrMalformed)
+			if d.ns == nil {
+				// XML-DSig 4.4.3.2: octets followed by a transform that
+				// requires a node set are parsed, with the same fixed options
+				// and limits as any received document.
+				tree, err := xmlsec.Parse(d.octets)
+				if err != nil {
+					return fmt.Errorf("%w: parsing octets for %s: %w", xmlsec.ErrMalformed, alg, err)
+				}
+				d.ns, d.stripComments = c14n.Document(tree.Root), false
 			}
-			// A bare "" or "#id" dereference removes comments (XML-DSig
-			// 4.4.3.3), so the #WithComments variants render the same as
-			// their plain forms here.
 			c := c14n.Algorithm(alg)
-			if plain, ok := withoutComments[c]; ok {
+			if plain, ok := withoutComments[c]; ok && d.stripComments {
 				c = plain
 			}
 			opts := c14n.Options{
@@ -113,62 +175,80 @@ func digestReference(h hash.Hash, doc, sig *xdm.Node, uri string, transforms []T
 				InclusiveNamespacePrefixes: t.InclusiveNamespacePrefixes,
 			}
 			if last {
-				_, err := c14n.DigestNodeSet(h, ns, opts)
-				return out, err
+				_, err := c14n.DigestNodeSet(h, d.ns, opts)
+				return err
 			}
-			b, err := c14n.BytesNodeSet(ns, opts)
+			b, err := c14n.BytesNodeSet(d.ns, opts)
 			if err != nil {
-				return out, err
+				return err
 			}
-			ns, octets = nil, b
+			d.ns, d.octets = nil, b
 
 		case alg == xmlsec.TransformBase64:
-			if ns != nil {
-				return out, fmt.Errorf("%w: base64 needs an octet stream", xmlsec.ErrMalformed)
+			if d.ns != nil {
+				// XML-DSig 6.6.2: a node set becomes octets as self::text(),
+				// in document order, concatenated.
+				d.ns, d.octets = nil, []byte(textOf(d.ns))
 			}
-			b, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(string(octets)), ""))
+			b, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(string(d.octets)), ""))
 			if err != nil {
-				return out, fmt.Errorf("%w: base64 transform: %v", xmlsec.ErrMalformed, err)
+				return fmt.Errorf("%w: base64 transform: %v", xmlsec.ErrMalformed, err)
 			}
-			octets = b
+			d.octets = b
 
 		case alg == xmlsec.TransformAttachmentContentSignature, alg == xmlsec.TransformAttachmentCompleteSignature:
 			// SwA profile 5.3 and 5.4.4: the first transform of a cid:
 			// reference, over the attachment itself.
-			if out.attachment == nil || i > 0 {
-				return out, fmt.Errorf("%w: %s must be the first transform of a cid: reference", xmlsec.ErrMalformed, alg)
+			if d.attachment == nil || i > 0 {
+				return fmt.Errorf("%w: %s must be the first transform of a cid: reference", xmlsec.ErrMalformed, alg)
 			}
 			canon := swa.Content
 			if alg == xmlsec.TransformAttachmentCompleteSignature {
 				canon = swa.Complete
 			}
-			b, err := canon(out.attachment)
+			b, err := canon(d.attachment)
 			if err != nil {
-				return out, err
+				return err
 			}
-			octets = b
+			d.octets = b
 
 		case alg == xmlsec.TransformAttachmentContentOnly, alg == xmlsec.TransformAttachmentComplete:
 			// SwA profile 5.5.2: EncryptedData Type URIs, not signature
 			// transforms. WS-Security peers refuse them in a signature, so
 			// neither is produced nor accepted as one.
-			return out, fmt.Errorf("%w: %s is an EncryptedData Type, not a signature transform; use %s or %s",
+			return fmt.Errorf("%w: %s is an EncryptedData Type, not a signature transform; use %s or %s",
 				xmlsec.ErrUnsupportedAlgorithm, alg, xmlsec.TransformAttachmentContentSignature, xmlsec.TransformAttachmentCompleteSignature)
 
 		case alg == xmlsec.TransformXSLT, alg == xmlsec.TransformXPath, alg == xmlsec.TransformXPathFilter2:
-			return out, fmt.Errorf("%w: %s", xmlsec.ErrTransformRefused, alg)
+			return fmt.Errorf("%w: %s", xmlsec.ErrTransformRefused, alg)
 
 		default:
-			return out, fmt.Errorf("%w: transform %s", xmlsec.ErrUnsupportedAlgorithm, alg)
+			return fmt.Errorf("%w: transform %s", xmlsec.ErrUnsupportedAlgorithm, alg)
 		}
 	}
-	if ns != nil {
+	if d.ns != nil {
 		if !implicit {
-			return out, fmt.Errorf("%w: final transform of %q yields a node set, not octets", xmlsec.ErrMalformed, uri)
+			return fmt.Errorf("%w: final transform of %q yields a node set, not octets", xmlsec.ErrMalformed, uri)
 		}
-		_, err := c14n.DigestNodeSet(h, ns, c14n.Options{Algorithm: c14n.Inclusive10})
-		return out, err
+		_, err := c14n.DigestNodeSet(h, d.ns, c14n.Options{Algorithm: c14n.Inclusive10})
+		return err
 	}
-	h.Write(octets)
-	return out, nil
+	h.Write(d.octets)
+	return nil
+}
+
+// textOf concatenates the text nodes of ns in document order.
+func textOf(ns c14n.NodeSet) string {
+	var b strings.Builder
+	var walk func(n *xdm.Node)
+	walk = func(n *xdm.Node) {
+		if n.Kind == xdm.KindText && ns.Contains(n) {
+			b.WriteString(n.Value)
+		}
+		for _, c := range n.Children {
+			walk(c)
+		}
+	}
+	walk(ns.Root())
+	return b.String()
 }

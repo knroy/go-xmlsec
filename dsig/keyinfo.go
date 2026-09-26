@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"math/big"
+	"strings"
 
 	"github.com/knroy/go-xml/xdm"
 	"github.com/knroy/go-xmlsec"
@@ -15,12 +16,13 @@ import (
 	"github.com/knroy/go-xmlsec/wss"
 )
 
-// nsDSig11 is the XML Signature 1.1 namespace of dsig11:ECKeyValue and
-// dsig11:DEREncodedKeyValue.
+// nsDSig11 is the XML Signature 1.1 namespace of dsig11:ECKeyValue,
+// dsig11:DEREncodedKeyValue and dsig11:KeyInfoReference.
 const nsDSig11 = "http://www.w3.org/2009/xmldsig11#"
 
-// minRSABits is the smallest RSA modulus accepted as a raw key. crypto/rsa
-// itself refuses only keys under 1024 bits.
+// minRSABits is the smallest RSA modulus accepted as a raw key, and the
+// smallest Sign signs with. crypto/rsa itself refuses only keys under 1024
+// bits.
 const minRSABits = 2048
 
 // namedCurves are the dsig11:NamedCurve URIs accepted, by curve.
@@ -34,13 +36,23 @@ var namedCurves = map[elliptic.Curve]string{
 // certificate carrying it when there is one, and its form. Accepted: a
 // direct-reference wsse:SecurityTokenReference; ds:X509Data elements carrying
 // exactly one ds:X509Certificate between them, optionally beside the subject
-// name, issuer-serial or SKI that describe it; or a lone ds:KeyValue or
-// dsig11:DEREncodedKeyValue holding a raw key.
-func resolveKeyInfo(doc, ki *xdm.Node) (*x509.Certificate, crypto.PublicKey, KeyInfoSpec, error) {
+// name, issuer-serial or SKI that describe it; a lone ds:KeyValue or
+// dsig11:DEREncodedKeyValue holding a raw key; or a lone
+// dsig11:KeyInfoReference to a ds:KeyInfo in the same document holding one
+// of those. idAttrs are the ID attributes the reference resolves against
+// beyond wsu:Id and xml:id.
+func resolveKeyInfo(doc, ki *xdm.Node, idAttrs []xdm.QName) (*x509.Certificate, crypto.PublicKey, KeyInfoSpec, error) {
 	if ki == nil {
 		return nil, nil, KeyInfoNone, nil
 	}
 	kids := ki.ChildElements()
+	if len(kids) == 1 && kids[0].IsElement(nsDSig11, "KeyInfoReference") {
+		target, err := keyInfoReference(doc, kids[0], idAttrs)
+		if err != nil {
+			return nil, nil, KeyInfoNone, err
+		}
+		return resolveKeyInfo(doc, target, idAttrs)
+	}
 	if len(kids) == 1 {
 		switch k := kids[0]; {
 		case k.IsElement(wss.NSWSSE, "SecurityTokenReference"):
@@ -85,6 +97,40 @@ func resolveKeyInfo(doc, ki *xdm.Node) (*x509.Certificate, crypto.PublicKey, Key
 	}
 	cert, err := x509.ParseCertificate(der)
 	return withKey(cert, KeyInfoX509Data, err)
+}
+
+// keyInfoReference resolves a dsig11:KeyInfoReference (XML-DSig 4.5.10) to
+// the ds:KeyInfo it names. Only a same-document reference to an element by
+// ID is followed, refusing duplicate IDs as a ds:Reference does, and the
+// target may not itself hold a KeyInfoReference, so references never chain.
+func keyInfoReference(doc, ref *xdm.Node, idAttrs []xdm.QName) (*xdm.Node, error) {
+	uri := ref.Attr("", "URI")
+	if uri == nil || len(ref.ChildElements()) > 0 {
+		return nil, malformed("dsig11:KeyInfoReference must have a URI and no children")
+	}
+	if !strings.HasPrefix(uri.Value, "#") {
+		return nil, fmt.Errorf("%w: dsig11:KeyInfoReference to %q; only a same-document ID is followed", xmlsec.ErrUnsupportedKeyInfo, uri.Value)
+	}
+	id, whole, _, err := sameDocumentTarget(uri.Value)
+	if err != nil {
+		return nil, err
+	}
+	if whole {
+		return nil, fmt.Errorf("%w: dsig11:KeyInfoReference to the whole document", xmlsec.ErrUnsupportedKeyInfo)
+	}
+	target, err := wss.FindByIDAttributes(doc, id, idAttrs...)
+	if err != nil {
+		return nil, err
+	}
+	if !target.IsElement(NSDSig, "KeyInfo") {
+		return nil, malformed("dsig11:KeyInfoReference %q names %s, not ds:KeyInfo", uri.Value, target.Name.Local)
+	}
+	for _, k := range target.ChildElements() {
+		if k.IsElement(nsDSig11, "KeyInfoReference") {
+			return nil, fmt.Errorf("%w: dsig11:KeyInfoReference to a ds:KeyInfo holding another", xmlsec.ErrUnsupportedKeyInfo)
+		}
+	}
+	return target, nil
 }
 
 // withKey returns a resolved certificate with its key.
@@ -189,6 +235,15 @@ func parseDEREncodedKeyValue(e *xdm.Node) (crypto.PublicKey, error) {
 	return pub, checkRawKey(pub)
 }
 
+// checkRSASize refuses an RSA key under minRSABits: as a raw key from
+// ds:KeyInfo, and as any signing key (XML-DSig 6.4.2).
+func checkRSASize(k *rsa.PublicKey) error {
+	if k.N.BitLen() < minRSABits {
+		return fmt.Errorf("%w: %d-bit RSA key; at least %d bits required", xmlsec.ErrUnsupportedKeyInfo, k.N.BitLen(), minRSABits)
+	}
+	return nil
+}
+
 // checkRawKey is the policy for a key that arrives without a certificate,
 // and that Sign applies before emitting one: RSA of at least minRSABits with
 // an odd modulus and an odd exponent that fits 31 bits, or ECDSA on a curve
@@ -196,8 +251,8 @@ func parseDEREncodedKeyValue(e *xdm.Node) (crypto.PublicKey, error) {
 func checkRawKey(pub crypto.PublicKey) error {
 	switch k := pub.(type) {
 	case *rsa.PublicKey:
-		if k.N.BitLen() < minRSABits {
-			return fmt.Errorf("%w: %d-bit RSA key; at least %d bits required", xmlsec.ErrUnsupportedKeyInfo, k.N.BitLen(), minRSABits)
+		if err := checkRSASize(k); err != nil {
+			return err
 		}
 		if k.N.Bit(0) == 0 || k.E < 3 || k.E&1 == 0 || k.E > 1<<31-1 {
 			return malformed("RSA key has an even modulus or an invalid exponent")

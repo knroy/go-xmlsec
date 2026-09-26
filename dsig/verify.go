@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"hash"
 	"math/big"
 	"slices"
 
@@ -31,9 +32,11 @@ type VerifyOptions struct {
 	//
 	// A pinned key replaces whatever ds:KeyInfo describes, which is then not
 	// compared with it: a signature by another key fails as
-	// ErrSignatureInvalid. ds:KeyInfo is still read, so a form this library
-	// does not accept, or a malformed one, is refused even when a key is
-	// pinned.
+	// ErrSignatureInvalid. ds:KeyInfo is only a hint (XML-DSig 3.2.2: "from
+	// KeyInfo or from an external source"), so a form this library does not
+	// accept is then ignored, and Coverage.KeyInfoForm is KeyInfoNone. It is
+	// still read: a malformed one, or one whose reference is ambiguous, is
+	// refused even when a key is pinned.
 	Certificate *x509.Certificate
 
 	// PublicKey, if set, is the only key accepted, as Certificate but for a
@@ -44,18 +47,22 @@ type VerifyOptions struct {
 	PublicKey crypto.PublicKey
 
 	// AllowedSignatureAlgorithms restricts the accepted ds:SignatureMethod
-	// values. Empty means every Sig* constant. A caller enforcing a profile
-	// passes exactly the values it permits; accepting more is a downgrade
-	// surface.
+	// values. Empty means the default set, today every Sig* constant. A
+	// caller enforcing a profile passes exactly the values it permits;
+	// accepting more is a downgrade surface.
+	//
+	// For every allow-list, an algorithm implemented only for legacy
+	// interoperability is outside the default set, and accepted only when
+	// named in the list. There is none yet.
 	AllowedSignatureAlgorithms []string
 
 	// AllowedDigestAlgorithms restricts ds:DigestMethod values. Empty means
-	// every Digest* constant.
+	// the default set, today every Digest* constant.
 	AllowedDigestAlgorithms []string
 
 	// AllowedCanonicalizationAlgorithms restricts ds:CanonicalizationMethod
-	// and canonicalization transform values. Empty means every c14n
-	// Algorithm constant.
+	// and canonicalization transform values. Empty means the default set,
+	// today every c14n Algorithm constant.
 	AllowedCanonicalizationAlgorithms []string
 
 	// Attachments resolves cid: references encountered during verification.
@@ -90,6 +97,15 @@ type VerifyOptions struct {
 	// the implied form, so this is off by default; a profile that names its
 	// canonicalization on every reference can turn it on.
 	RequireExplicitCanonicalization bool
+
+	// ResolveOmittedURI supplies the data object of a ds:Reference without
+	// a URI attribute, which XML-DSig 4.4.3.1 allows on at most one
+	// Reference: "the receiving application is expected to know the
+	// identity of the object". The returned octets go through that
+	// Reference's transforms, which must accept octets, and are digested.
+	// It is called only after the signature value has verified. When nil, a
+	// Reference without a URI is refused; more than one is always refused.
+	ResolveOmittedURI func() ([]byte, error)
 }
 
 // Coverage describes exactly what a verified signature covered.
@@ -103,13 +119,17 @@ type Coverage struct {
 	// order, for callers that need to check identity rather than ID.
 	SignedElements []*xdm.Node
 
-	// WholeDocumentSigned is true if a reference with an empty URI covered
-	// the document, as in an enveloped signature.
+	// WholeDocumentSigned is true if a reference with an empty URI, or
+	// "#xpointer(/)", covered the document, as in an enveloped signature.
 	WholeDocumentSigned bool
 
 	// SignedAttachmentIDs are the attachment IDs covered by cid:
 	// references, in reference order.
 	SignedAttachmentIDs []string
+
+	// OmittedURISigned is true if a reference without a URI covered the
+	// octets VerifyOptions.ResolveOmittedURI returned.
+	OmittedURISigned bool
 
 	// Certificate is the certificate the signature was verified against. It
 	// is nil when the key was a raw one: VerifyOptions.PublicKey, or a
@@ -120,8 +140,10 @@ type Coverage struct {
 	// certificate's key when there is a certificate.
 	PublicKey crypto.PublicKey
 
-	// KeyInfoForm records how the key was described in the signature. When a
-	// key was pinned, that description was read but not used.
+	// KeyInfoForm records how the key was described in the signature; for a
+	// dsig11:KeyInfoReference, how the ds:KeyInfo it references describes
+	// it. When a key was pinned, that description was read but not used, and
+	// a form this library does not accept is reported as KeyInfoNone.
 	KeyInfoForm KeyInfoSpec
 
 	// References are the verified references in order, retained because
@@ -131,6 +153,8 @@ type Coverage struct {
 
 // VerifiedReference is one verified ds:Reference, as it appeared.
 type VerifiedReference struct {
+	// URI is "" both for an empty URI and for an omitted one; Raw shows
+	// which.
 	URI             string
 	Type            string
 	DigestAlgorithm string
@@ -204,24 +228,36 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 	if err != nil {
 		return nil, err
 	}
+	omitted := 0
+	for _, r := range p.refs {
+		if r.omitted {
+			omitted++
+		}
+	}
+	switch {
+	case omitted > 1:
+		return nil, malformed("%d ds:Reference elements without URI; at most one is allowed", omitted)
+	case omitted == 1 && opts.ResolveOmittedURI == nil:
+		return nil, malformed("ds:Reference without URI, and no VerifyOptions.ResolveOmittedURI")
+	}
 
 	// Every algorithm is checked before any cryptographic work.
-	if err := allowed("signature", p.sigAlg, opts.AllowedSignatureAlgorithms, func(s string) bool { _, ok := xmlsec.SignatureHash(s); return ok }); err != nil {
+	if err := allowed("signature", p.sigAlg, opts.AllowedSignatureAlgorithms, defaultSignature); err != nil {
 		return nil, err
 	}
 	if p.sigMethodChildren > 0 {
 		return nil, malformed("ds:SignatureMethod has children")
 	}
-	if err := allowed("canonicalization", string(p.c14n.Algorithm), opts.AllowedCanonicalizationAlgorithms, isC14N); err != nil {
+	if err := allowed("canonicalization", string(p.c14n.Algorithm), opts.AllowedCanonicalizationAlgorithms, defaultC14N); err != nil {
 		return nil, err
 	}
 	for _, r := range p.refs {
-		if err := allowed("digest", r.digestAlg, opts.AllowedDigestAlgorithms, func(s string) bool { _, ok := xmlsec.DigestHash(s); return ok }); err != nil {
+		if err := allowed("digest", r.digestAlg, opts.AllowedDigestAlgorithms, defaultDigest); err != nil {
 			return nil, err
 		}
 		for _, t := range r.transforms {
 			if isC14N(t.Algorithm) {
-				if err := allowed("canonicalization", t.Algorithm, opts.AllowedCanonicalizationAlgorithms, isC14N); err != nil {
+				if err := allowed("canonicalization", t.Algorithm, opts.AllowedCanonicalizationAlgorithms, defaultC14N); err != nil {
 					return nil, err
 				}
 			}
@@ -230,18 +266,18 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 		// Exclusive C14N (SwA profile 5.4.2), so they need it allowed.
 		for _, t := range r.transforms {
 			if t.Algorithm == xmlsec.TransformAttachmentContentSignature || t.Algorithm == xmlsec.TransformAttachmentCompleteSignature {
-				if err := allowed("attachment canonicalization", string(c14n.Exclusive10), opts.AllowedCanonicalizationAlgorithms, isC14N); err != nil {
+				if err := allowed("attachment canonicalization", string(c14n.Exclusive10), opts.AllowedCanonicalizationAlgorithms, defaultC14N); err != nil {
 					return nil, err
 				}
 			}
 		}
 		// The implicit Canonical XML 1.0 is subject to the allow-list like
 		// any named one.
-		if impliesC14N(r.uri, r.transforms) {
+		if impliesC14N(!r.omitted && isSameDocument(r.uri), r.transforms) {
 			if opts.RequireExplicitCanonicalization {
 				return nil, fmt.Errorf("%w: reference %q relies on implicit canonicalization", xmlsec.ErrAlgorithmNotAllowed, r.uri)
 			}
-			if err := allowed("implicit canonicalization", string(c14n.Inclusive10), opts.AllowedCanonicalizationAlgorithms, isC14N); err != nil {
+			if err := allowed("implicit canonicalization", string(c14n.Inclusive10), opts.AllowedCanonicalizationAlgorithms, defaultC14N); err != nil {
 				return nil, err
 			}
 		}
@@ -258,8 +294,15 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 		}
 	}
 
-	cert, pub, form, err := resolveKeyInfo(doc, p.keyInfo)
-	if err != nil {
+	cert, pub, form, err := resolveKeyInfo(doc, p.keyInfo, opts.IDAttributes)
+	pinned := opts.Certificate != nil || opts.PublicKey != nil
+	switch {
+	case pinned && errors.Is(err, xmlsec.ErrUnsupportedKeyInfo):
+		// XML-DSig 3.2.2: the key comes "from KeyInfo or from an external
+		// source". With the key pinned, a form this library does not
+		// implement is a hint it cannot use, not an error.
+		form = KeyInfoNone
+	case err != nil:
 		return nil, err
 	}
 	switch {
@@ -292,7 +335,12 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 	for i, r := range p.refs {
 		dh, _ := xmlsec.DigestHash(r.digestAlg)
 		h := dh.New()
-		got, err := digestReference(h, doc, sig, r.uri, r.transforms, opts.Attachments, true, opts.IDAttributes)
+		var got dereferenced
+		if r.omitted {
+			err = digestOmitted(h, r.transforms, opts.ResolveOmittedURI)
+		} else {
+			got, err = digestReference(h, doc, sig, r.uri, r.transforms, opts.Attachments, true, opts.IDAttributes)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -300,10 +348,12 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 			return nil, fmt.Errorf("%w: reference %q", xmlsec.ErrDigestMismatch, r.uri)
 		}
 		switch {
+		case r.omitted:
+			cov.OmittedURISigned = true
 		case got.whole:
 			cov.WholeDocumentSigned = true
 		case got.element != nil:
-			cov.SignedElementIDs = append(cov.SignedElementIDs, r.uri[1:])
+			cov.SignedElementIDs = append(cov.SignedElementIDs, got.id)
 			cov.SignedElements = append(cov.SignedElements, got.element)
 		case got.attachment != nil:
 			cov.SignedAttachmentIDs = append(cov.SignedAttachmentIDs, got.attachment.ID)
@@ -316,9 +366,29 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 	return cov, nil
 }
 
-// allowed checks v against list, or against known when list is empty.
-func allowed(kind, v string, list []string, known func(string) bool) error {
-	if len(list) == 0 && known(v) || slices.Contains(list, v) {
+// digestOmitted digests the data object of a Reference without a URI, as
+// VerifyOptions.ResolveOmittedURI supplies it.
+func digestOmitted(h hash.Hash, transforms []TransformSpec, resolve func() ([]byte, error)) error {
+	b, err := resolve()
+	if err != nil {
+		return fmt.Errorf("dsig: ResolveOmittedURI: %w", err)
+	}
+	return data{octets: b}.digest(h, nil, "(omitted)", transforms, true)
+}
+
+// The default sets: what an empty allow-list accepts. An algorithm
+// implemented only for legacy interoperability is left out of them, so it
+// is accepted only when an allow-list names it. Today each is everything
+// implemented.
+func defaultSignature(alg string) bool { _, ok := xmlsec.SignatureHash(alg); return ok }
+func defaultDigest(alg string) bool    { _, ok := xmlsec.DigestHash(alg); return ok }
+func defaultC14N(alg string) bool      { return isC14N(alg) }
+
+// allowed checks v against list, or against the default set when list is
+// empty. A non-empty list is the whole policy: it may name an algorithm
+// outside the default set.
+func allowed(kind, v string, list []string, isDefault func(string) bool) error {
+	if len(list) == 0 && isDefault(v) || slices.Contains(list, v) {
 		return nil
 	}
 	return fmt.Errorf("%w: %s algorithm %q", xmlsec.ErrAlgorithmNotAllowed, kind, v)
