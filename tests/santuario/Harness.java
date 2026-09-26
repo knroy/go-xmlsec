@@ -33,8 +33,9 @@ import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 
 /**
- * A command-line face on Apache Santuario for the go-xmlsec differential
- * tests: sign, verify, encrypt and decrypt, one operation per invocation.
+ * A command-line face on Apache Santuario and WSS4J for the go-xmlsec
+ * differential tests: sign, verify, encrypt and decrypt with Santuario, and
+ * process a WS-Security header with WSS4J, one operation per invocation.
  * Run with -Dorg.apache.xml.security.ignoreLineBreaks=true so that Santuario
  * adds no formatting whitespace inside ds:SignedInfo; the byte-equality test
  * depends on it.
@@ -55,6 +56,8 @@ public final class Harness {
                 case "sign-detached" -> signDetached(a[1], a[2], a[3], a[4], java.util.Arrays.copyOfRange(a, 5, a.length));
                 case "encrypt" -> encrypt(a[1], a[2], a[3], a[4]);
                 case "decrypt" -> decrypt(a[1], a[2], a[3]);
+                case "wss4j-verify" -> wss4jVerify(a[1], a[2]);
+                case "wss4j-decrypt" -> wss4jDecrypt(a[1], a[2], a[3]);
                 default -> throw new IllegalArgumentException("unknown command " + a[0]);
             }
         } catch (Exception e) {
@@ -198,5 +201,85 @@ public final class Harness {
         c.setKEK(key(keyPath));
         c.doFinal(doc, first(doc, EncryptionConstants.EncryptionSpecNS, "EncryptedData"));
         write(doc, out);
+    }
+
+    /**
+     * wss4j-verify soap.xml cert.pem: processes the wsse:Security header with
+     * WSS4J, the WS-Security engine of phase4 and most Java stacks, with Basic
+     * Security Profile enforcement left on and the certificate as the only
+     * trusted one. Prints each action performed and the wsu:Id of every
+     * element a signature covered.
+     */
+    static void wss4jVerify(String soapPath, String certPath) throws Exception {
+        org.apache.wss4j.dom.engine.WSSConfig.init();
+        Document doc = parse(soapPath);
+
+        java.security.KeyStore ks = java.security.KeyStore.getInstance("PKCS12");
+        ks.load(null, null);
+        ks.setCertificateEntry("sender", cert(certPath));
+        org.apache.wss4j.common.crypto.Merlin crypto = new org.apache.wss4j.common.crypto.Merlin();
+        crypto.setKeyStore(ks);
+        crypto.setTrustStore(ks);
+
+        org.apache.wss4j.dom.handler.RequestData data = new org.apache.wss4j.dom.handler.RequestData();
+        data.setWssConfig(org.apache.wss4j.dom.engine.WSSConfig.getNewInstance());
+        data.setSigVerCrypto(crypto);
+
+        org.apache.wss4j.dom.handler.WSHandlerResult result =
+            new org.apache.wss4j.dom.engine.WSSecurityEngine().processSecurityHeader(doc, data);
+        if (result == null || result.getResults().isEmpty()) {
+            throw new IllegalStateException("no wsse:Security header processed");
+        }
+        for (org.apache.wss4j.dom.engine.WSSecurityEngineResult r : result.getResults()) {
+            int action = (Integer) r.get(org.apache.wss4j.dom.engine.WSSecurityEngineResult.TAG_ACTION);
+            System.out.println("action " + action);
+            @SuppressWarnings("unchecked")
+            java.util.List<org.apache.wss4j.dom.WSDataRef> refs = (java.util.List<org.apache.wss4j.dom.WSDataRef>)
+                r.get(org.apache.wss4j.dom.engine.WSSecurityEngineResult.TAG_DATA_REF_URIS);
+            if (refs != null) {
+                for (org.apache.wss4j.dom.WSDataRef ref : refs) {
+                    System.out.println("signed " + ref.getWsuId());
+                }
+            }
+        }
+    }
+
+    /**
+     * wss4j-decrypt soap.xml key.pem cert.pem: processes the wsse:Security
+     * header with WSS4J holding the recipient's private key, which decrypts
+     * every EncryptedData its EncryptedKey's ReferenceList names, then prints
+     * the actions performed and the decrypted document.
+     */
+    static void wss4jDecrypt(String soapPath, String keyPath, String certPath) throws Exception {
+        org.apache.wss4j.dom.engine.WSSConfig.init();
+        Document doc = parse(soapPath);
+
+        char[] pass = "changeit".toCharArray();
+        java.security.KeyStore ks = java.security.KeyStore.getInstance("PKCS12");
+        ks.load(null, null);
+        ks.setKeyEntry("recipient", key(keyPath), pass, new java.security.cert.Certificate[] {cert(certPath)});
+        org.apache.wss4j.common.crypto.Merlin crypto = new org.apache.wss4j.common.crypto.Merlin();
+        crypto.setKeyStore(ks);
+        crypto.setTrustStore(ks);
+
+        org.apache.wss4j.dom.handler.RequestData data = new org.apache.wss4j.dom.handler.RequestData();
+        data.setWssConfig(org.apache.wss4j.dom.engine.WSSConfig.getNewInstance());
+        data.setDecCrypto(crypto);
+        data.setCallbackHandler(callbacks -> {
+            for (javax.security.auth.callback.Callback c : callbacks) {
+                ((org.apache.wss4j.common.ext.WSPasswordCallback) c).setPassword(new String(pass));
+            }
+        });
+
+        org.apache.wss4j.dom.handler.WSHandlerResult result =
+            new org.apache.wss4j.dom.engine.WSSecurityEngine().processSecurityHeader(doc, data);
+        if (result == null || result.getResults().isEmpty()) {
+            throw new IllegalStateException("no wsse:Security header processed");
+        }
+        for (org.apache.wss4j.dom.engine.WSSecurityEngineResult r : result.getResults()) {
+            System.out.println("action " + r.get(org.apache.wss4j.dom.engine.WSSecurityEngineResult.TAG_ACTION));
+        }
+        XMLUtils.outputDOM(doc, System.out);
+        System.out.println();
     }
 }

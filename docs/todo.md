@@ -7,7 +7,6 @@
 | `Attachment-Complete` transform, signing and encryption | Refused with `ErrUnsupportedAlgorithm`. Its MIME header canonicalization is easy to get subtly wrong, and no peer has been seen to require it (open item X-6). |
 | Gate 2 against phase4 | Needs the captured-message corpus (X-5), and the consumer that builds whole AS4 messages: Gate 2 compares a message, not a signature. The signature-level equivalent, byte equality with Santuario, is in place (`tests/interop`). |
 | Golden files, with `-update` | See [testing.md](testing.md#not-tested-yet). |
-| `ds:KeyInfo` on `xenc:EncryptedKey`, and `xenc:ReferenceList` | Not emitted; how a peer identifies the recipient key needs settling against a real profile. The `xmlsec1` differential confirms it matters: `xmlsec1` finds the session key only through `EncryptedData/ds:KeyInfo`, so the harness places the `EncryptedKey` there itself. |
 | Raw keys in `ds:KeyInfo` (`KeyValue`, `DEREncodedKeyValue`) | `Verify` works from certificates, so the 25 W3C interop vectors that carry raw keys are refused. A caller that pins a key rather than a certificate cannot express it today. |
 | SAML `ID` attributes | `FindByID` resolves `wsu:Id` and `xml:id` only. SAML is the likeliest second consumer. |
 | Configurable, lower parse limits | Parsing costs up to about 40 times the input in memory (see [security.md](security.md#resource-limits)). The pinned limits cannot be lowered; callers must cap input size themselves. Deciding whether `Parse` should accept stricter limits is open. |
@@ -23,9 +22,9 @@ the latest commit.
 | 1 | `xmlsec1 --verify` accepts our enveloped and detached signatures | **Met.** `tests/interop`, every push. Santuario accepts them too. |
 | 2 | We accept `xmlsec1`'s and Santuario's signatures, and reject the negative corpus: modified element, modified attachment, relocated element, duplicated `wsu:Id`, algorithm outside the allow-list, truncated signature | **Met.** `tests/interop`; `TestVerifyNegative`, AP-09, AP-10. Signatures are also byte-identical to Santuario's. |
 | 3 | `Coverage` matches phase4's own over a real-message corpus | **Open.** Needs captured AS4 messages, which need a certified access point. The real SMP corpus (122 documents, all verifying) covers enveloped signatures only. |
-| 4 | `xenc` round-trips every permitted algorithm combination, and its output decrypts under WSS4J | **Partly met.** Every combination round-trips (`TestAlgorithmCombinations`), and `xmlsec1` and Santuario decrypt our output. WSS4J decryption needs the `EncryptedKey` composition below. |
+| 4 | `xenc` round-trips every permitted algorithm combination, and its output decrypts under WSS4J | **Met.** Every combination round-trips (`TestAlgorithmCombinations`); `xmlsec1`, Santuario and WSS4J 4.0.1 all decrypt our output (`TestWSS4JDecryptsOurEncryption`, with the `EncryptedKey` composed by `SetKeyInfo` and `AddDataReference`). |
 | 5 | Attachment encryption round-trips against phase4 | **Open.** Needs phase4. |
-| 6 | WSS4J processes our `wsse:Security` header without warnings | **In progress.** A WSS4J harness with Basic Security Profile enforcement is being added to `tests/interop`. |
+| 6 | WSS4J processes our `wsse:Security` header without warnings | **Met.** WSS4J 4.0.1, with Basic Security Profile enforcement on, processes a header built entirely by this library, a timestamp, a binary security token and a signature over body and timestamp, and reports both as signed (`TestWSS4JProcessesOurSecurityHeader`). |
 | 7 | Gate 2: our `SignatureValue` byte-identical to phase4's over whole AS4 messages | **Open.** Needs the AS4 message builder this library serves, and the corpus. The signature-level equivalent, byte equality with Santuario, is met. |
 | 8 | Every algorithm constant used by at least one test | **Met.** Checked mechanically: every `Sig*`, `Digest*`, `Transform*`, `Enc*`, `KeyTransport*`, `MGF1*` and `BST*` constant appears in a test. |
 | 9 | `c14n.ErrRelativeNamespaceURI` and `c14n.ErrXML11` reached from untrusted input and mapped to `ErrUnverifiable` | **Met.** `TestUnverifiable`. |
@@ -46,9 +45,8 @@ the latest commit.
 
 **What stands between here and v1:** 3, 5, 7 and 12 need either phase4 run
 against captured AS4 messages, or the AS4 message builder this library is
-written for. They cannot be closed inside this repository. 4 and 6 need the
-WSS4J work in progress, and 4 also needs `EncryptedKey` composition helpers.
-16 needs the running fuzz results.
+written for. They cannot be closed inside this repository. 16 needs the
+running fuzz results.
 
 ## Open items
 

@@ -83,6 +83,7 @@ func EncryptElement(doc *xdm.Node, target *xdm.Node, sessionKey []byte, opts Enc
 
 	ed := newRoot("EncryptedData")
 	xmltree.SetAttr(ed, "", "", "Type", TypeElement)
+	setDataID(ed, opts)
 	encryptionMethod(ed, opts.DataAlgorithm)
 	xmltree.Text(element(element(ed, "CipherData"), "CipherValue"), base64.StdEncoding.EncodeToString(ct))
 

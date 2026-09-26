@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"math/big"
+	"strings"
 	"testing"
 	"time"
 
@@ -172,3 +173,65 @@ func TestDecryptEncryptedKeyErrors(t *testing.T) {
 }
 
 func covEM(alg string) string { return `<xenc:EncryptionMethod Algorithm="` + alg + `"/>` }
+
+// SetKeyInfo and AddDataReference compose an EncryptedKey the way a
+// WS-Security receiver finds it: KeyInfo after EncryptionMethod, and a
+// ReferenceList naming each EncryptedData.
+func TestEncryptedKeyComposition(t *testing.T) {
+	ek, err := xenc.GenerateEncryptedKey(as4Opts(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	str := xmltree.Element(nil, "wsse", "urn:wsse", "SecurityTokenReference")
+	str.AddNamespace("wsse", "urn:wsse")
+	if err := ek.SetKeyInfo(str); err != nil {
+		t.Fatal(err)
+	}
+	ek.AddDataReference("ED-1")
+	ek.AddDataReference("ED-2")
+
+	var order []string
+	for _, k := range ek.Element.ChildElements() {
+		order = append(order, k.Name.Local)
+	}
+	if got := strings.Join(order, ","); got != "EncryptionMethod,KeyInfo,CipherData,ReferenceList" {
+		t.Fatalf("child order %s", got)
+	}
+	refs := ek.Element.ChildElements()[3].ChildElements()
+	if len(refs) != 2 || refs[1].AttrValue("URI") != "#ED-2" {
+		t.Fatalf("references %d", len(refs))
+	}
+	// Still unwraps: KeyInfo and ReferenceList do not disturb decryption.
+	if _, err := xenc.DecryptEncryptedKey(reparse(t, ek.Element), recipientKey, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, el := range map[string]*xdm.Node{
+		"nil":            nil,
+		"text node":      {Kind: xdm.KindText, Value: "x"},
+		"already placed": ek.Element.ChildElements()[0],
+		"second KeyInfo": xmltree.Element(nil, "x", "urn:x", "Other"),
+	} {
+		if err := ek.SetKeyInfo(el); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+func TestDataID(t *testing.T) {
+	opts := as4Opts(t)
+	opts.DataID = "ED-9"
+	key := make([]byte, 16)
+	_, ed, err := xenc.EncryptAttachment(&xmlsec.Attachment{ID: "a", Body: []byte("b")}, key, xmlsec.TransformAttachmentContentOnly, opts)
+	if err != nil || ed.AttrValue("Id") != "ED-9" {
+		t.Fatalf("attachment: %v", err)
+	}
+	tree, err := xmlsec.Parse([]byte(`<r><a/></r>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := xenc.EncryptElement(tree.Root, xmltree.DocumentElement(tree.Root).ChildElements()[0], key, opts)
+	if err != nil || !strings.Contains(string(out), `Id="ED-9"`) {
+		t.Fatalf("element: %v\n%s", err, out)
+	}
+}

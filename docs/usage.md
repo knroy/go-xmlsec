@@ -143,11 +143,26 @@ ciphertext, ed, err := xenc.EncryptAttachment(att, ek.SessionKey, xmlsec.Transfo
 The MGF is emitted explicitly. Omitting it means SHA-1 by specification
 default, so `DecryptEncryptedKey` refuses an `EncryptedKey` without one.
 
-`GenerateEncryptedKey` emits no `ds:KeyInfo` naming the recipient key, and no
-`xenc:ReferenceList`; add what your profile requires. See
-[todo.md](todo.md). A peer that locates the session key through
-`EncryptedData/ds:KeyInfo`, as `xmlsec1` does, needs the `EncryptedKey`
-placed there.
+A WS-Security receiver such as WSS4J finds the session key through the
+`EncryptedKey` in the header: its `ds:KeyInfo` names the recipient's key, and
+its `xenc:ReferenceList` names each `EncryptedData` it decrypts. Compose them
+as a sender does:
+
+```go
+tokenID, err := hdr.AddBinarySecurityToken(recipientCert, nil, xmlsec.BSTValueTypeX509v3)
+str, err := wss.NewSecurityTokenReference(doc, tokenID, xmlsec.BSTValueTypeX509v3)
+
+opts.DataID = "ED-1"                  // the Id the EncryptedData will carry
+ek, err := xenc.GenerateEncryptedKey(opts)
+err = ek.SetKeyInfo(str)              // which key unwraps it
+ek.AddDataReference(opts.DataID)      // what it decrypts
+err = hdr.Append(ek.Element)
+encrypted, err := xenc.EncryptElement(doc, payload, ek.SessionKey, opts)
+```
+
+This is exactly what `TestWSS4JDecryptsOurEncryption` sends to WSS4J. A
+peer that instead looks for the key inside `EncryptedData/ds:KeyInfo`, as
+`xmlsec1` does, needs the `EncryptedKey` placed there.
 
 Receiving:
 

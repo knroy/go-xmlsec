@@ -125,7 +125,7 @@ outside the document and its attachments. The reasons are in
 | | |
 |---|---|
 | Unit and conformance tests | Linux, macOS and Windows on every commit; 100% statement coverage, enforced |
-| Interoperability | [`xmlsec1`](https://www.aleksey.com/xmlsec/) 1.3 and [Apache Santuario](https://santuario.apache.org/) 4.0.4 verify our signatures and decrypt our output, and we do the same for theirs, on every commit |
+| Interoperability | [`xmlsec1`](https://www.aleksey.com/xmlsec/) 1.3 and [Apache Santuario](https://santuario.apache.org/) 4.0.4 verify our signatures and decrypt our output, and we do the same for theirs, on every commit. [Apache WSS4J](https://ws.apache.org/wss4j/) 4.0.1 processes our WS-Security headers, with Basic Security Profile enforcement, and decrypts our encryption |
 | Byte equality | the same document signed with the same key produces a `SignatureValue` byte-identical to Santuario's, enveloped and WS-Security |
 | Static analysis | `staticcheck` and `gosec`, clean, on every commit |
 | Real-world documents | 122 real Peppol SMP responses, from 62 providers, all verify; kept in a separate corpus module |

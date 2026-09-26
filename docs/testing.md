@@ -15,7 +15,7 @@ read no clock. Keys and certificates are generated per run.
 | Layer | Where | Runs |
 |---|---|---|
 | Unit and conformance | `*_test.go` beside each package, named after the source file they test | every push, Linux, macOS and Windows, under `-race` |
-| Differential against `xmlsec1` and Apache Santuario | `tests/interop`, build tag `interop`, run by `tests/interop.sh` | every push, Linux |
+| Differential against `xmlsec1`, Apache Santuario and WSS4J | `tests/interop`, build tag `interop`, run by `tests/interop.sh` | every push, Linux |
 | Security regressions | `tests/security`: XXE, external fetches, key substitution, algorithm confusion, comment truncation, encryption downgrade | every push, all three systems; a local HTTP listener proves nothing is fetched |
 | Fuzzing | `FuzzVerify`, `FuzzDecryptEncryptedKey`, `FuzzDecryptData` | nightly, one hour per target |
 | Static analysis | `staticcheck` v0.8.1, `gosec` v2.29.0, pinned | every push: both clean, no `#nosec` suppressions |
@@ -65,6 +65,9 @@ implementations verify and decrypt the result, and the reverse:
 * **Apache Santuario 4.0.4** (Java), the XML Security library that WSS4J and
   so most Java WS-Security stacks are built on, driven through a small
   harness, `tests/santuario/Harness.java`.
+* **Apache WSS4J 4.0.1**, the WS-Security engine phase4 is built on, through
+  the same harness: it processes our WS-Security headers and decrypts our
+  encryption.
 
 `tests/interop.sh` builds `tests/Dockerfile` (Go, `xmlsec1` and Santuario in
 one Alpine image) and runs the tests in it; CI runs the same script. Alpine,
@@ -78,6 +81,8 @@ package, does not implement XML Encryption 1.1 `rsa-oaep`.
 | `TestXmlsec1VerifiesOurDetachedSignature`, `TestWeVerifyXmlsec1DetachedSignature` | both ways | SOAP 1.2, two `#id` references, exclusive C14N with an InclusiveNamespaces prefix list |
 | `TestSignatureValueMatchesSantuarioEnveloped` | byte equality | inclusive and exclusive C14N |
 | `TestSignatureValueMatchesSantuarioDetached` | byte equality, and both ways | SOAP 1.2 WS-Security header, two `#id` references |
+| `TestWSS4JProcessesOurSecurityHeader` | WSS4J | a WS-Security header built by this library: timestamp, binary security token, signature over body and timestamp; WSS4J must report both as signed, with Basic Security Profile enforcement on |
+| `TestWSS4JDecryptsOurEncryption` | WSS4J | an encrypted body with the `EncryptedKey` in the header, naming the recipient's token and the `EncryptedData`; WSS4J must decrypt it to the original |
 | `TestXmlsec1DecryptsOurEncryption`, `TestSantuarioDecryptsOurEncryption` | ours → each | AES-128-GCM element, RSA-OAEP with explicit SHA-256 MGF and digest |
 | `TestWeDecryptXmlsec1Encryption`, `TestWeDecryptSantuarioEncryption` | each → ours | the same |
 
@@ -134,6 +139,7 @@ beside the assertion that uses it:
 |---|---|---|
 | `xmlsec1` (libxmlsec1 on OpenSSL) | 1.3.11 at the time of writing | Alpine package `xmlsec`, on `golang:1.26-alpine` |
 | Apache Santuario | 4.0.4 | Maven Central `org.apache.santuario:xmlsec`, run on OpenJDK 21 |
+| Apache WSS4J | 4.0.1 | Maven Central `org.apache.wss4j:wss4j-ws-security-dom`, same harness |
 
 The Alpine package is not pinned to a patch release; the version in use is
 printed by `xmlsec1 --version` in the container.
@@ -193,6 +199,5 @@ fail to encode.
 
 * **Gate 2**: byte equality with phase4 over whole captured AS4 messages. The
   signature-level equivalent, byte equality with Santuario, is in place.
-* **WSS4J** processing our headers and decrypting our output.
 * **Golden files** for a signed envelope with two attachments, a signed and
   encrypted envelope, and an enveloped metadata document.

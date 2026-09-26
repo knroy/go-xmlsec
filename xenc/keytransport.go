@@ -156,3 +156,41 @@ func DecryptEncryptedKey(el *xdm.Node, dec crypto.Decrypter,
 	}
 	return key, nil
 }
+
+// SetKeyInfo places el, such as a wsse:SecurityTokenReference to the
+// recipient's certificate, in a ds:KeyInfo of the EncryptedKey, where a
+// receiver looks to find which private key unwraps it.
+func (ek *EncryptedKey) SetKeyInfo(el *xdm.Node) error {
+	if el == nil || el.Kind != xdm.KindElement || el.Parent != nil {
+		return errors.New("xenc: SetKeyInfo needs a detached element")
+	}
+	for _, k := range ek.Element.ChildElements() {
+		if k.IsElement(NSDSig, "KeyInfo") {
+			return errors.New("xenc: EncryptedKey already has a ds:KeyInfo")
+		}
+	}
+	ki := xmltree.Element(ek.Element, "ds", NSDSig, "KeyInfo")
+	ki.AddNamespace("ds", NSDSig)
+	ki.AppendChild(el)
+	// Schema order: EncryptionMethod, KeyInfo, CipherData, ReferenceList.
+	kids := ek.Element.Children
+	copy(kids[2:], kids[1:len(kids)-1])
+	kids[1] = ki
+	return nil
+}
+
+// AddDataReference adds an xenc:DataReference to the EncryptedKey's
+// xenc:ReferenceList, creating the list if needed. id is the Id of an
+// xenc:EncryptedData this key decrypts; see EncryptOptions.DataID.
+func (ek *EncryptedKey) AddDataReference(id string) {
+	var list *xdm.Node
+	for _, k := range ek.Element.ChildElements() {
+		if k.IsElement(NSXEnc, "ReferenceList") {
+			list = k
+		}
+	}
+	if list == nil {
+		list = element(ek.Element, "ReferenceList")
+	}
+	xmltree.SetAttr(element(list, "DataReference"), "", "", "URI", "#"+id)
+}

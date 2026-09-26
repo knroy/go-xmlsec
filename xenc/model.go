@@ -50,6 +50,11 @@ type EncryptOptions struct {
 	// SessionKey, if non-nil, is used instead of a freshly generated key.
 	// For tests only. Never set in production.
 	SessionKey []byte
+
+	// DataID, if set, becomes the Id of the xenc:EncryptedData that
+	// EncryptElement or EncryptAttachment produces, for an
+	// EncryptedKey.AddDataReference to point at.
+	DataID string
 }
 
 // keySizes maps each data algorithm to its AES key length.
@@ -123,4 +128,10 @@ func cipherValue(el *xdm.Node) ([]byte, error) {
 		return nil, malformed("xenc:CipherValue: %v", err)
 	}
 	return b, nil
+}
+
+func setDataID(ed *xdm.Node, opts EncryptOptions) {
+	if opts.DataID != "" {
+		xmltree.SetAttr(ed, "", "", "Id", opts.DataID)
+	}
 }

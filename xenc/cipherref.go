@@ -39,6 +39,7 @@ func EncryptAttachment(att *xmlsec.Attachment, sessionKey []byte, transform stri
 		xmltree.SetAttr(ed, "", "", "MimeType", mt)
 	}
 	xmltree.SetAttr(ed, "", "", "Type", transform)
+	setDataID(ed, opts)
 	encryptionMethod(ed, opts.DataAlgorithm)
 	cr := element(element(ed, "CipherData"), "CipherReference")
 	xmltree.SetAttr(cr, "", "", "URI", "cid:"+att.ID)
