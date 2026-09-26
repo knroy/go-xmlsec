@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"strings"
 
 	"github.com/knroy/go-xml/c14n"
 	"github.com/knroy/go-xml/xdm"
@@ -222,7 +221,7 @@ func addKeyInfo(sig, doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions) er
 // signDigest signs in the XML-DSig encoding: PKCS#1 v1.5 for RSA, and the
 // fixed-width r||s concatenation, not ASN.1, for ECDSA.
 func signDigest(s crypto.Signer, alg string, h crypto.Hash, digest []byte) ([]byte, error) {
-	isEC := strings.Contains(alg, "#ecdsa-")
+	isEC := ecdsaAlgorithms[alg]
 	switch pub := s.Public().(type) {
 	case *rsa.PublicKey:
 		if isEC {

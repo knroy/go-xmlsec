@@ -140,7 +140,9 @@ default, so `DecryptEncryptedKey` refuses an `EncryptedKey` without one.
 
 `GenerateEncryptedKey` emits no `ds:KeyInfo` naming the recipient key, and no
 `xenc:ReferenceList`; add what your profile requires. See
-[todo.md](todo.md).
+[todo.md](todo.md). A peer that locates the session key through
+`EncryptedData/ds:KeyInfo`, as `xmlsec1` does, needs the `EncryptedKey`
+placed there.
 
 Receiving:
 

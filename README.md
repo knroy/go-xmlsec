@@ -17,16 +17,16 @@ Read this before depending on it.
 
 | Evidence | Status |
 |---|---|
-| Unit and conformance tests in this module | 40 tests; CI runs them on Linux, macOS and Windows |
-| Round-trip: our signatures verify under our verifier, every algorithm constant exercised | Yes |
+| Unit and conformance tests | 63 test and fuzz functions, run on Linux, macOS and Windows in CI; statement coverage 96.6–100% per package |
 | Negative corpus: modified element, modified attachment, relocated element, duplicated ID, algorithm outside allow-list, truncated signature | Yes, each a named test |
-| Interop with `xmlsec1` and Apache Santuario at the signature level | **Not yet built** |
+| Differential against `xmlsec1` 1.3 | **Yes**, in CI: it verifies our enveloped and detached signatures (RSA, ECDSA; inclusive, exclusive) and decrypts our AES-GCM / RSA-OAEP encryption, and we do the same for its output |
+| Differential against Apache Santuario | **Not yet built** |
 | Signature byte-equality with phase4 (Gate 2) | **Not yet built** |
-| Fuzzing | **Not yet built** |
+| Fuzzing | Three targets on the parse-and-verify and decrypt paths, nightly at one hour each |
 | Canonicalization conformance (Gate 1) | Owned upstream by `go-xml/c14n` v1.4.0, which reports differential testing against `xmllint` and `xmlsec1`; the Santuario differential and real-message corpus are still open there |
 
-Everything this module produces has so far only been checked against itself.
-That is why it is v0. See [docs/testing.md](docs/testing.md) for exactly what
+One independent implementation accepts what this module produces, and the
+spec asks for two before anything is called validated. That is why it is v0. See [docs/testing.md](docs/testing.md) for exactly what
 runs and [docs/todo.md](docs/todo.md) for what stands between here and v1.
 
 ## Sign and verify

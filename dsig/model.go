@@ -1,7 +1,10 @@
 // Package dsig implements XML Signature generation and verification.
 package dsig
 
-import "github.com/knroy/go-xml/c14n"
+import (
+	"github.com/knroy/go-xml/c14n"
+	"github.com/knroy/go-xmlsec"
+)
 
 // Namespace URIs.
 const (
@@ -66,3 +69,18 @@ const (
 )
 
 func isC14N(alg string) bool { return c14n.Algorithm(alg).Valid() }
+
+// withoutComments maps each #WithComments canonicalization to its plain form.
+var withoutComments = map[c14n.Algorithm]c14n.Algorithm{
+	c14n.Inclusive10WithComments: c14n.Inclusive10,
+	c14n.Exclusive10WithComments: c14n.Exclusive10,
+	c14n.Inclusive11WithComments: c14n.Inclusive11,
+}
+
+// ecdsaAlgorithms are the Sig* constants that take an ECDSA key. The others
+// take RSA.
+var ecdsaAlgorithms = map[string]bool{
+	xmlsec.SigECDSASHA256: true,
+	xmlsec.SigECDSASHA384: true,
+	xmlsec.SigECDSASHA512: true,
+}

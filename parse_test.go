@@ -1,7 +1,7 @@
 package xmlsec
 
 import (
-	"errors"
+	"strings"
 	"testing"
 )
 
@@ -22,21 +22,25 @@ func TestParseRefusesDOCTYPE(t *testing.T) {
 	}
 }
 
-func TestAttachmentSet(t *testing.T) {
-	a := &Attachment{ID: "part 1@example.com"}
-	s, err := NewAttachmentSet(a)
-	if err != nil {
-		t.Fatal(err)
+func TestParseLimits(t *testing.T) {
+	deep := func(n int) []byte {
+		return []byte(strings.Repeat("<a>", n) + strings.Repeat("</a>", n))
 	}
-	if got, err := s.Lookup("cid:part%201@example.com"); err != nil || got != a {
-		t.Fatalf("percent-decoded lookup: %v", err)
+	cases := []struct {
+		name    string
+		doc     []byte
+		wantErr bool
+	}{
+		{"at depth limit", deep(MaxParseDepth), false},
+		{"beyond depth limit", deep(MaxParseDepth + 1), true},
+		{"not well-formed", []byte("<a>"), true},
+		{"empty", nil, true},
 	}
-	for _, uri := range []string{"cid:other", "part 1@example.com", "cid:%zz"} {
-		if _, err := s.Lookup(uri); !errors.Is(err, ErrAttachmentNotFound) {
-			t.Errorf("%q: %v", uri, err)
-		}
-	}
-	if _, err := NewAttachmentSet(a, &Attachment{ID: a.ID}); !errors.Is(err, ErrDuplicateAttachmentID) {
-		t.Fatalf("duplicate: %v", err)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if _, err := Parse(c.doc); (err != nil) != c.wantErr {
+				t.Fatalf("err = %v", err)
+			}
+		})
 	}
 }

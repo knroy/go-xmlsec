@@ -36,6 +36,17 @@ jobs:
         run: CGO_ENABLED=0 go build ./...
       - run: go test -race -cover ./...
 
+  interop:
+    # The xmlsec1 differential: signatures and encryption in both directions.
+    # Run through the same container script as locally, because it needs
+    # xmlsec 1.3 and Ubuntu packages 1.2, which lacks XML Encryption 1.1
+    # rsa-oaep. The script sets GOXMLSEC_REQUIRE_XMLSEC1, so a missing tool
+    # fails rather than skips.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: tests/interop-xmlsec1.sh
+
   hygiene:
     # The module must know nothing of the profiles that consume it: no import
     # of a peppol-* module, and no mention of one in Go source outside

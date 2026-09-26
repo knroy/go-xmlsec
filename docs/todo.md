@@ -5,11 +5,10 @@
 | Item | Notes |
 |---|---|
 | `Attachment-Complete` transform, signing and encryption | Refused with `ErrUnsupportedAlgorithm`. Its MIME header canonicalization is easy to get subtly wrong, and no peer has been seen to require it (open item X-6). |
-| Interop harness, `internal/interop` | Against `xmlsec1` and Apache Santuario, which must stay two independent implementations. |
+| Apache Santuario in the differential | `xmlsec1` is done (`tests/interop`); the harness must reach two independent implementations, or a canonicalization bug we share with `xmlsec1` passes. |
 | Gate 2 against phase4 | Needs the captured-message corpus (X-5). |
 | Golden files, with `-update` | See [testing.md](testing.md#not-tested-yet). |
-| Fuzz targets | Malformed `ds:Signature` and `xenc:EncryptedData`, truncated base64, deep namespace nesting. |
-| `ds:KeyInfo` on `xenc:EncryptedKey`, and `xenc:ReferenceList` | Not emitted; how a peer identifies the recipient key needs settling against a real profile. |
+| `ds:KeyInfo` on `xenc:EncryptedKey`, and `xenc:ReferenceList` | Not emitted; how a peer identifies the recipient key needs settling against a real profile. The `xmlsec1` differential confirms it matters: `xmlsec1` finds the session key only through `EncryptedData/ds:KeyInfo`, so the harness places the `EncryptedKey` there itself. |
 | SAML `ID` attributes | `FindByID` resolves `wsu:Id` and `xml:id` only. SAML is the likeliest second consumer. |
 | `staticcheck` and `gosec` in CI | Acceptance criterion 18. |
 
@@ -19,15 +18,15 @@ v1 waits for all of them. Numbers refer to the design document.
 
 | # | Criterion | Now |
 |---|---|---|
-| 1–2 | `xmlsec1` and Santuario accept our signatures, and we theirs | no harness |
+| 1–2 | `xmlsec1` and Santuario accept our signatures, and we theirs | `xmlsec1` done, both directions, enveloped and detached; Santuario not built |
 | 3 | Coverage matches phase4's over the real-message corpus | no corpus |
 | 4–6 | `xenc` and `wss` output accepted by WSS4J and phase4 | not tested |
 | 7 | Gate 2 | not built |
 | 12 | Gate 2 on every go-xml bump | not built |
-| 16 | one hour per fuzz target, clean | no targets |
+| 16 | one hour per fuzz target, clean | three targets, nightly at one hour each; first local runs of about a minute each were clean |
 | 18 | `staticcheck`, `gosec` clean | not in CI |
-| 19 | 85% statement coverage | 47–77% per package |
-| 20 | README states the evidence with figures | done, but the figures are self-tests only |
+| 19 | 85% statement coverage | **met**: 96.6–100% per package |
+| 20 | README states the evidence with figures | done; one independent implementation so far |
 
 ## Open items
 
@@ -55,4 +54,5 @@ the first tag, since a public API is hard to reshape afterwards.
 | `VerifiedReference.Raw` is canonical, not the original octets | `xdm` keeps no source offsets. `Raw` is the reference in its SignedInfo's canonicalization, which is what a receipt built on exclusive C14N contains. |
 | `SignEnveloped` and `EncryptElement` output is `Inclusive10WithComments` of the document | This module has no serializer and should not grow one; canonical form re-parses to the same tree. The XML declaration is dropped. |
 | No `dsig/transform` sub-package or transform registry | The transform set is closed and small; one switch in `dsig/reference.go` is the whole pipeline. |
+| The differential harness is `tests/interop`, not `internal/interop` | The repository keeps harnesses under `tests/`, as go-xml does. |
 | No `xenc/encrypt.go` and `decrypt.go` split | Split by mechanism instead: key transport, data cipher, cipher reference. |

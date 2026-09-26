@@ -80,8 +80,12 @@ func digestReference(h hash.Hash, doc, sig *xdm.Node, uri string, transforms []T
 			// A bare "" or "#id" dereference removes comments (XML-DSig
 			// 4.4.3.3), so the #WithComments variants render the same as
 			// their plain forms here.
+			c := c14n.Algorithm(alg)
+			if plain, ok := withoutComments[c]; ok {
+				c = plain
+			}
 			opts := c14n.Options{
-				Algorithm:                  c14n.Algorithm(strings.TrimSuffix(alg, "#WithComments")),
+				Algorithm:                  c,
 				InclusiveNamespacePrefixes: t.InclusiveNamespacePrefixes,
 			}
 			if last {

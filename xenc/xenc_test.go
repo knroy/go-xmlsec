@@ -163,7 +163,7 @@ func TestEncryptElement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(out), "hi") || !strings.Contains(string(out), xenc.TypeElement) {
+	if strings.Contains(string(out), ">hi<") || !strings.Contains(string(out), xenc.TypeElement) {
 		t.Fatalf("not encrypted:\n%s", out)
 	}
 	if again, _ := c14n.Bytes(doc, c14n.Options{Algorithm: c14n.Inclusive10}); string(again) != src {

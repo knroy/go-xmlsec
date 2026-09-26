@@ -1,0 +1,39 @@
+name: Fuzz
+
+# Nightly, one hour per target: acceptance criterion 16. A crash, hang or
+# out-of-memory is a release blocker; a verification error on garbage input
+# is correct behaviour. A failing input is uploaded as an artifact; commit it
+# under testdata/fuzz/<Target>/ so it becomes a permanent regression seed.
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { pkg: ./dsig, name: FuzzVerify }
+          - { pkg: ./xenc, name: FuzzDecryptEncryptedKey }
+          - { pkg: ./xenc, name: FuzzDecryptData }
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - run: go test -run '^$' -fuzz '^${{ matrix.target.name }}$' -fuzztime 60m ${{ matrix.target.pkg }}
+      - name: Upload the failing input
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-${{ matrix.target.name }}
+          path: '**/testdata/fuzz/${{ matrix.target.name }}/'
+          if-no-files-found: ignore

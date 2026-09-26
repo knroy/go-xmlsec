@@ -54,7 +54,9 @@ func NewHeader(doc *xdm.Node, soapNS string, actor string, mustUnderstand bool) 
 		}
 	}
 
-	sec := xmltree.Element(hdr, "wsse", NSWSSE, "Security")
+	// Built detached and attached last, so its own xmlns:wsse cannot
+	// conflict with an ancestor's.
+	sec := xmltree.Element(nil, "wsse", NSWSSE, "Security")
 	if err := xmltree.Declare(sec, "wsse", NSWSSE); err != nil {
 		return nil, err
 	}
@@ -68,6 +70,7 @@ func NewHeader(doc *xdm.Node, soapNS string, actor string, mustUnderstand bool) 
 	if actor != "" {
 		xmltree.SetAttr(sec, p, soapNS, actorAttr, actor)
 	}
+	hdr.AppendChild(sec)
 	return &Header{doc: doc, el: sec}, nil
 }
 

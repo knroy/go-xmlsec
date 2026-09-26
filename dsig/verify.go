@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"math/big"
 	"slices"
-	"strings"
 
 	"github.com/knroy/go-xml/c14n"
 	"github.com/knroy/go-xml/xdm"
@@ -234,7 +233,7 @@ func allowed(kind, v string, list []string, known func(string) bool) error {
 }
 
 func verifyDigest(pub crypto.PublicKey, alg string, h crypto.Hash, digest, sig []byte) error {
-	isEC := strings.Contains(alg, "#ecdsa-")
+	isEC := ecdsaAlgorithms[alg]
 	switch k := pub.(type) {
 	case *rsa.PublicKey:
 		if isEC {
