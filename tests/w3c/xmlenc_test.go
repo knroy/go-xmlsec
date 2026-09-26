@@ -165,6 +165,16 @@ func TestW3CXMLEncryptionVectors(t *testing.T) {
 			if eq, err := c14n.Equal(gotTree.Root, wantTree.Root, c14n.Options{Algorithm: c14n.Inclusive10}); !eq || err != nil {
 				t.Fatalf("plaintext %q, %v\nwant\n%q", got, err, plain)
 			}
+			// Sections 4.1 and 4.5: the EncryptedData is the document
+			// element, so replacing it yields plaintext.xml's document.
+			replaced, err := xenc.DecryptAndReplace(tree.Root, ed, key, xenc.DecryptOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := c14n.Bytes(wantTree.Root, c14n.Options{Algorithm: c14n.Inclusive10WithComments})
+			if err != nil || string(replaced) != string(want) {
+				t.Fatalf("replaced %q, %v\nwant\n%q", replaced, err, want)
+			}
 		})
 	}
 }

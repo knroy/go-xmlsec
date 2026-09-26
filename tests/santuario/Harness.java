@@ -71,6 +71,7 @@ public final class Harness {
                 case "encrypt-ecdh" -> encryptECDH(a[1], a[2], a[3], a[4]);
                 case "encrypt-kw" -> encryptKW(a[1], a[2], a[3], a[4]);
                 case "decrypt-kw" -> decryptKW(a[1], a[2], a[3]);
+                case "decrypt-octets-kw" -> decryptOctetsKW(a[1], a[2], a[3]);
                 case "encrypt-legacy" -> encryptLegacy(a[1], a[2], a[3], a[4], a[5], a[6]);
                 case "wss4j-verify" -> wss4jVerify(a[1], a[2], new Parts(a, 3));
                 case "wss4j-decrypt" -> wss4jDecrypt(a[1], a[2], a[3], new Parts(a, 4));
@@ -354,6 +355,19 @@ public final class Harness {
         c.setKEK(new javax.crypto.spec.SecretKeySpec(Files.readAllBytes(Path.of(kekPath)), "AES"));
         c.doFinal(doc, first(doc, EncryptionConstants.EncryptionSpecNS, "EncryptedData"));
         write(doc, out);
+    }
+
+    /**
+     * decrypt-octets-kw in.xml kek.bin out.bin: the plaintext octets of the
+     * first EncryptedData, whatever its Type, the session key unwrapped
+     * from its KeyInfo under the shared KEK; nothing is replaced.
+     */
+    static void decryptOctetsKW(String in, String kekPath, String out) throws Exception {
+        Document doc = parse(in);
+        XMLCipher c = XMLCipher.getInstance();
+        c.init(XMLCipher.DECRYPT_MODE, null);
+        c.setKEK(new javax.crypto.spec.SecretKeySpec(Files.readAllBytes(Path.of(kekPath)), "AES"));
+        Files.write(Path.of(out), c.decryptToByteArray(first(doc, EncryptionConstants.EncryptionSpecNS, "EncryptedData")));
     }
 
     /** decrypt in.xml key.pem out.xml: the first EncryptedData, key from its KeyInfo. */
