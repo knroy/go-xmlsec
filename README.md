@@ -125,8 +125,9 @@ default produces a signature that looks valid and that no peer accepts.
 Never produced, and accepted only when a caller names each one: SHA-1,
 DSA, HMAC, `rsa-oaep-mgf1p`, `rsa-1_5`, AES-CBC, 3DES and `kw-tripledes`, which
 the specifications require but which are weak. Refused outright: XSLT and
-XPath transforms, DOCTYPE, and dereferencing any URI outside the document
-and its attachments. The reasons, and how this measures against each specification
+XPath transforms and DOCTYPE. The library never fetches anything: a URI
+outside the document and its attachments is dereferenced only through a
+resolver the caller supplies (`ResolveURI`), and refused without one. The reasons, and how this measures against each specification
 requirement by requirement, are in [docs/security.md](docs/security.md#conformance).
 
 ## How it is tested

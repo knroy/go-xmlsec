@@ -135,6 +135,20 @@ type VerifyOptions struct {
 	// It is called only after the signature value has verified. When nil, a
 	// Reference without a URI is refused; more than one is always refused.
 	ResolveOmittedURI func() ([]byte, error)
+
+	// ResolveURI supplies the octets of a ds:Reference to an absolute URI
+	// other than cid:, such as "http://example.com/data.xml", which XML-DSig
+	// 4.4.3.1 recommends dereferencing. The octets go through that
+	// Reference's transforms as an octet stream, and Coverage.ExternalURIs
+	// reports the URI. Like ResolveOmittedURI, it is called only after
+	// every algorithm has passed the allow-lists, TrustKey has accepted the
+	// key and the signature value has verified, so a message from an
+	// untrusted or wrong key never makes it fetch. It is still called with
+	// URIs the signer chose: see xmlsec.URIResolver for what a safe one
+	// does. An error it returns is wrapped with xmlsec.ErrDereference. When
+	// nil, such a reference is refused, and a relative URI is always
+	// refused.
+	ResolveURI xmlsec.URIResolver
 }
 
 // Coverage describes exactly what a verified signature covered.
@@ -159,6 +173,11 @@ type Coverage struct {
 	// OmittedURISigned is true if a reference without a URI covered the
 	// octets VerifyOptions.ResolveOmittedURI returned.
 	OmittedURISigned bool
+
+	// ExternalURIs are the absolute URIs of references whose octets
+	// VerifyOptions.ResolveURI supplied, in reference order. What the
+	// resolver returned for each is what was signed.
+	ExternalURIs []string
 
 	// Certificate is the certificate the signature was verified against. It
 	// is nil when the key was a raw one: VerifyOptions.PublicKey, or a
@@ -405,7 +424,7 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 		if r.omitted {
 			err = digestOmitted(h, r.transforms, opts.ResolveOmittedURI)
 		} else {
-			got, err = digestReference(h, doc, sig, r.uri, r.transforms, opts.Attachments, true, opts.IDAttributes)
+			got, err = digestReference(h, doc, sig, r.uri, r.transforms, opts.Attachments, true, opts.IDAttributes, opts.ResolveURI)
 		}
 		if err != nil {
 			return nil, err
@@ -423,6 +442,8 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 			cov.SignedElements = append(cov.SignedElements, got.element)
 		case got.attachment != nil:
 			cov.SignedAttachmentIDs = append(cov.SignedAttachmentIDs, got.attachment.ID)
+		case got.external != "":
+			cov.ExternalURIs = append(cov.ExternalURIs, got.external)
 		}
 		cov.References = append(cov.References, VerifiedReference{
 			URI: r.uri, Type: r.typ, DigestAlgorithm: r.digestAlg,

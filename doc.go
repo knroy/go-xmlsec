@@ -51,5 +51,7 @@
 //   - The XPath and XPath Filter 2.0 transforms: they evaluate
 //     attacker-supplied expressions during verification.
 //   - Trust decisions about certificates.
-//   - Network or filesystem dereferencing of any URI.
+//   - Network or filesystem dereferencing of any URI. An external reference
+//     is dereferenced only through a URIResolver the caller supplies, which
+//     is then the caller's request forgery boundary.
 package xmlsec

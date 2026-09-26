@@ -8,7 +8,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/url"
 	"slices"
+	"strings"
 
 	"github.com/knroy/go-xml/c14n"
 	"github.com/knroy/go-xml/xdm"
@@ -247,7 +249,10 @@ func EncryptContent(doc *xdm.Node, target *xdm.Node, sessionKey []byte, opts Enc
 // xenc:CipherReference: URI="#id" for the element with that Id, wsu:Id or
 // xml:id (refused if more than one carries it), or URI="" for the whole
 // document, with exactly the base64 transform, which decodes the text
-// content. Any other CipherReference is refused; attachments are
+// content. With opts.ResolveURI set, a CipherReference to an absolute URI
+// other than cid: is fetched through it (section 3.3.1): its octets are the
+// ciphertext, or, with exactly the base64 transform, its base64 encoding.
+// Any other CipherReference is refused; attachments are
 // DecryptAttachment's.
 //
 // For an encrypted element the result is the element's octets, and for
@@ -269,16 +274,17 @@ func DecryptData(el *xdm.Node, sessionKey []byte, opts DecryptOptions) ([]byte, 
 	if err != nil {
 		return nil, err
 	}
-	ct, err := dataCiphertext(el)
+	ct, err := dataCiphertext(el, opts.ResolveURI)
 	if err != nil {
 		return nil, err
 	}
 	return open(alg, sessionKey, ct)
 }
 
-// dataCiphertext returns the ciphertext of an EncryptedData, inline or by
-// same-document CipherReference.
-func dataCiphertext(el *xdm.Node) ([]byte, error) {
+// dataCiphertext returns the ciphertext of an EncryptedData, inline, by
+// same-document CipherReference, or by external CipherReference through
+// resolve.
+func dataCiphertext(el *xdm.Node, resolve xmlsec.URIResolver) ([]byte, error) {
 	cd, err := cipherData(el)
 	if err != nil {
 		return nil, err
@@ -289,6 +295,11 @@ func dataCiphertext(el *xdm.Node) ([]byte, error) {
 	}
 	cr := kids[0]
 	uri := cr.AttrValue("URI")
+	if resolve != nil && !strings.HasPrefix(uri, "cid:") {
+		if u, err := url.Parse(uri); err == nil && u.IsAbs() {
+			return externalCiphertext(cr, uri, resolve)
+		}
+	}
 	if uri != "" && uri[0] != '#' {
 		return nil, malformed("CipherReference URI %q: only a same-document reference is dereferenced here", uri)
 	}
@@ -307,6 +318,30 @@ func dataCiphertext(el *xdm.Node) ([]byte, error) {
 	}
 	b, err := xmltree.Base64(src)
 	if err != nil {
+		return nil, malformed("CipherReference content: %v", err)
+	}
+	return b, nil
+}
+
+// externalCiphertext fetches the octets of an external CipherReference
+// through resolve, after checking its transforms: none, for the ciphertext
+// itself, or exactly base64, for its encoding.
+func externalCiphertext(cr *xdm.Node, uri string, resolve xmlsec.URIResolver) ([]byte, error) {
+	algs, err := transforms(cr)
+	if err != nil {
+		return nil, err
+	}
+	if len(algs) > 1 || len(algs) == 1 && algs[0] != xmlsec.TransformBase64 {
+		return nil, unsupported("external CipherReference transforms %q: none or exactly the base64 transform is supported", algs)
+	}
+	b, err := resolve(uri)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %q: %w", xmlsec.ErrDereference, uri, err)
+	}
+	if len(algs) == 0 {
+		return b, nil
+	}
+	if b, err = base64.StdEncoding.DecodeString(strings.Join(strings.Fields(string(b)), "")); err != nil {
 		return nil, malformed("CipherReference content: %v", err)
 	}
 	return b, nil

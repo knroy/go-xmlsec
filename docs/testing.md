@@ -50,6 +50,8 @@ Named `TestConformance_<ID>_<description>` for the requirement they prove.
 | `TestSignRefusals` | XSLT, XPath, SHA-1, no final canonicalization, whole-document reference without enveloped, inclusive SignedInfo on a detached signature |
 | `TestParseRefusesDOCTYPE` | open item X-1: the pinned options refuse a DOCTYPE, asserted rather than read from documentation |
 | `TestParseRefusesXXE`, `TestParseFetchesNothing`, `TestVerifyDereferencesNothingExternal` | every XXE and external-reference route in the [assessment](security.md#assessment) is refused or inert, with zero requests reaching a local listener |
+| `TestExternalReferences`, `TestExternalCipherReference` | an absolute-URI reference signs and verifies through `ResolveURI`, raw and through a canonicalization that parses the octets, and is reported in `Coverage.ExternalURIs`; no resolver, a relative or unparsable URI and `cid:` are refused without calling it; resolver errors wrap `ErrDereference`; an external `CipherReference` decrypts raw or base64, and refused transforms never reach the resolver |
+| `TestResolverCalledOnlyForAuthenticSignatures`, `TestCipherReferenceResolverAfterAllowList` | the resolver is never called for an untrusted key, a different pinned key, a disallowed signature or digest algorithm, a URI rewritten after signing, or a disallowed data algorithm |
 | `TestRawKeyRoundTrip`, `TestRawKeyInfoStructure`, `TestCoveragePublicKey` | each raw-key form with RSA and P-256/384/521, self-described and pinned; a different pinned key refused; malformed and refused raw keys (short RSA, even modulus or exponent, off-curve and compressed points, explicit parameters, unknown curves) |
 | `TestPinnedCertificateIgnoresEmbeddedKey`, `TestAlgorithmConfusion` | an attacker's own key is refused against a pinned certificate; HMAC, SHA-1 and key-type confusion are refused |
 | `TestXPointerReferences`, `TestBase64OfNodeSet`, `TestOmittedURI`, `TestKeyInfoReference`, `TestPinnedKeyIgnoresUnsupportedKeyInfo` | the XML Signature 1.1 processing rules: XPointer forms keeping comments, base64 over a node set, the one URI-less reference, same-document `KeyInfoReference`, and a pinned key tolerating an unsupported `KeyInfo` |
@@ -96,6 +98,7 @@ package, does not implement XML Encryption 1.1 `rsa-oaep`.
 | `TestWSS4JDecryptsOurEncryptedHeaderAndContent` | WSS4J | a `wsse11:EncryptedHeader` and encrypted Body content |
 | `TestSantuarioXPointerReferences` | Santuario, both ways | `#xpointer(/)` and `#xpointer(id('…'))` with comments; byte-identical `SignatureValue`; a changed comment is refused |
 | `TestSantuarioVerifiesOurInPlaceInclusiveSignature` | ours → Santuario | an inclusive-canonicalization signature computed in place (`SignOptions.Parent`) |
+| `TestWeVerifySantuarioExternalReference`, `TestSantuarioVerifiesOurExternalReference` | Santuario, both ways | a reference to `http://example.invalid/…`, as raw octets and through exclusive C14N, served from a local file by a Santuario `ResourceResolver` and by our `ResolveURI`: nothing is fetched; Santuario refuses other octets |
 | `TestReferenceImplementationsDecryptOurECDHES`, `TestWeDecryptSantuarioECDHES`, `TestWeDecryptXmlsec1ECDHES` | both ways | ECDH-ES with ConcatKDF on P-256, P-384 and P-521 |
 | `TestReferenceImplementationsDecryptOurKeyWrap`, `TestWeDecryptTheirKeyWrap` | both ways | AES key wrap |
 | `TestDecryptReplaceKeepsNoNamespace` | ours → both | a decrypted element that undeclares a default namespace stays in no namespace |
@@ -170,8 +173,9 @@ beside the assertion that uses it:
 The harness (`tests/santuario/Harness.java`) exposes Santuario and WSS4J as
 commands: `verify`, `sign-enveloped`, `sign-detached`, `encrypt`, `decrypt`,
 `encrypt-ecdh`, `encrypt-kw`, `decrypt-kw`, `wss4j-verify`, `wss4j-decrypt`,
-`wss4j-process` (both keys: decrypt, then verify), and the attachment
-commands; `--id-attr NAME` registers extra ID attributes.
+`wss4j-process` (both keys: decrypt, then verify), the attachment
+commands, and `sign-external` and `verify-external`, which serve one external
+URI from a local file through a `ResourceResolver`; `--id-attr NAME` registers extra ID attributes.
 
 The Alpine package is not pinned to a patch release; the version in use is
 printed by `xmlsec1 --version` in the container.
@@ -193,7 +197,8 @@ Document License (`tests/w3c/NOTICE`, `tests/w3c/LICENSE-W3C-DOCUMENT`).
 signature over a `ds:Object` (identified with `IDAttrDSig`). The other 15
 are refused, each for a documented reason: 4 carry 1024-bit RSA keys, below
 the 2048-bit minimum; 9 use the legacy RFC 4050 `ECDSAKeyValue` form; one
-uses `KeyInfoReference` and one `X509Digest`.
+uses `KeyInfoReference` and one `X509Digest`. None references an external
+URI, so none depends on `ResolveURI`.
 
 **W3C XML Encryption 1.1 interop vectors.** `tests/w3c/testdata/xmlenc11`, the
 2012 Oracle vectors under the same license, with their keys (the `.p12` files

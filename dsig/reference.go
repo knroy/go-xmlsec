@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"hash"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -62,6 +63,15 @@ type dereferenced struct {
 	id         string             // the ID that resolved to element
 	attachment *xmlsec.Attachment // cid: target
 	whole      bool               // "" or #xpointer(/) target
+	external   string             // absolute URI the resolver supplied
+}
+
+// isExternal reports whether uri is absolute, the only kind a URIResolver
+// is given: a relative reference would need a base URI this library does
+// not have.
+func isExternal(uri string) bool {
+	u, err := url.Parse(uri)
+	return err == nil && u.IsAbs()
 }
 
 // digestReference dereferences uri, applies transforms in order and writes
@@ -75,9 +85,10 @@ type dereferenced struct {
 // does not, so this library never produces a signature that depends on it.
 //
 // idAttrs are the ID attributes "#id" resolves against beyond wsu:Id and
-// xml:id.
+// xml:id. resolve supplies the octets of an absolute URI other than cid:;
+// when nil, such a reference is refused.
 func digestReference(h hash.Hash, doc, sig *xdm.Node, uri string, transforms []TransformSpec,
-	atts xmlsec.AttachmentSet, implicit bool, idAttrs []xdm.QName) (dereferenced, error) {
+	atts xmlsec.AttachmentSet, implicit bool, idAttrs []xdm.QName, resolve xmlsec.URIResolver) (dereferenced, error) {
 
 	var (
 		out dereferenced
@@ -113,6 +124,13 @@ func digestReference(h hash.Hash, doc, sig *xdm.Node, uri string, transforms []T
 		}
 		in.octets, in.attachment = att.Body, att
 		out.attachment = att
+	case resolve != nil && isExternal(uri):
+		// XML-DSig 4.4.3.1: an external resource is an octet stream.
+		b, err := resolve(uri)
+		if err != nil {
+			return out, fmt.Errorf("%w: %q: %w", xmlsec.ErrDereference, uri, err)
+		}
+		in.octets, out.external = b, uri
 	default:
 		return out, fmt.Errorf("%w: reference URI %q", xmlsec.ErrMalformed, uri)
 	}

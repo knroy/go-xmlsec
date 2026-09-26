@@ -68,6 +68,15 @@ type SignOptions struct {
 	// attribute of the whole set is refused with xmlsec.ErrAmbiguousID. The
 	// verifier must name the same attributes. SecurityTokenID is unaffected.
 	IDAttributes []xdm.QName
+
+	// ResolveURI supplies the octets of a reference to an absolute URI
+	// other than cid:, such as "http://example.com/data.xml" (XML-DSig
+	// 4.4.3.1). They go through the reference's transforms as an octet
+	// stream: with none they are digested as they are, and a
+	// canonicalization parses them with xmlsec.Parse first. This library
+	// never fetches anything itself; see xmlsec.URIResolver. When nil, such
+	// a reference is refused, and a relative URI is always refused.
+	ResolveURI xmlsec.URIResolver
 }
 
 // Sign creates a ds:Signature over the references in opts.
@@ -184,7 +193,7 @@ func sign(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions, parent *xdm.N
 			return nil, fmt.Errorf("%w: digest %q", xmlsec.ErrUnsupportedAlgorithm, r.DigestAlgorithm)
 		}
 		h := dh.New()
-		if _, err := digestReference(h, doc, sig, r.URI, r.Transforms, opts.Attachments, false, opts.IDAttributes); err != nil {
+		if _, err := digestReference(h, doc, sig, r.URI, r.Transforms, opts.Attachments, false, opts.IDAttributes, opts.ResolveURI); err != nil {
 			return nil, err
 		}
 		ref := xmltree.Element(si, "ds", xmlsec.NSDSig, "Reference")

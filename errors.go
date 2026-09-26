@@ -59,6 +59,10 @@ var (
 	// ErrAttachmentNotFound is returned when a cid: URI matches no attachment.
 	ErrAttachmentNotFound = errors.New("xmlsec: attachment not found")
 
+	// ErrDereference is returned when a URIResolver fails to supply an
+	// external reference. The resolver's error is wrapped.
+	ErrDereference = errors.New("xmlsec: URI dereference failed")
+
 	// ErrDuplicateAttachmentID is returned when two attachments share an ID.
 	ErrDuplicateAttachmentID = errors.New("xmlsec: duplicate attachment ID")
 

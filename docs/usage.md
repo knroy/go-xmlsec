@@ -245,6 +245,7 @@ More options:
 | `StrictSecurityTokenReference` | Resolve a `wsse:SecurityTokenReference` with the Basic Security Profile rules; see Token references above. |
 | `HMACKey []byte` | The secret for an HMAC signature, the only HMAC key there is: never taken from the message, not combinable with `Certificate` or `PublicKey`, and a non-HMAC signature then fails. The HMAC algorithm must also be named in the allow-list. |
 | `ResolveOmittedURI func() ([]byte, error)` | Supplies the data of the one `ds:Reference` without a URI that XML Signature §4.4.3.1 allows; `Coverage.OmittedURISigned` reports that it was covered. Without it, such a reference is refused. |
+| `ResolveURI xmlsec.URIResolver` | Supplies the octets of a reference to an absolute URI such as `http:`; see External references below. Without it, such a reference is refused. |
 
 Then check `Coverage`, every time:
 
@@ -253,6 +254,7 @@ Then check `Coverage`, every time:
 | `Covers(ids...)` / `SignedElements` | every element your profile requires is signed; compare identity, not just ID, when you locate elements by position |
 | `CoversAttachments(ids...)` | every attachment is signed |
 | `WholeDocumentSigned` | set for an enveloped signature |
+| `ExternalURIs` | the absolute URIs your `ResolveURI` supplied; what it returned is what was signed |
 | `KeyInfoForm` | the key was described the way your profile requires |
 | `Certificate` | **you** establish that it is trusted |
 | `PublicKey` | the key the signature was verified with; `Certificate` is nil when it was a raw key |
@@ -268,6 +270,53 @@ Errors worth distinguishing, all matchable with `errors.Is`:
 | `ErrDigestMismatch` / `ErrSignatureInvalid` | the content or the signature value does not match |
 | `ErrTransformRefused` | XSLT or XPath |
 | `ErrUntrusted` | your `TrustKey` refused the signer |
+| `ErrDereference` | your `ResolveURI` failed; wraps its error |
+
+### External references
+
+A `ds:Reference` to an absolute URI other than `cid:`, such as
+`http://example.com/data.xml`, is dereferenced only through a
+`xmlsec.URIResolver` you pass as `SignOptions.ResolveURI` or
+`VerifyOptions.ResolveURI`. The library never fetches anything itself. The
+octets you return go through the reference's transforms as an octet stream:
+with none they are digested as they are, and a canonicalization parses them
+with `xmlsec.Parse` first, under the same limits. A relative URI is always
+refused, since there is no base URI to resolve it against.
+
+```go
+allowed := map[string]bool{"http://example.com/schema.xml": true}
+client := &http.Client{Timeout: 5 * time.Second}
+resolve := func(uri string) ([]byte, error) {
+    if !allowed[uri] {
+        return nil, fmt.Errorf("%s is not on the allow-list", uri)
+    }
+    resp, err := client.Get(uri)
+    if err != nil {
+        return nil, err
+    }
+    defer resp.Body.Close()
+    if resp.StatusCode != http.StatusOK {
+        return nil, fmt.Errorf("%s: %s", uri, resp.Status)
+    }
+    b, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20+1))
+    if err == nil && len(b) > 1<<20 {
+        err = fmt.Errorf("%s: larger than 1 MiB", uri)
+    }
+    return b, err
+}
+cov, err := dsig.Verify(doc, sigElement, dsig.VerifyOptions{Certificate: cert, ResolveURI: resolve})
+// cov.ExternalURIs lists the URIs whose octets were signed.
+```
+
+On verification the resolver is called only after every algorithm has
+passed the allow-lists, `TrustKey` has accepted the key and the signature
+value has verified, so a message from a key you do not trust never makes
+you fetch. The URIs are still the signer's choice: resolve an allow-list,
+with timeouts and a size cap, as above, and give the client a
+`CheckRedirect` that refuses what the allow-list would.
+`xenc.DecryptOptions.ResolveURI` does the same for an external
+`xenc:CipherReference` in `DecryptData`: its octets are the ciphertext, or,
+with the base64 transform, its encoding.
 
 ## Encryption
 

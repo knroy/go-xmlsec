@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -243,5 +244,104 @@ func TestXPointerReferences(t *testing.T) {
 	resignSI(t, sig, c14n.Inclusive10)
 	if _, err := verify(doc); !errors.Is(err, xmlsec.ErrMalformed) {
 		t.Fatalf("XPointer expression: %v", err)
+	}
+}
+
+// External references: an absolute URI other than cid: is dereferenced
+// only through the caller's resolver, as an octet stream, and reported in
+// Coverage.ExternalURIs.
+func TestExternalReferences(t *testing.T) {
+	const (
+		plain = "http://example.invalid/plain.bin"
+		xml   = "http://example.invalid/doc.xml"
+	)
+	resources := map[string][]byte{plain: []byte("hello!"), xml: []byte(`<a  b='1'></a>`)}
+	var calls []string
+	resolve := func(uri string) ([]byte, error) {
+		calls = append(calls, uri)
+		b, ok := resources[uri]
+		if !ok {
+			return nil, errors.New("not served")
+		}
+		return b, nil
+	}
+	key := newKey(t, rsaKey)
+	sign := func(refs []dsig.Reference, r xmlsec.URIResolver) ([]byte, error) {
+		doc := parse(t, []byte(`<r/>`))
+		_, err := dsig.Sign(doc, key, dsig.SignOptions{
+			SignatureAlgorithm: xmlsec.SigRSASHA256, CanonicalizationAlgorithm: string(c14n.Exclusive10),
+			References: refs, KeyInfo: dsig.KeyInfoX509Data, ResolveURI: r, Parent: xmltree.DocumentElement(doc),
+		})
+		if err != nil {
+			return nil, err
+		}
+		return serialize(t, doc), nil
+	}
+	signed, err := sign([]dsig.Reference{
+		{URI: plain, DigestAlgorithm: xmlsec.DigestSHA256},
+		{URI: xml, DigestAlgorithm: xmlsec.DigestSHA256, Transforms: excC14N},
+	}, resolve)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verify := func(r xmlsec.URIResolver) (*dsig.Coverage, error) {
+		doc := parse(t, signed)
+		return dsig.Verify(doc, findSignature(doc), dsig.VerifyOptions{Certificate: key.Certificate, ResolveURI: r})
+	}
+
+	calls = nil
+	cov, err := verify(resolve)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(cov.ExternalURIs, []string{plain, xml}) || !slices.Equal(calls, []string{plain, xml}) ||
+		cov.WholeDocumentSigned || len(cov.SignedElementIDs) != 0 || len(cov.References) != 2 {
+		t.Fatalf("coverage %+v, resolver calls %v", cov, calls)
+	}
+
+	// The canonicalization parses the octets, so another serialization of
+	// the same XML verifies; other octets do not.
+	resources[xml] = []byte(`<a b="1"/>`)
+	if _, err := verify(resolve); err != nil {
+		t.Fatalf("reserialized: %v", err)
+	}
+	resources[plain] = []byte("hello?")
+	if _, err := verify(resolve); !errors.Is(err, xmlsec.ErrDigestMismatch) {
+		t.Fatalf("other octets: %v", err)
+	}
+	resources[plain] = []byte("hello!")
+	resources[xml] = []byte(`<!DOCTYPE a><a/>`)
+	if _, err := verify(resolve); !errors.Is(err, xmlsec.ErrMalformed) {
+		t.Fatalf("octets with a DOCTYPE: %v", err)
+	}
+
+	errGone := errors.New("gone")
+	if _, err := verify(func(string) ([]byte, error) { return nil, errGone }); !errors.Is(err, xmlsec.ErrDereference) || !errors.Is(err, errGone) {
+		t.Fatalf("resolver error: %v", err)
+	}
+	if _, err := verify(nil); !errors.Is(err, xmlsec.ErrMalformed) {
+		t.Fatalf("no resolver: %v", err)
+	}
+
+	// Refused when signing: no resolver, a failing one, a relative URI and
+	// a URI that does not parse; only the failing one is ever called.
+	for _, c := range []struct {
+		uri  string
+		r    xmlsec.URIResolver
+		want error
+	}{
+		{plain, nil, xmlsec.ErrMalformed},
+		{"http://example.invalid/missing", resolve, xmlsec.ErrDereference},
+		{"data/plain.bin", resolve, xmlsec.ErrMalformed},
+		{"http://[::1", resolve, xmlsec.ErrMalformed},
+	} {
+		calls = nil
+		_, err := sign([]dsig.Reference{{URI: c.uri, DigestAlgorithm: xmlsec.DigestSHA256}}, c.r)
+		if !errors.Is(err, c.want) {
+			t.Fatalf("sign %q: got %v, want %v", c.uri, err, c.want)
+		}
+		if c.want == xmlsec.ErrMalformed && len(calls) != 0 {
+			t.Fatalf("sign %q called the resolver", c.uri)
+		}
 	}
 }

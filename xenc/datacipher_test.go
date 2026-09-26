@@ -428,3 +428,64 @@ func TestSameDocumentCipherReference(t *testing.T) {
 		})
 	}
 }
+
+// Section 3.3.1: an external CipherReference is fetched only through
+// DecryptOptions.ResolveURI, its octets being the ciphertext or, with the
+// base64 transform, its encoding.
+func TestExternalCipherReference(t *testing.T) {
+	key := bytes.Repeat([]byte{7}, 16)
+	ct := sealGCM(key, "secret")
+	b64 := base64.StdEncoding.EncodeToString(ct)
+	const uri = "http://example.invalid/ct"
+	ref := func(uri, transforms string) string {
+		return covED(`Type="`+xenc.TypeElement+`"`, covEM(xmlsec.EncAES128GCM)+
+			`<xenc:CipherData><xenc:CipherReference URI="`+uri+`">`+transforms+`</xenc:CipherReference></xenc:CipherData>`)
+	}
+	tr := func(algs ...string) string {
+		s := `<xenc:Transforms>`
+		for _, a := range algs {
+			s += `<ds:Transform xmlns:ds="` + xmlsec.NSDSig + `" Algorithm="` + a + `"/>`
+		}
+		return s + `</xenc:Transforms>`
+	}
+	errGone := errors.New("gone")
+	serve := func(b []byte, err error) (xmlsec.URIResolver, *[]string) {
+		var calls []string
+		return func(u string) ([]byte, error) { calls = append(calls, u); return b, err }, &calls
+	}
+	for name, c := range map[string]struct {
+		ed      string
+		body    []byte
+		err     error
+		want    error // nil: decrypts to "secret"
+		fetched bool
+	}{
+		"raw octets":         {ref(uri, ``), ct, nil, nil, true},
+		"base64":             {ref(uri, tr(xmlsec.TransformBase64)), []byte(b64[:10] + "\r\n " + b64[10:]), nil, nil, true},
+		"not base64":         {ref(uri, tr(xmlsec.TransformBase64)), []byte("!!"), nil, xmlsec.ErrMalformed, true},
+		"resolver fails":     {ref(uri, ``), nil, errGone, errGone, true},
+		"two transforms":     {ref(uri, tr(xmlsec.TransformBase64, xmlsec.TransformBase64)), ct, nil, xmlsec.ErrUnsupportedAlgorithm, false},
+		"c14n transform":     {ref(uri, tr(string(c14n.Exclusive10))), ct, nil, xmlsec.ErrUnsupportedAlgorithm, false},
+		"XPath":              {ref(uri, tr(xmlsec.TransformXPath, xmlsec.TransformBase64)), ct, nil, xmlsec.ErrTransformRefused, false},
+		"relative":           {ref("data/ct", ``), ct, nil, xmlsec.ErrMalformed, false},
+		"unparsable":         {ref("http://[::1", ``), ct, nil, xmlsec.ErrMalformed, false},
+		"cid":                {ref("cid:a", ``), ct, nil, xmlsec.ErrMalformed, false},
+		"algorithm refused":  {covED(``, covEM(xmlsec.EncAES128CBC)+`<xenc:CipherData><xenc:CipherReference URI="`+uri+`"/></xenc:CipherData>`), ct, nil, xmlsec.ErrAlgorithmNotAllowed, false},
+		"same-document kept": {`<r><v Id="cv">` + b64 + `</v>` + ref("#cv", tr(xmlsec.TransformBase64)) + `</r>`, nil, nil, nil, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			resolve, calls := serve(c.body, c.err)
+			pt, err := xenc.DecryptData(firstNamed(covParse(t, c.ed), "EncryptedData"), key, xenc.DecryptOptions{ResolveURI: resolve})
+			switch {
+			case c.want == nil && (err != nil || string(pt) != "secret"):
+				t.Fatalf("%s, %v", pt, err)
+			case c.want != nil && !errors.Is(err, c.want):
+				t.Fatalf("got %v, want %v", err, c.want)
+			case c.err != nil && !errors.Is(err, xmlsec.ErrDereference):
+				t.Fatalf("resolver error not wrapped: %v", err)
+			case c.fetched != (len(*calls) == 1):
+				t.Fatalf("resolver calls %v", *calls)
+			}
+		})
+	}
+}

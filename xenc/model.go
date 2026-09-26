@@ -160,6 +160,15 @@ type DecryptOptions struct {
 	// AllowedKeyAgreementAlgorithms restricts the xenc:AgreementMethod.
 	// Default: xmlsec.KeyAgreementECDHES.
 	AllowedKeyAgreementAlgorithms []string
+
+	// ResolveURI supplies the octets of an xenc:CipherReference to an
+	// absolute URI other than cid:, such as "http://example.com/ct.bin",
+	// for DecryptData. It is called only after the data algorithm and the
+	// CipherReference transforms are accepted. This library never fetches
+	// anything itself; see xmlsec.URIResolver. An error it returns is
+	// wrapped with xmlsec.ErrDereference. When nil, such a CipherReference
+	// is refused, and a relative URI is always refused.
+	ResolveURI xmlsec.URIResolver
 }
 
 // The default allow-lists, used when a caller passes an empty one.

@@ -75,6 +75,8 @@ public final class Harness {
                 case "wss4j-process" -> wss4jProcess(a[1], a[2], a[3], a[4]);
                 case "wss4j-sign-attachments" -> wss4jSignAttachments(a[1], a[2], a[3], a[4], a[5], new Parts(a, 6));
                 case "wss4j-encrypt-attachments" -> wss4jEncryptAttachments(a[1], a[2], a[3], a[4], a[5], new Parts(a, 6));
+                case "sign-external" -> signExternal(a[1], a[2], a[3], a[4], a[5], a[6], a.length > 7 ? a[7] : "");
+                case "verify-external" -> verifyExternal(a[1], a[2], a[3], a[4]);
                 default -> throw new IllegalArgumentException("unknown command " + a[0]);
             }
         } catch (Exception e) {
@@ -501,6 +503,60 @@ public final class Harness {
         for (org.apache.wss4j.common.ext.Attachment r : parts.results) {
             Files.write(Path.of(outDir, r.getId()), Parts.serialize(r));
         }
+    }
+
+    /**
+     * sign-external in.xml key.pem cert.pem out.xml uri resource [transform]:
+     * an RSA-SHA256, exclusive-C14N signature appended to the document
+     * element, over one reference to the external uri, with the transform
+     * if given. The uri's octets are served from the local file resource by
+     * a ResourceResolver: nothing is fetched.
+     */
+    static void signExternal(String in, String keyPath, String certPath, String out, String uri, String resource, String transform)
+            throws Exception {
+        Document doc = parse(in);
+        XMLSignature sig = new XMLSignature(doc, "", XMLSignature.ALGO_ID_SIGNATURE_RSA_SHA256, Transforms.TRANSFORM_C14N_EXCL_OMIT_COMMENTS);
+        doc.getDocumentElement().appendChild(sig.getElement());
+        sig.addResourceResolver(serving(uri, resource));
+        Transforms t = null;
+        if (!transform.isEmpty()) {
+            t = new Transforms(doc);
+            t.addTransform(transform);
+        }
+        sig.addDocument(uri, t, SHA256);
+        sig.addKeyInfo(cert(certPath));
+        sig.sign(key(keyPath));
+        write(doc, out);
+    }
+
+    /** verify-external doc.xml cert.pem uri resource: verify, serving uri from the local file resource. */
+    static void verifyExternal(String docPath, String certPath, String uri, String resource) throws Exception {
+        Document doc = parse(docPath);
+        XMLSignature sig = new XMLSignature(first(doc, Constants.SignatureSpecNS, "Signature"), "", true);
+        sig.addResourceResolver(serving(uri, resource));
+        if (!sig.checkSignatureValue(cert(certPath))) {
+            throw new IllegalStateException("signature does not verify");
+        }
+        System.out.println("OK");
+    }
+
+    /** A resolver that serves exactly uri from a local file, and nothing else. */
+    static org.apache.xml.security.utils.resolver.ResourceResolverSpi serving(String uri, String resource) throws Exception {
+        byte[] b = Files.readAllBytes(Path.of(resource));
+        return new org.apache.xml.security.utils.resolver.ResourceResolverSpi() {
+            @Override
+            public boolean engineCanResolveURI(org.apache.xml.security.utils.resolver.ResourceResolverContext c) {
+                return uri.equals(c.uriToResolve);
+            }
+
+            @Override
+            public org.apache.xml.security.signature.XMLSignatureInput engineResolveURI(
+                    org.apache.xml.security.utils.resolver.ResourceResolverContext c) {
+                org.apache.xml.security.signature.XMLSignatureInput in = new org.apache.xml.security.signature.XMLSignatureByteInput(b);
+                in.setSourceURI(uri);
+                return in;
+            }
+        };
     }
 
     /**
