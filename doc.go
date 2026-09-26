@@ -35,9 +35,15 @@
 // fixed: the parse is part of the signature, so two different parse
 // configurations can make one set of octets verify one way and not another.
 //
+// Parsing can cost about 40 times the input in memory, and a signature that
+// is not checked against a pinned certificate can be the attacker's own. A
+// server caps input size and pins certificates where it can; docs/security.md
+// has the measurements.
+//
 // # Deliberate refusals
 //
 //   - SHA-1, in every role, including the rsa-oaep-mgf1p key transport.
+//   - The rsa-1_5 key transport: the Bleichenbacher padding-oracle class.
 //   - The XSLT transform: it executes attacker-supplied code during
 //     verification of an unauthenticated message.
 //   - The XPath and XPath Filter 2.0 transforms: they evaluate

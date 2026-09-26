@@ -34,6 +34,9 @@ func ids(e *xdm.Node) []string {
 // different elements. It never returns the first match. xdm.ElementByID is
 // deliberately not used: it returns the first match.
 func FindByID(doc *xdm.Node, id string) (*xdm.Node, error) {
+	if doc == nil {
+		return nil, fmt.Errorf("%w: %q: no document", xmlsec.ErrIDNotFound, id)
+	}
 	var found *xdm.Node
 	n := 0
 	xmltree.Walk(doc.Root(), func(e *xdm.Node) {
@@ -59,6 +62,9 @@ func FindByID(doc *xdm.Node, id string) (*xdm.Node, error) {
 // Generated IDs are "id-" plus 32 hex characters from crypto/rand, unique
 // within the document. The prefix keeps the value an NCName.
 func AssignID(doc *xdm.Node, el *xdm.Node) (string, error) {
+	if el == nil || el.Kind != xdm.KindElement {
+		return "", fmt.Errorf("%w: AssignID needs an element", xmlsec.ErrMalformed)
+	}
 	if a := el.Attr(NSWSU, "Id"); a != nil {
 		return a.Value, nil
 	}

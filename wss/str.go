@@ -36,7 +36,7 @@ func NewSecurityTokenReference(doc *xdm.Node, tokenID, valueType string) (*xdm.N
 // returns the certificate it carries. Other reference forms are refused
 // with xmlsec.ErrUnsupportedKeyInfo.
 func ResolveSecurityTokenReference(doc, str *xdm.Node) (*x509.Certificate, error) {
-	if !str.IsElement(NSWSSE, "SecurityTokenReference") {
+	if doc == nil || str == nil || !str.IsElement(NSWSSE, "SecurityTokenReference") {
 		return nil, fmt.Errorf("%w: not a wsse:SecurityTokenReference", xmlsec.ErrUnsupportedKeyInfo)
 	}
 	kids := str.ChildElements()

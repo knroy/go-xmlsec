@@ -6,11 +6,13 @@
 |---|---|
 | `Attachment-Complete` transform, signing and encryption | Refused with `ErrUnsupportedAlgorithm`. Its MIME header canonicalization is easy to get subtly wrong, and no peer has been seen to require it (open item X-6). |
 | Apache Santuario in the differential | `xmlsec1` is done (`tests/interop`); the harness must reach two independent implementations, or a canonicalization bug we share with `xmlsec1` passes. |
-| Gate 2 against phase4 | Needs the captured-message corpus (X-5). |
+| Gate 2 against phase4 | Needs the captured-message corpus (X-5), and the consumer that builds whole AS4 messages: Gate 2 compares a message, not a signature. A signature-level byte-equality check against Santuario can come first. |
 | Golden files, with `-update` | See [testing.md](testing.md#not-tested-yet). |
 | `ds:KeyInfo` on `xenc:EncryptedKey`, and `xenc:ReferenceList` | Not emitted; how a peer identifies the recipient key needs settling against a real profile. The `xmlsec1` differential confirms it matters: `xmlsec1` finds the session key only through `EncryptedData/ds:KeyInfo`, so the harness places the `EncryptedKey` there itself. |
 | SAML `ID` attributes | `FindByID` resolves `wsu:Id` and `xml:id` only. SAML is the likeliest second consumer. |
 | `staticcheck` and `gosec` in CI | Acceptance criterion 18. |
+| Configurable, lower parse limits | Parsing costs up to about 40 times the input in memory (see [security.md](security.md#resource-limits)). The pinned limits cannot be lowered; callers must cap input size themselves. Deciding whether `Parse` should accept stricter limits is open. |
+| A trust hook before reference processing | With no pinned certificate, an attacker's own valid signature forces every reference to be digested before the caller can refuse the certificate ([security.md](security.md#verification-cost-before-the-certificate-is-judged)). A `VerifyOptions` callback run after key resolution and before any digest would close it; it is an API decision. |
 
 ## Acceptance criteria not yet met
 
@@ -32,7 +34,7 @@ v1 waits for all of them. Numbers refer to the design document.
 
 | # | Item | Status |
 |---|---|---|
-| X-1 | Effective DOCTYPE and entity behaviour of the pinned parse | **Closed by test.** A DOCTYPE, with or without entities, is refused. |
+| X-1 | Effective DOCTYPE and entity behaviour of the pinned parse | **Closed by test.** A DOCTYPE, with or without entities and however encoded, is refused, and nothing is fetched (`tests/security`). |
 | X-2 | `xdm.ElementByID` on duplicate IDs | **Answered** from the v1.4.0 source: it returns the first depth-first match. Not used on the verify path. |
 | X-3 | Gate 1 status upstream | go-xml v1.4.0's changelog now reports `xmllint` and `xmlsec1` differentials; the Santuario differential and real-message corpus are still open there. |
 | X-4 | AS4 canonicalization URI inherited, not stated | unchanged |

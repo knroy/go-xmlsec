@@ -57,7 +57,7 @@ func (h *Header) AddBinarySecurityToken(cert *x509.Certificate, chain []*x509.Ce
 // wsse:BinarySecurityToken carries: the token itself for X509v3, the target
 // (last) certificate for X509PKIPathv1.
 func ParseBinarySecurityToken(bst *xdm.Node) (*x509.Certificate, error) {
-	if !bst.IsElement(NSWSSE, "BinarySecurityToken") {
+	if bst == nil || !bst.IsElement(NSWSSE, "BinarySecurityToken") {
 		return nil, fmt.Errorf("%w: not a wsse:BinarySecurityToken", xmlsec.ErrUnsupportedKeyInfo)
 	}
 	if enc := bst.AttrValue("EncodingType"); enc != xmlsec.BSTEncodingBase64 {

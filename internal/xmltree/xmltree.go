@@ -47,8 +47,11 @@ func Declare(e *xdm.Node, prefix, uri string) error {
 	return nil
 }
 
-// DocumentElement returns the element child of n's document node.
+// DocumentElement returns the element child of n's document node, or nil.
 func DocumentElement(n *xdm.Node) *xdm.Node {
+	if n == nil {
+		return nil
+	}
 	root := n.Root()
 	if root.Kind == xdm.KindElement {
 		return root

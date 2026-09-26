@@ -101,8 +101,11 @@ func GenerateEncryptedKey(opts EncryptOptions) (*EncryptedKey, error) {
 func DecryptEncryptedKey(el *xdm.Node, dec crypto.Decrypter,
 	allowedKeyTransport, allowedMGF, allowedDigest []string) ([]byte, error) {
 
-	if !el.IsElement(NSXEnc, "EncryptedKey") {
+	if el == nil || !el.IsElement(NSXEnc, "EncryptedKey") {
 		return nil, malformed("not an xenc:EncryptedKey")
+	}
+	if dec == nil {
+		return nil, errors.New("xenc: no Decrypter")
 	}
 	kt, m, err := parseEncryptionMethod(el)
 	if err != nil {

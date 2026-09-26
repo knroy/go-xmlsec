@@ -17,11 +17,12 @@ Read this before depending on it.
 
 | Evidence | Status |
 |---|---|
-| Unit and conformance tests | 63 test and fuzz functions, run on Linux, macOS and Windows in CI; 100% statement coverage, enforced by CI |
+| Unit and conformance tests | 74 test and fuzz functions, run on Linux, macOS and Windows in CI; 100% statement coverage, enforced by CI |
+| Security assessment | XXE and every external-fetch route, signature wrapping, key substitution, algorithm confusion, comment truncation, encryption downgrade, nil-input crashes: each a regression test in CI; results in [docs/security.md](docs/security.md#assessment) |
 | Negative corpus: modified element, modified attachment, relocated element, duplicated ID, algorithm outside allow-list, truncated signature | Yes, each a named test |
 | Differential against `xmlsec1` 1.3 | **Yes**, in CI: it verifies our enveloped and detached signatures (RSA, ECDSA; inclusive, exclusive) and decrypts our AES-GCM / RSA-OAEP encryption, and we do the same for its output |
 | Differential against Apache Santuario | **Not yet built** |
-| Signature byte-equality with phase4 (Gate 2) | **Not yet built** |
+| Signature byte-equality with phase4 (Gate 2) | **Not yet built**: needs the captured-message corpus and the AS4 consumer this library serves |
 | Fuzzing | Three targets on the parse-and-verify and decrypt paths, nightly at one hour each |
 | Canonicalization conformance (Gate 1) | Owned upstream by `go-xml/c14n` v1.4.0, which reports differential testing against `xmllint` and `xmlsec1`; the Santuario differential and real-message corpus are still open there |
 

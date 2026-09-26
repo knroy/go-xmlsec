@@ -46,6 +46,9 @@ type attachmentSet struct {
 func NewAttachmentSet(atts ...*Attachment) (AttachmentSet, error) {
 	s := &attachmentSet{list: atts, byID: make(map[string]*Attachment, len(atts))}
 	for _, a := range atts {
+		if a == nil {
+			return nil, fmt.Errorf("%w: nil attachment", ErrMalformed)
+		}
 		if _, dup := s.byID[a.ID]; dup {
 			return nil, fmt.Errorf("%w: %q", ErrDuplicateAttachmentID, a.ID)
 		}

@@ -30,6 +30,9 @@ func init() {
 // configurable.
 //
 // A DOCTYPE is refused and no EntityResolver is ever supplied.
+//
+// Memory use can reach about 40 times len(b) within the limits above, before
+// anything is authenticated. Cap the size of b to what the profile needs.
 func Parse(b []byte) (*xdm.Tree, error) {
 	opts := xdm.ParseOptions{
 		MaxDepth: MaxParseDepth,

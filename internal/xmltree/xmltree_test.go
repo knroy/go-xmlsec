@@ -100,3 +100,9 @@ func TestWalk(t *testing.T) {
 		t.Fatalf("walk order %v", names)
 	}
 }
+
+func TestDocumentElementNil(t *testing.T) {
+	if DocumentElement(nil) != nil {
+		t.Fatal("non-nil")
+	}
+}

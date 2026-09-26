@@ -3,7 +3,8 @@
 * **[Usage](usage.md)** — signing and verifying (WS-Security and enveloped),
   encrypting keys, elements and attachments, and the order to compose them in.
 * **[Security](security.md)** — the threat model, what `Coverage` is for, the
-  deliberate refusals, the resource limits, and what a caller must still do.
+  deliberate refusals, the resource limits and their measured cost, the
+  security assessment and its results, and what a caller must still do.
 * **[Testing](testing.md)** — what runs, the conformance test IDs, how to run
   any of it, and what is not tested yet.
 * **[TODO](todo.md)** — what is left before v1: the acceptance criteria that

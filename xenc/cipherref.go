@@ -1,6 +1,7 @@
 package xenc
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -22,6 +23,9 @@ import (
 // always carries TransformAttachmentCiphertext. Attachment-Complete is not
 // yet supported.
 func EncryptAttachment(att *xmlsec.Attachment, sessionKey []byte, transform string, opts EncryptOptions) ([]byte, *xdm.Node, error) {
+	if att == nil {
+		return nil, nil, errors.New("xenc: no attachment")
+	}
 	if transform != xmlsec.TransformAttachmentContentOnly {
 		return nil, nil, fmt.Errorf("%w: attachment transform %q", xmlsec.ErrUnsupportedAlgorithm, transform)
 	}

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/knroy/go-xml/xdm"
 	"github.com/knroy/go-xmlsec"
 	"github.com/knroy/go-xmlsec/internal/xmltree"
 )
@@ -61,5 +62,24 @@ func TestNewIDSkipsCollision(t *testing.T) {
 	id, err := newID(doc)
 	if err != nil || id != "id-cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd" {
 		t.Fatalf("newID = %q, %v", id, err)
+	}
+}
+
+// Nil or wrong-kind input from a failed lookup is an error, never a panic.
+func TestNilInputs(t *testing.T) {
+	doc := parseDoc(t, env11)
+	text := &xdm.Node{Kind: xdm.KindText, Value: "t"}
+	checks := map[string]error{}
+	_, checks["FindByID(nil)"] = FindByID(nil, "x")
+	_, checks["AssignID(nil)"] = AssignID(doc, nil)
+	_, checks["AssignID(text)"] = AssignID(doc, text)
+	_, checks["ParseBinarySecurityToken(nil)"] = ParseBinarySecurityToken(nil)
+	_, checks["ResolveSecurityTokenReference(doc, nil)"] = ResolveSecurityTokenReference(doc, nil)
+	_, checks["ResolveSecurityTokenReference(nil, nil)"] = ResolveSecurityTokenReference(nil, nil)
+	_, checks["NewHeader(nil)"] = NewHeader(nil, NSSOAP11, "", false)
+	for name, err := range checks {
+		if err == nil {
+			t.Errorf("%s: accepted", name)
+		}
 	}
 }

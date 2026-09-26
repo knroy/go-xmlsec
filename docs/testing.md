@@ -16,6 +16,7 @@ read no clock. Keys and certificates are generated per run.
 |---|---|---|
 | Unit and conformance | `*_test.go` beside each package, named after the source file they test | every push, Linux, macOS and Windows, under `-race` |
 | Differential against `xmlsec1` | `tests/interop`, build tag `interop` | every push, Linux |
+| Security regressions | `tests/security`: XXE, external fetches, key substitution, algorithm confusion, comment truncation, encryption downgrade | every push, all three systems; a local HTTP listener proves nothing is fetched |
 | Fuzzing | `FuzzVerify`, `FuzzDecryptEncryptedKey`, `FuzzDecryptData` | nightly, one hour per target |
 | Hygiene | CI | every push: no `peppol` module in the dependency graph, no `peppol` string in Go source outside `internal/` |
 
@@ -45,6 +46,9 @@ Named `TestConformance_<ID>_<description>` for the requirement they prove.
 | `TestAlgorithms`, `TestAlgorithmCombinations` | every `Sig*` and `Digest*` constant; every data × MGF × OAEP digest combination |
 | `TestSignRefusals` | XSLT, XPath, SHA-1, no final canonicalization, whole-document reference without enveloped, inclusive SignedInfo on a detached signature |
 | `TestParseRefusesDOCTYPE` | open item X-1: the pinned options refuse a DOCTYPE, asserted rather than read from documentation |
+| `TestParseRefusesXXE`, `TestParseFetchesNothing`, `TestVerifyDereferencesNothingExternal` | every XXE and external-reference route in the [assessment](security.md#assessment) is refused or inert, with zero requests reaching a local listener |
+| `TestPinnedCertificateIgnoresEmbeddedKey`, `TestAlgorithmConfusion` | an attacker's own key is refused against a pinned certificate; HMAC, SHA-1 and key-type confusion are refused |
+| `TestNilInputs` (`wss`, `xenc`) | a nil or wrong-kind argument is an error, never a panic |
 | `TestFindByID` | duplicate IDs are refused across `wsu:Id` and `xml:id` |
 | `TestPrefixBoundElsewhere` | a `wsu` or `wsse` prefix bound to another namespace higher up does not corrupt the header |
 | `TestVersionIsReleasedAndDescribed` | the version constant and the changelog agree; see [RELEASE.md](../RELEASE.md) |

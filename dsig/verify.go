@@ -23,6 +23,11 @@ type VerifyOptions struct {
 	// signature is self-describing and the CALLER MUST separately establish
 	// that the certificate is trusted. This library does not make trust
 	// decisions.
+	//
+	// When nil, an attacker can sign with their own key, and every reference
+	// is digested before the caller can refuse their certificate. Set it
+	// whenever the sender is known in advance: a signature from any other key
+	// is then refused before any reference is processed.
 	Certificate *x509.Certificate
 
 	// AllowedSignatureAlgorithms restricts the accepted ds:SignatureMethod
@@ -44,7 +49,8 @@ type VerifyOptions struct {
 	Attachments xmlsec.AttachmentSet
 
 	// MaxReferences caps the number of ds:Reference elements processed.
-	// Zero means DefaultMaxReferences.
+	// Zero means DefaultMaxReferences. Set it to what the profile needs: it
+	// bounds how much work one message can force.
 	MaxReferences int
 }
 

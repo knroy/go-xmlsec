@@ -62,8 +62,9 @@ single profile.
 | XSLT transform | Executes attacker-supplied code while verifying an unauthenticated message. |
 | XPath and XPath Filter 2.0 transforms | Evaluate attacker-supplied expressions during verification. `go-xml` v1.4.0 makes XPath Filter implementable; the threat model is unchanged. |
 | Unknown children of `ds:Transform` or `ds:CanonicalizationMethod` | A refused transform carries its program as a child; ignoring unknown children would be a way round the refusal. |
-| DOCTYPE | Entry point for XXE and entity expansion. `xmlsec.Parse` never enables it and never supplies an entity resolver; `TestParseRefusesDOCTYPE` asserts it. |
-| Network or filesystem dereferencing | Only `""`, `#id` and `cid:` references resolve. |
+| DOCTYPE | Entry point for XXE and entity expansion. `xmlsec.Parse` never enables it and never supplies an entity resolver; `TestParseRefusesXXE` asserts it for every variant in the assessment below. |
+| Network or filesystem dereferencing | Only `""`, `#id` and `cid:` references resolve. `TestVerifyDereferencesNothingExternal` asserts it with an authentic signature, so the refusal is not merely a side effect of an earlier failure. |
+| RSA PKCS#1 v1.5 key transport (`rsa-1_5`) | The Bleichenbacher padding-oracle class. Not implemented, so not accepted. |
 | KeyInfo forms other than one `X509Certificate` or a direct `SecurityTokenReference` | Issuer-and-serial and thumbprint references are legal but are not emitted, so they are not tested, so they are not accepted. |
 
 ## Resource limits
@@ -84,6 +85,22 @@ silently change what is accepted. Each is enforced before the work it bounds.
 The two depth limits differ, so a document can parse and then fail to
 canonicalize. That is a bounded outcome, not a bug.
 
+**Bounded is not cheap.** Measured on an arm64 Mac, parsing costs up to
+about 40 times the input in memory, before anything is authenticated:
+
+| Input | Size | Outcome | Peak memory |
+|---|---:|---|---:|
+| 16M empty elements | 64 MB | refused at the node limit after 2.6 s | 2.7 GB |
+| one element, many attributes | 60 MB | accepted | 2.3 GB |
+| many namespace declarations | 60 MB | accepted | 1.5 GB |
+| 1,000,000-deep nesting | 6.7 MB | refused at depth 1000 | 34 MB |
+| over the byte limit | 65 MB | refused | 318 MB |
+
+The limits are the design document's pinned values and are not
+configurable. A server should therefore cap the size of what it hands to
+`Parse` at what its profile needs: memory scales with input size, so a size
+cap bounds every row above.
+
 Setting `c14n.MaxDepth` is process-global: it also bounds any other `c14n`
 user in the same program.
 
@@ -94,12 +111,48 @@ canonicalized, so it can never be verified. `Verify` returns
 `ErrUnverifiable` wrapping the `c14n` cause. Treat it as permanent: never
 retry, and do not log the document content unbounded.
 
+## Verification cost before the certificate is judged
+
+With `VerifyOptions.Certificate` set, a signature from any other key is
+rejected before a single reference is processed. With it nil, an attacker
+can sign with their own key and embed their own certificate; the signature
+is then valid, and every reference is digested before the caller sees
+`Coverage.Certificate` and can refuse it. Measured: 64 references to one
+8 MB element cost 5.1 s of CPU; the same message against a pinned
+certificate is refused at once.
+
+Pin the certificate whenever the sender is known in advance, and set
+`MaxReferences` to what the profile needs (a WS-Security message signing a
+header, a body and a few attachments needs well under 64).
+
 ## Other properties
 
 * Digest comparison uses `crypto/subtle.ConstantTimeCompare`.
 * RSA-OAEP and AES-GCM failures return a fixed message, not the cause.
 * Session keys are returned to the caller, who should `clear` them after use.
   No key material is held in package state.
+* A nil or wrong-kind argument to any exported function is an error, not a
+  panic, so a lookup that found nothing in a hostile message cannot crash the
+  caller.
+
+## Assessment
+
+Performed against every entry point, with each attack kept as a regression
+test in `tests/security` or beside the package it exercises.
+
+| Class | Attempt | Result |
+|---|---|---|
+| XXE | file, http and parameter entities; external and PUBLIC DTD subsets; after a comment and PI, behind a UTF-8 BOM, in UTF-16; undeclared entities in content and attributes | refused, no file read, no request made (a local listener counts attempts) |
+| Entity expansion | billion laughs | refused: DOCTYPE |
+| External references | XInclude, `xml-stylesheet`, `xsi:schemaLocation`, `xml:base` | parsed, nothing fetched or expanded |
+| Remote dereferencing | authentic signatures whose references name `http:`, `file:`, `cid:` wrapping a URL, and an XPointer `document()` | refused, nothing fetched |
+| Signature wrapping | relocated signed element; duplicated IDs across `wsu:Id` and `xml:id` | `Coverage` exposes the relocation; duplicates refused |
+| Key substitution | attacker's key and certificate against a pinned certificate | refused |
+| Algorithm confusion | HMAC, RSA-SHA1, empty method, ECDSA URI with an RSA key and the reverse, ECDSA r = s = 0 | refused |
+| Comment truncation (CVE-2017-11427 class) | signed text split by a comment | `StringValue` of the covered element returns the whole value |
+| Encryption downgrade | AES size swap, AES-CBC, `rsa-oaep-mgf1p`, `rsa-1_5`, SHA-1 MGF | refused |
+| Crashes | nil and wrong-kind arguments to every exported function; three fuzz targets | fixed: 13 functions panicked on nil and now return errors |
+| Resource exhaustion | limits in parsing, depth, references, transforms | bounded; see the memory and verification-cost sections above |
 
 ## What a caller must still do
 
@@ -107,5 +160,7 @@ retry, and do not log the document content unbounded.
 2. Check `Coverage` against the profile, every time.
 3. Pass single-value allow-lists for the profile.
 4. Parse with `xmlsec.Parse`, and keep the received octets.
-5. Transmit `SignEnveloped` and `EncryptElement` output exactly, never
+5. Cap the size of input before parsing, and pin the certificate or keep
+   `MaxReferences` low; see the cost sections above.
+6. Transmit `SignEnveloped` and `EncryptElement` output exactly, never
    re-serialized.

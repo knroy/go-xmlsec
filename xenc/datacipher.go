@@ -69,8 +69,7 @@ func open(alg string, key, data []byte) ([]byte, error) {
 // own. The returned document is also in canonical form
 // (Inclusive10WithComments).
 func EncryptElement(doc *xdm.Node, target *xdm.Node, sessionKey []byte, opts EncryptOptions) ([]byte, error) {
-	parent := target.Parent
-	if target.Kind != xdm.KindElement || parent == nil || target.Root() != doc.Root() {
+	if doc == nil || target == nil || target.Kind != xdm.KindElement || target.Parent == nil || target.Root() != doc.Root() {
 		return nil, errors.New("xenc: target must be an element inside doc")
 	}
 	plain, err := c14n.Bytes(target, c14n.Options{Algorithm: c14n.Inclusive10WithComments})
@@ -87,6 +86,7 @@ func EncryptElement(doc *xdm.Node, target *xdm.Node, sessionKey []byte, opts Enc
 	encryptionMethod(ed, opts.DataAlgorithm)
 	xmltree.Text(element(element(ed, "CipherData"), "CipherValue"), base64.StdEncoding.EncodeToString(ct))
 
+	parent := target.Parent
 	i := slices.Index(parent.Children, target)
 	parent.AppendChild(ed)
 	parent.Children = parent.Children[:len(parent.Children)-1]
@@ -114,7 +114,7 @@ func DecryptData(el *xdm.Node, sessionKey []byte, allowedData []string) ([]byte,
 // dataAlgorithm validates el as xenc:EncryptedData and returns its allowed
 // data algorithm.
 func dataAlgorithm(el *xdm.Node, allowedData []string) (string, error) {
-	if !el.IsElement(NSXEnc, "EncryptedData") {
+	if el == nil || !el.IsElement(NSXEnc, "EncryptedData") {
 		return "", malformed("not an xenc:EncryptedData")
 	}
 	alg, _, err := parseEncryptionMethod(el)

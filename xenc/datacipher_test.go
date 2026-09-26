@@ -101,3 +101,29 @@ func TestEncryptElementErrors(t *testing.T) {
 		})
 	}
 }
+
+// Nil input from a failed lookup is an error, never a panic.
+func TestNilInputs(t *testing.T) {
+	key := make([]byte, 16)
+	tree, err := xmlsec.Parse([]byte(`<r><a/></r>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ek, err := xenc.GenerateEncryptedKey(as4Opts(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checks := map[string]error{}
+	_, checks["DecryptEncryptedKey(nil)"] = xenc.DecryptEncryptedKey(nil, recipientKey, nil, nil, nil)
+	_, checks["DecryptEncryptedKey(el, nil)"] = xenc.DecryptEncryptedKey(reparse(t, ek.Element), nil, nil, nil, nil)
+	_, checks["DecryptData(nil)"] = xenc.DecryptData(nil, key, nil)
+	_, checks["DecryptAttachment(nil)"] = xenc.DecryptAttachment(nil, nil, key, nil)
+	_, checks["EncryptElement(nil, nil)"] = xenc.EncryptElement(nil, nil, key, as4Opts(t))
+	_, checks["EncryptElement(doc, nil)"] = xenc.EncryptElement(tree.Root, nil, key, as4Opts(t))
+	_, _, checks["EncryptAttachment(nil)"] = xenc.EncryptAttachment(nil, key, xmlsec.TransformAttachmentContentOnly, as4Opts(t))
+	for name, err := range checks {
+		if err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}

@@ -37,3 +37,9 @@ func TestAttachmentSet(t *testing.T) {
 		t.Fatalf("duplicate: %v", err)
 	}
 }
+
+func TestNewAttachmentSetNil(t *testing.T) {
+	if _, err := NewAttachmentSet(&Attachment{ID: "a"}, nil); !errors.Is(err, ErrMalformed) {
+		t.Fatalf("got %v", err)
+	}
+}
