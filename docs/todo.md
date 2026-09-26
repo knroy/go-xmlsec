@@ -52,7 +52,7 @@ running fuzz results.
 | X-2 | `xdm.ElementByID` on duplicate IDs | **Answered** from the v1.4.0 source: it returns the first depth-first match. Not used on the verify path. |
 | X-3 | Gate 1 status upstream | go-xml v1.4.0 reports `xmllint` and `xmlsec1` canonicalization differentials; a Santuario differential and a real-message corpus are still open there. This module adds indirect evidence: signatures byte-identical to Santuario's, and 147 independently produced signatures whose digests go-xml's canonicalization reproduces. |
 | X-4 | AS4 canonicalization URI inherited, not stated | unchanged |
-| X-5 | Real-message corpus | **Partly closed.** 122 real Peppol SMP responses from 62 providers, plus 25 W3C XML-DSig 1.1 interop vectors, are verified in a separate module, `go-xmlsec-corpus`, kept out of this library's module. All 122 SMP responses verify. Captured AS4 messages still need a certified access point. |
+| X-5 | Real-message corpus | **Partly closed.** 122 real Peppol SMP responses from 62 providers all verify; they live in the private `go-xmlsec-corpus` repository, because they carry no license grant and may contain personal data. The 25 W3C XML-DSig 1.1 interop vectors are in this repository, `tests/w3c`, under the W3C Document License. Captured AS4 messages still need a certified access point. |
 | X-6 | Does any peer require `Attachment-Complete`? | unchanged |
 
 ## Where the implementation departs from the design document

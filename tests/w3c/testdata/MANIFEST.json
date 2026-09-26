@@ -1,0 +1,477 @@
+[
+ {
+  "path": "signature-enveloping-derencoded-ec.xml",
+  "source": "w3c-xmldsig11-interop",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-derencoded-ec.xml",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2001/04/xmlenc#sha256"
+   ],
+   "transforms": []
+  },
+  "expect": "refuse",
+  "error": "ErrUnsupportedKeyInfo",
+  "reason": "Key given as dsig11:DEREncodedKeyValue; only X509Certificate is accepted. Independently, the signature and digest are valid with that key."
+ },
+ {
+  "path": "signature-enveloping-derencoded-rsa.xml",
+  "source": "w3c-xmldsig11-interop",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-derencoded-rsa.xml",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2001/04/xmlenc#sha256"
+   ],
+   "transforms": []
+  },
+  "expect": "refuse",
+  "error": "ErrUnsupportedKeyInfo",
+  "reason": "Key given as dsig11:DEREncodedKeyValue; only X509Certificate is accepted. Independently, the signature and digest are valid with that key."
+ },
+ {
+  "path": "signature-enveloping-keyinforeference-rsa.xml",
+  "source": "w3c-xmldsig11-interop",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-keyinforeference-rsa.xml",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2001/04/xmlenc#sha256"
+   ],
+   "transforms": []
+  },
+  "expect": "refuse",
+  "error": "ErrUnsupportedKeyInfo",
+  "reason": "Key given by dsig11:KeyInfoReference to a ds:KeyInfo inside a ds:Object; not accepted. Independently, the signature and digest are valid with the referenced RSAKeyValue."
+ },
+ {
+  "path": "signature-enveloping-p256_sha256.xml",
+  "source": "w3c-xmldsig11-interop",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-p256_sha256.xml",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2001/04/xmlenc#sha256"
+   ],
+   "transforms": []
+  },
+  "expect": "refuse",
+  "error": "ErrUnsupportedKeyInfo",
+  "reason": "Key given as ds:KeyValue (dsig11:ECKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+ },
+ {
+  "path": "signature-enveloping-p256_sha256_4050.xml",
+  "source": "w3c-xmldsig11-interop",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-p256_sha256_4050.xml",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2001/04/xmlenc#sha256"
+   ],
+   "transforms": []
+  },
+  "expect": "refuse",
+  "error": "ErrUnsupportedKeyInfo",
+  "reason": "Key given as ds:KeyValue (RFC 4050 ECDSAKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+ },
+ {
+  "path": "signature-enveloping-p256_sha384.xml",
+  "source": "w3c-xmldsig11-interop",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-p256_sha384.xml",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha384",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2001/04/xmldsig-more#sha384"
+   ],
+   "transforms": []
+  },
+  "expect": "refuse",
+  "error": "ErrUnsupportedKeyInfo",
+  "reason": "Key given as ds:KeyValue (dsig11:ECKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+ },
+ {
+  "path": "signature-enveloping-p256_sha384_4050.xml",
+  "source": "w3c-xmldsig11-interop",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-p256_sha384_4050.xml",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha384",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2001/04/xmldsig-more#sha384"
+   ],
+   "transforms": []
+  },
+  "expect": "refuse",
+  "error": "ErrUnsupportedKeyInfo",
+  "reason": "Key given as ds:KeyValue (RFC 4050 ECDSAKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+ },
+ {
+  "path": "signature-enveloping-p256_sha512.xml",
+  "source": "w3c-xmldsig11-interop",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-p256_sha512.xml",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha512",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2001/04/xmlenc#sha512"
+   ],
+   "transforms": []
+  },
+  "expect": "refuse",
+  "error": "ErrUnsupportedKeyInfo",
+  "reason": "Key given as ds:KeyValue (dsig11:ECKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+ },
+ {
+  "path": "signature-enveloping-p256_sha512_4050.xml",
+  "source": "w3c-xmldsig11-interop",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-p256_sha512_4050.xml",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha512",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2001/04/xmlenc#sha512"
+   ],
+   "transforms": []
+  },
+  "expect": "refuse",
+  "error": "ErrUnsupportedKeyInfo",
+  "reason": "Key given as ds:KeyValue (RFC 4050 ECDSAKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+ },
+ {
+  "path": "signature-enveloping-p384_sha256.xml",
+  "source": "w3c-xmldsig11-interop",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-p384_sha256.xml",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2001/04/xmlenc#sha256"
+   ],
+   "transforms": []
+  },
+  "expect": "refuse",
+  "error": "ErrUnsupportedKeyInfo",
+  "reason": "Key given as ds:KeyValue (dsig11:ECKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+ },
+ {
+  "path": "signature-enveloping-p384_sha256_4050.xml",
+  "source": "w3c-xmldsig11-interop",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-p384_sha256_4050.xml",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2001/04/xmlenc#sha256"
+   ],
+   "transforms": []
+  },
+  "expect": "refuse",
+  "error": "ErrUnsupportedKeyInfo",
+  "reason": "Key given as ds:KeyValue (RFC 4050 ECDSAKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+ },
+ {
+  "path": "signature-enveloping-p384_sha384.xml",
+  "source": "w3c-xmldsig11-interop",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-p384_sha384.xml",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha384",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2001/04/xmldsig-more#sha384"
+   ],
+   "transforms": []
+  },
+  "expect": "refuse",
+  "error": "ErrUnsupportedKeyInfo",
+  "reason": "Key given as ds:KeyValue (dsig11:ECKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+ },
+ {
+  "path": "signature-enveloping-p384_sha384_4050.xml",
+  "source": "w3c-xmldsig11-interop",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-p384_sha384_4050.xml",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha384",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2001/04/xmldsig-more#sha384"
+   ],
+   "transforms": []
+  },
+  "expect": "refuse",
+  "error": "ErrUnsupportedKeyInfo",
+  "reason": "Key given as ds:KeyValue (RFC 4050 ECDSAKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+ },
+ {
+  "path": "signature-enveloping-p384_sha512.xml",
+  "source": "w3c-xmldsig11-interop",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-p384_sha512.xml",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha512",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2001/04/xmlenc#sha512"
+   ],
+   "transforms": []
+  },
+  "expect": "refuse",
+  "error": "ErrUnsupportedKeyInfo",
+  "reason": "Key given as ds:KeyValue (dsig11:ECKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+ },
+ {
+  "path": "signature-enveloping-p384_sha512_4050.xml",
+  "source": "w3c-xmldsig11-interop",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-p384_sha512_4050.xml",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha512",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2001/04/xmlenc#sha512"
+   ],
+   "transforms": []
+  },
+  "expect": "refuse",
+  "error": "ErrUnsupportedKeyInfo",
+  "reason": "Key given as ds:KeyValue (RFC 4050 ECDSAKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+ },
+ {
+  "path": "signature-enveloping-p521_sha256.xml",
+  "source": "w3c-xmldsig11-interop",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-p521_sha256.xml",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2001/04/xmlenc#sha256"
+   ],
+   "transforms": []
+  },
+  "expect": "refuse",
+  "error": "ErrUnsupportedKeyInfo",
+  "reason": "Key given as ds:KeyValue (dsig11:ECKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+ },
+ {
+  "path": "signature-enveloping-p521_sha256_4050.xml",
+  "source": "w3c-xmldsig11-interop",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-p521_sha256_4050.xml",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2001/04/xmlenc#sha256"
+   ],
+   "transforms": []
+  },
+  "expect": "refuse",
+  "error": "ErrUnsupportedKeyInfo",
+  "reason": "Key given as ds:KeyValue (RFC 4050 ECDSAKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+ },
+ {
+  "path": "signature-enveloping-p521_sha384.xml",
+  "source": "w3c-xmldsig11-interop",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-p521_sha384.xml",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha384",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2001/04/xmldsig-more#sha384"
+   ],
+   "transforms": []
+  },
+  "expect": "refuse",
+  "error": "ErrUnsupportedKeyInfo",
+  "reason": "Key given as ds:KeyValue (dsig11:ECKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+ },
+ {
+  "path": "signature-enveloping-p521_sha384_4050.xml",
+  "source": "w3c-xmldsig11-interop",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-p521_sha384_4050.xml",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha384",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2001/04/xmldsig-more#sha384"
+   ],
+   "transforms": []
+  },
+  "expect": "refuse",
+  "error": "ErrUnsupportedKeyInfo",
+  "reason": "Key given as ds:KeyValue (RFC 4050 ECDSAKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+ },
+ {
+  "path": "signature-enveloping-p521_sha512.xml",
+  "source": "w3c-xmldsig11-interop",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-p521_sha512.xml",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha512",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2001/04/xmlenc#sha512"
+   ],
+   "transforms": []
+  },
+  "expect": "refuse",
+  "error": "ErrUnsupportedKeyInfo",
+  "reason": "Key given as ds:KeyValue (dsig11:ECKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+ },
+ {
+  "path": "signature-enveloping-p521_sha512_4050.xml",
+  "source": "w3c-xmldsig11-interop",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-p521_sha512_4050.xml",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha512",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2001/04/xmlenc#sha512"
+   ],
+   "transforms": []
+  },
+  "expect": "refuse",
+  "error": "ErrUnsupportedKeyInfo",
+  "reason": "Key given as ds:KeyValue (RFC 4050 ECDSAKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+ },
+ {
+  "path": "signature-enveloping-sha256-rsa-sha256.xml",
+  "source": "w3c-xmldsig11-interop",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-sha256-rsa-sha256.xml",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2001/04/xmlenc#sha256"
+   ],
+   "transforms": []
+  },
+  "expect": "refuse",
+  "error": "ErrUnsupportedKeyInfo",
+  "reason": "Key given as ds:KeyValue (RSAKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+ },
+ {
+  "path": "signature-enveloping-sha384-rsa_sha256.xml",
+  "source": "w3c-xmldsig11-interop",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-sha384-rsa_sha256.xml",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2001/04/xmldsig-more#sha384"
+   ],
+   "transforms": []
+  },
+  "expect": "refuse",
+  "error": "ErrUnsupportedKeyInfo",
+  "reason": "Key given as ds:KeyValue (RSAKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+ },
+ {
+  "path": "signature-enveloping-sha512-rsa_sha256.xml",
+  "source": "w3c-xmldsig11-interop",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-sha512-rsa_sha256.xml",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2001/04/xmlenc#sha512"
+   ],
+   "transforms": []
+  },
+  "expect": "refuse",
+  "error": "ErrUnsupportedKeyInfo",
+  "reason": "Key given as ds:KeyValue (RSAKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+ },
+ {
+  "path": "signature-enveloping-x509digest-rsa.xml",
+  "source": "w3c-xmldsig11-interop",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-x509digest-rsa.xml",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2001/04/xmlenc#sha256"
+   ],
+   "transforms": []
+  },
+  "expect": "refuse",
+  "error": "ErrUnsupportedKeyInfo",
+  "reason": "ds:X509Data holds only a dsig11:X509Digest, which names a certificate the document does not carry; unsupported KeyInfo form. Reference digest checks out independently (C14N 1.0 implicit, #Id on ds:Object)."
+ }
+]

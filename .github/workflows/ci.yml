@@ -35,6 +35,12 @@ jobs:
         shell: bash
         run: CGO_ENABLED=0 go build ./...
       - run: go test -race -cover ./...
+      # The W3C interop vectors, a nested module so they never ship in the
+      # library's module download.
+      - name: W3C XML Signature 1.1 interop vectors
+        working-directory: tests/w3c
+        shell: bash
+        run: go vet ./... && go test ./...
       # Every statement is covered, and stays so. An unreachable branch is
       # deleted, not excused; see docs/testing.md.
       - name: 100% statement coverage

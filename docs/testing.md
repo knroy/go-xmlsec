@@ -20,6 +20,7 @@ golden-file key.
 | Security regressions | `tests/security`: XXE, external fetches, key substitution, algorithm confusion, comment truncation, encryption downgrade | every push, all three systems; a local HTTP listener proves nothing is fetched |
 | Fuzzing | `FuzzVerify`, `FuzzDecryptEncryptedKey`, `FuzzDecryptData` | nightly, one hour per target |
 | Static analysis | `staticcheck` v0.8.1, `gosec` v2.29.0, pinned | every push: both clean, no `#nosec` suppressions |
+| W3C interop vectors | `tests/w3c`, a nested module | every push, all three systems |
 | Hygiene | CI | every push: no `peppol` module in the dependency graph, no `peppol` string in Go source outside `internal/` |
 
 ## Conformance tests
@@ -162,20 +163,26 @@ Inputs the fuzzer finds interesting stay in the local Go fuzz cache; any
 failing input is committed under `testdata/fuzz/<Target>/` as a permanent
 regression seed.
 
-**Real-world corpus.** Kept in a separate module, `go-xmlsec-corpus`, so
-that third-party documents never ship inside this library's module. It is
-run against this library through a `replace` directive:
+**W3C XML Signature 1.1 interop vectors.** `tests/w3c`, a nested module, so
+they are in this repository and CI but not in the library's module
+download: 25 vectors from the 2012 interop report (Oracle), ECDSA
+P-256/384/521 and RSA with SHA-256/384/512, copied unmodified under the W3C
+Document License (`tests/w3c/NOTICE`, `tests/w3c/LICENSE-W3C-DOCUMENT`).
+`testdata/MANIFEST.json` records the expected outcome of each; run with
+`cd tests/w3c && go test ./...`.
 
-| Source | Files | Outcome |
-|---|---:|---|
-| Peppol SMP responses, fetched 2026-09-26, stored byte-for-byte | 122, from 62 SMP providers and at least 20 distinct producing implementations | **all verify**: whole document signed, key from the certificate |
-| W3C XML Signature 1.1 interop vectors (2012, Oracle), W3C Document License | 25: ECDSA P-256/384/521 and RSA with SHA-256/384/512 | refused by policy: they carry raw keys or key references, not certificates |
-
-Every one of the 147 was also checked independently: each signature and every
-digest matches. The documents exercise CRLF line endings, a UTF-8 byte-order
-mark, character references and non-ASCII text. The corpus found the two
+**Real-world corpus.** 122 real Peppol SMP responses, fetched 2026-09-26 from
+62 SMP providers and at least 20 distinct producing implementations, stored
+byte-for-byte. They are kept in a separate, private repository,
+`go-xmlsec-corpus`, not here: they carry no license grant and may contain
+personal data, so they are not redistributed. Its CI runs them against this
+library. **All 122 verify**, whole document signed, key from the
+certificate; each signature and every digest was also checked
+independently, and Santuario agrees on every one. The corpus found the two
 behaviours recorded in [todo.md](todo.md) as decided departures: implicit
-Canonical XML 1.0 on verification, and descriptive `X509Data` elements.
+Canonical XML 1.0 on verification, and descriptive `X509Data` elements. The
+documents exercise CRLF line endings, a UTF-8 byte-order mark, character
+references and non-ASCII text.
 
 ## Golden files
 

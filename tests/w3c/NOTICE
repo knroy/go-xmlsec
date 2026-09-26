@@ -1,0 +1,15 @@
+The XML files in testdata/ (except MANIFEST.json) are copied unmodified from
+the W3C XML Signature 1.1 Interop Test Report, Oracle test vectors:
+
+  XML Signature 1.1 Interop Test Report
+  https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/
+  Status: W3C Working Group Note, 13 November 2012
+  Vectors: https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/
+
+Copyright © 2012 World Wide Web Consortium (MIT, ERCIM, Keio).
+https://www.w3.org/copyright/document-license-2023/
+
+They are distributed under the W3C Document License, reproduced in
+LICENSE-W3C-DOCUMENT, and are not covered by this repository's MIT license.
+MANIFEST.json and the Go files in this directory are this repository's own,
+under its MIT license.
