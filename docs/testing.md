@@ -50,6 +50,7 @@ Named `TestConformance_<ID>_<description>` for the requirement they prove.
 | `TestSignRefusals` | XSLT, XPath, SHA-1, no final canonicalization, whole-document reference without enveloped, inclusive SignedInfo on a detached signature |
 | `TestParseRefusesDOCTYPE` | open item X-1: the pinned options refuse a DOCTYPE, asserted rather than read from documentation |
 | `TestParseRefusesXXE`, `TestParseFetchesNothing`, `TestVerifyDereferencesNothingExternal` | every XXE and external-reference route in the [assessment](security.md#assessment) is refused or inert, with zero requests reaching a local listener |
+| `TestRawKeyRoundTrip`, `TestRawKeyInfoStructure`, `TestCoveragePublicKey` | each raw-key form with RSA and P-256/384/521, self-described and pinned; a different pinned key refused; malformed and refused raw keys (short RSA, even modulus or exponent, off-curve and compressed points, explicit parameters, unknown curves) |
 | `TestPinnedCertificateIgnoresEmbeddedKey`, `TestAlgorithmConfusion` | an attacker's own key is refused against a pinned certificate; HMAC, SHA-1 and key-type confusion are refused |
 | `TestNilInputs` (`wss`, `xenc`) | a nil or wrong-kind argument is an error, never a panic |
 | `TestImplicitCanonicalization` | a received reference ending in a node set verifies through Canonical XML 1.0, and the implied algorithm is refused when outside the allow-list |
@@ -169,7 +170,12 @@ download: 25 vectors from the 2012 interop report (Oracle), ECDSA
 P-256/384/521 and RSA with SHA-256/384/512, copied unmodified under the W3C
 Document License (`tests/w3c/NOTICE`, `tests/w3c/LICENSE-W3C-DOCUMENT`).
 `testdata/MANIFEST.json` records the expected outcome of each; run with
-`cd tests/w3c && go test ./...`.
+`cd tests/w3c && go test ./...`. **10 verify end to end**: the nine
+`ECKeyValue` vectors and the EC `DEREncodedKeyValue` one, each an enveloping
+signature over a `ds:Object` (identified with `IDAttrDSig`). The other 15
+are refused, each for a documented reason: 4 carry 1024-bit RSA keys, below
+the 2048-bit minimum; 9 use the legacy RFC 4050 `ECDSAKeyValue` form; one
+uses `KeyInfoReference` and one `X509Digest`.
 
 **Real-world corpus.** 122 real Peppol SMP responses, fetched 2026-09-26 from
 62 SMP providers and at least 20 distinct producing implementations, stored

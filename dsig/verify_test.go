@@ -373,27 +373,28 @@ func TestHMACReportedAsNotAllowed(t *testing.T) {
 	}
 }
 
-// TrustCertificate sees the signer's certificate before any digest is
-// computed: a tampered message whose certificate the hook refuses fails as
+// TrustKey sees the signer's key and certificate before any digest is
+// computed: a tampered message whose key the hook refuses fails as
 // untrusted, not as a digest mismatch.
-func TestTrustCertificate(t *testing.T) {
+func TestTrustKey(t *testing.T) {
 	key := newKey(t, rsaKey)
 	signed := signEnveloped(t, key, xmlsec.SigRSASHA256, xmlsec.DigestSHA256)
 
 	var seen *x509.Certificate
-	accept := func(c *x509.Certificate) error { seen = c; return nil }
+	var seenKey crypto.PublicKey
+	accept := func(c *x509.Certificate, k crypto.PublicKey) error { seen, seenKey = c, k; return nil }
 	doc := parse(t, signed)
-	if _, err := dsig.Verify(doc, findSignature(doc), dsig.VerifyOptions{TrustCertificate: accept}); err != nil {
+	if _, err := dsig.Verify(doc, findSignature(doc), dsig.VerifyOptions{TrustKey: accept}); err != nil {
 		t.Fatal(err)
 	}
-	if !seen.Equal(key.Certificate) {
-		t.Fatal("hook did not see the signer's certificate")
+	if !seen.Equal(key.Certificate) || !key.Certificate.PublicKey.(*rsa.PublicKey).Equal(seenKey) {
+		t.Fatal("hook did not see the signer's certificate and key")
 	}
 
 	errNotOurs := errors.New("not a known sender")
-	refuse := func(*x509.Certificate) error { return errNotOurs }
+	refuse := func(*x509.Certificate, crypto.PublicKey) error { return errNotOurs }
 	tampered := parse(t, []byte(strings.Replace(string(signed), "example.com", "evil.com", 1)))
-	_, err := dsig.Verify(tampered, findSignature(tampered), dsig.VerifyOptions{TrustCertificate: refuse})
+	_, err := dsig.Verify(tampered, findSignature(tampered), dsig.VerifyOptions{TrustKey: refuse})
 	if !errors.Is(err, xmlsec.ErrUntrusted) || !errors.Is(err, errNotOurs) {
 		t.Fatalf("got %v", err)
 	}

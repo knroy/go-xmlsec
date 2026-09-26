@@ -14,9 +14,15 @@
    ],
    "transforms": []
   },
-  "expect": "refuse",
-  "error": "ErrUnsupportedKeyInfo",
-  "reason": "Key given as dsig11:DEREncodedKeyValue; only X509Certificate is accepted. Independently, the signature and digest are valid with that key."
+  "expect": "verify",
+  "coverage": {
+   "whole_document_signed": false,
+   "signed_element_ids": [
+    "DSig.Object_zv1ejyt3CTdWWFZEI3SgsQ22"
+   ],
+   "key_info_form": "DEREncodedKeyValue"
+  },
+  "verify_options": "IDAttributes: dsig.IDAttrDSig (the ds:Object Id)"
  },
  {
   "path": "signature-enveloping-derencoded-rsa.xml",
@@ -35,7 +41,7 @@
   },
   "expect": "refuse",
   "error": "ErrUnsupportedKeyInfo",
-  "reason": "Key given as dsig11:DEREncodedKeyValue; only X509Certificate is accepted. Independently, the signature and digest are valid with that key."
+  "reason": "1024-bit RSA key in ds:KeyValue; go-xmlsec requires at least 2048 bits for a raw RSA key."
  },
  {
   "path": "signature-enveloping-keyinforeference-rsa.xml",
@@ -54,7 +60,7 @@
   },
   "expect": "refuse",
   "error": "ErrUnsupportedKeyInfo",
-  "reason": "Key given by dsig11:KeyInfoReference to a ds:KeyInfo inside a ds:Object; not accepted. Independently, the signature and digest are valid with the referenced RSAKeyValue."
+  "reason": "Key given by dsig11:KeyInfoReference, a reference to a key elsewhere, which go-xmlsec does not follow."
  },
  {
   "path": "signature-enveloping-p256_sha256.xml",
@@ -71,9 +77,15 @@
    ],
    "transforms": []
   },
-  "expect": "refuse",
-  "error": "ErrUnsupportedKeyInfo",
-  "reason": "Key given as ds:KeyValue (dsig11:ECKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+  "expect": "verify",
+  "coverage": {
+   "whole_document_signed": false,
+   "signed_element_ids": [
+    "DSig.Object_1"
+   ],
+   "key_info_form": "KeyValue"
+  },
+  "verify_options": "IDAttributes: dsig.IDAttrDSig (the ds:Object Id)"
  },
  {
   "path": "signature-enveloping-p256_sha256_4050.xml",
@@ -92,7 +104,7 @@
   },
   "expect": "refuse",
   "error": "ErrUnsupportedKeyInfo",
-  "reason": "Key given as ds:KeyValue (RFC 4050 ECDSAKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+  "reason": "Key given in the RFC 4050 ECDSAKeyValue form (xmldsig-more namespace), which go-xmlsec does not accept; the XML Signature 1.1 dsig11:ECKeyValue form is accepted."
  },
  {
   "path": "signature-enveloping-p256_sha384.xml",
@@ -109,9 +121,15 @@
    ],
    "transforms": []
   },
-  "expect": "refuse",
-  "error": "ErrUnsupportedKeyInfo",
-  "reason": "Key given as ds:KeyValue (dsig11:ECKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+  "expect": "verify",
+  "coverage": {
+   "whole_document_signed": false,
+   "signed_element_ids": [
+    "DSig.Object_1"
+   ],
+   "key_info_form": "KeyValue"
+  },
+  "verify_options": "IDAttributes: dsig.IDAttrDSig (the ds:Object Id)"
  },
  {
   "path": "signature-enveloping-p256_sha384_4050.xml",
@@ -130,7 +148,7 @@
   },
   "expect": "refuse",
   "error": "ErrUnsupportedKeyInfo",
-  "reason": "Key given as ds:KeyValue (RFC 4050 ECDSAKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+  "reason": "Key given in the RFC 4050 ECDSAKeyValue form (xmldsig-more namespace), which go-xmlsec does not accept; the XML Signature 1.1 dsig11:ECKeyValue form is accepted."
  },
  {
   "path": "signature-enveloping-p256_sha512.xml",
@@ -147,9 +165,15 @@
    ],
    "transforms": []
   },
-  "expect": "refuse",
-  "error": "ErrUnsupportedKeyInfo",
-  "reason": "Key given as ds:KeyValue (dsig11:ECKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+  "expect": "verify",
+  "coverage": {
+   "whole_document_signed": false,
+   "signed_element_ids": [
+    "DSig.Object_1"
+   ],
+   "key_info_form": "KeyValue"
+  },
+  "verify_options": "IDAttributes: dsig.IDAttrDSig (the ds:Object Id)"
  },
  {
   "path": "signature-enveloping-p256_sha512_4050.xml",
@@ -168,7 +192,7 @@
   },
   "expect": "refuse",
   "error": "ErrUnsupportedKeyInfo",
-  "reason": "Key given as ds:KeyValue (RFC 4050 ECDSAKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+  "reason": "Key given in the RFC 4050 ECDSAKeyValue form (xmldsig-more namespace), which go-xmlsec does not accept; the XML Signature 1.1 dsig11:ECKeyValue form is accepted."
  },
  {
   "path": "signature-enveloping-p384_sha256.xml",
@@ -185,9 +209,15 @@
    ],
    "transforms": []
   },
-  "expect": "refuse",
-  "error": "ErrUnsupportedKeyInfo",
-  "reason": "Key given as ds:KeyValue (dsig11:ECKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+  "expect": "verify",
+  "coverage": {
+   "whole_document_signed": false,
+   "signed_element_ids": [
+    "DSig.Object_1"
+   ],
+   "key_info_form": "KeyValue"
+  },
+  "verify_options": "IDAttributes: dsig.IDAttrDSig (the ds:Object Id)"
  },
  {
   "path": "signature-enveloping-p384_sha256_4050.xml",
@@ -206,7 +236,7 @@
   },
   "expect": "refuse",
   "error": "ErrUnsupportedKeyInfo",
-  "reason": "Key given as ds:KeyValue (RFC 4050 ECDSAKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+  "reason": "Key given in the RFC 4050 ECDSAKeyValue form (xmldsig-more namespace), which go-xmlsec does not accept; the XML Signature 1.1 dsig11:ECKeyValue form is accepted."
  },
  {
   "path": "signature-enveloping-p384_sha384.xml",
@@ -223,9 +253,15 @@
    ],
    "transforms": []
   },
-  "expect": "refuse",
-  "error": "ErrUnsupportedKeyInfo",
-  "reason": "Key given as ds:KeyValue (dsig11:ECKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+  "expect": "verify",
+  "coverage": {
+   "whole_document_signed": false,
+   "signed_element_ids": [
+    "DSig.Object_1"
+   ],
+   "key_info_form": "KeyValue"
+  },
+  "verify_options": "IDAttributes: dsig.IDAttrDSig (the ds:Object Id)"
  },
  {
   "path": "signature-enveloping-p384_sha384_4050.xml",
@@ -244,7 +280,7 @@
   },
   "expect": "refuse",
   "error": "ErrUnsupportedKeyInfo",
-  "reason": "Key given as ds:KeyValue (RFC 4050 ECDSAKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+  "reason": "Key given in the RFC 4050 ECDSAKeyValue form (xmldsig-more namespace), which go-xmlsec does not accept; the XML Signature 1.1 dsig11:ECKeyValue form is accepted."
  },
  {
   "path": "signature-enveloping-p384_sha512.xml",
@@ -261,9 +297,15 @@
    ],
    "transforms": []
   },
-  "expect": "refuse",
-  "error": "ErrUnsupportedKeyInfo",
-  "reason": "Key given as ds:KeyValue (dsig11:ECKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+  "expect": "verify",
+  "coverage": {
+   "whole_document_signed": false,
+   "signed_element_ids": [
+    "DSig.Object_1"
+   ],
+   "key_info_form": "KeyValue"
+  },
+  "verify_options": "IDAttributes: dsig.IDAttrDSig (the ds:Object Id)"
  },
  {
   "path": "signature-enveloping-p384_sha512_4050.xml",
@@ -282,7 +324,7 @@
   },
   "expect": "refuse",
   "error": "ErrUnsupportedKeyInfo",
-  "reason": "Key given as ds:KeyValue (RFC 4050 ECDSAKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+  "reason": "Key given in the RFC 4050 ECDSAKeyValue form (xmldsig-more namespace), which go-xmlsec does not accept; the XML Signature 1.1 dsig11:ECKeyValue form is accepted."
  },
  {
   "path": "signature-enveloping-p521_sha256.xml",
@@ -299,9 +341,15 @@
    ],
    "transforms": []
   },
-  "expect": "refuse",
-  "error": "ErrUnsupportedKeyInfo",
-  "reason": "Key given as ds:KeyValue (dsig11:ECKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+  "expect": "verify",
+  "coverage": {
+   "whole_document_signed": false,
+   "signed_element_ids": [
+    "DSig.Object_1"
+   ],
+   "key_info_form": "KeyValue"
+  },
+  "verify_options": "IDAttributes: dsig.IDAttrDSig (the ds:Object Id)"
  },
  {
   "path": "signature-enveloping-p521_sha256_4050.xml",
@@ -320,7 +368,7 @@
   },
   "expect": "refuse",
   "error": "ErrUnsupportedKeyInfo",
-  "reason": "Key given as ds:KeyValue (RFC 4050 ECDSAKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+  "reason": "Key given in the RFC 4050 ECDSAKeyValue form (xmldsig-more namespace), which go-xmlsec does not accept; the XML Signature 1.1 dsig11:ECKeyValue form is accepted."
  },
  {
   "path": "signature-enveloping-p521_sha384.xml",
@@ -337,9 +385,15 @@
    ],
    "transforms": []
   },
-  "expect": "refuse",
-  "error": "ErrUnsupportedKeyInfo",
-  "reason": "Key given as ds:KeyValue (dsig11:ECKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+  "expect": "verify",
+  "coverage": {
+   "whole_document_signed": false,
+   "signed_element_ids": [
+    "DSig.Object_1"
+   ],
+   "key_info_form": "KeyValue"
+  },
+  "verify_options": "IDAttributes: dsig.IDAttrDSig (the ds:Object Id)"
  },
  {
   "path": "signature-enveloping-p521_sha384_4050.xml",
@@ -358,7 +412,7 @@
   },
   "expect": "refuse",
   "error": "ErrUnsupportedKeyInfo",
-  "reason": "Key given as ds:KeyValue (RFC 4050 ECDSAKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+  "reason": "Key given in the RFC 4050 ECDSAKeyValue form (xmldsig-more namespace), which go-xmlsec does not accept; the XML Signature 1.1 dsig11:ECKeyValue form is accepted."
  },
  {
   "path": "signature-enveloping-p521_sha512.xml",
@@ -375,9 +429,15 @@
    ],
    "transforms": []
   },
-  "expect": "refuse",
-  "error": "ErrUnsupportedKeyInfo",
-  "reason": "Key given as ds:KeyValue (dsig11:ECKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+  "expect": "verify",
+  "coverage": {
+   "whole_document_signed": false,
+   "signed_element_ids": [
+    "DSig.Object_1"
+   ],
+   "key_info_form": "KeyValue"
+  },
+  "verify_options": "IDAttributes: dsig.IDAttrDSig (the ds:Object Id)"
  },
  {
   "path": "signature-enveloping-p521_sha512_4050.xml",
@@ -396,7 +456,7 @@
   },
   "expect": "refuse",
   "error": "ErrUnsupportedKeyInfo",
-  "reason": "Key given as ds:KeyValue (RFC 4050 ECDSAKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+  "reason": "Key given in the RFC 4050 ECDSAKeyValue form (xmldsig-more namespace), which go-xmlsec does not accept; the XML Signature 1.1 dsig11:ECKeyValue form is accepted."
  },
  {
   "path": "signature-enveloping-sha256-rsa-sha256.xml",
@@ -415,7 +475,7 @@
   },
   "expect": "refuse",
   "error": "ErrUnsupportedKeyInfo",
-  "reason": "Key given as ds:KeyValue (RSAKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+  "reason": "1024-bit RSA key in ds:KeyValue; go-xmlsec requires at least 2048 bits for a raw RSA key."
  },
  {
   "path": "signature-enveloping-sha384-rsa_sha256.xml",
@@ -434,7 +494,7 @@
   },
   "expect": "refuse",
   "error": "ErrUnsupportedKeyInfo",
-  "reason": "Key given as ds:KeyValue (RSAKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+  "reason": "1024-bit RSA key in ds:KeyValue; go-xmlsec requires at least 2048 bits for a raw RSA key."
  },
  {
   "path": "signature-enveloping-sha512-rsa_sha256.xml",
@@ -453,7 +513,7 @@
   },
   "expect": "refuse",
   "error": "ErrUnsupportedKeyInfo",
-  "reason": "Key given as ds:KeyValue (RSAKeyValue); only X509Certificate is accepted. Independently, the signature and digest are valid with that key. The reference (#Id on ds:Object, no transforms) would next be refused: plain Id attributes are not resolved and implicit C14N 1.0 is refused."
+  "reason": "1024-bit RSA key in ds:KeyValue; go-xmlsec requires at least 2048 bits for a raw RSA key."
  },
  {
   "path": "signature-enveloping-x509digest-rsa.xml",
@@ -472,6 +532,6 @@
   },
   "expect": "refuse",
   "error": "ErrUnsupportedKeyInfo",
-  "reason": "ds:X509Data holds only a dsig11:X509Digest, which names a certificate the document does not carry; unsupported KeyInfo form. Reference digest checks out independently (C14N 1.0 implicit, #Id on ds:Object)."
+  "reason": "Key given only by dsig11:X509Digest, a certificate digest without the certificate, which go-xmlsec cannot use."
  }
 ]

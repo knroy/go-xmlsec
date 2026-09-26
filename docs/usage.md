@@ -124,11 +124,18 @@ cov, err := dsig.Verify(doc, sigElement, dsig.VerifyOptions{
 Pass exactly the algorithms your profile permits. An empty list means every
 algorithm this module implements, which is a downgrade surface.
 
+To pin a sender known by a raw key rather than a certificate, set
+`VerifyOptions.PublicKey` instead of `Certificate`; setting both is an
+error. A pinned key replaces `KeyInfo` and is not compared with it, but an
+unsupported or malformed `KeyInfo` is still refused. When signing,
+`KeyInfoKeyValue` and `KeyInfoDEREncodedKeyValue` emit the signer's key
+without a certificate.
+
 Two more options narrow what is accepted:
 
 | Option | Effect |
 |---|---|
-| `TrustCertificate func(*x509.Certificate) error` | Called with the signer's certificate before any cryptographic or digest work; an error stops verification with `ErrUntrusted`. Use it when you cannot pin one certificate but know which you accept: a refused sender costs nothing to process. |
+| `TrustKey func(cert *x509.Certificate, key crypto.PublicKey) error` | Called with the signer's key, and its certificate when there is one, before any cryptographic or digest work; an error stops verification with `ErrUntrusted`. Use it when you cannot pin one certificate but know which you accept: a refused sender costs nothing to process. |
 | `RequireExplicitCanonicalization` | Refuse a reference that relies on the Canonical XML 1.0 implied by XML-DSig 4.4.3.2, even when that algorithm is in the allow-list. Off by default, because most signers rely on it. |
 
 Then check `Coverage`, every time:
@@ -140,6 +147,7 @@ Then check `Coverage`, every time:
 | `WholeDocumentSigned` | set for an enveloped signature |
 | `KeyInfoForm` | the key was described the way your profile requires |
 | `Certificate` | **you** establish that it is trusted |
+| `PublicKey` | the key the signature was verified with; `Certificate` is nil when it was a raw key |
 | `References` | the digests, for receipts that echo them; `Raw` is each `ds:Reference` in the SignedInfo's canonical form |
 
 Errors worth distinguishing, all matchable with `errors.Is`:

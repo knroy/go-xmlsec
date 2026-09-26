@@ -55,6 +55,8 @@ var keyInfoForms = map[string]dsig.KeyInfoSpec{
 	"None":                   dsig.KeyInfoNone,
 	"X509Data":               dsig.KeyInfoX509Data,
 	"SecurityTokenReference": dsig.KeyInfoSecurityTokenReference,
+	"KeyValue":               dsig.KeyInfoKeyValue,
+	"DEREncodedKeyValue":     dsig.KeyInfoDEREncodedKeyValue,
 }
 
 func TestW3CInteropVectors(t *testing.T) {
@@ -92,7 +94,11 @@ func check(t *testing.T, e entry) {
 	}
 	checkAlgorithms(t, e, sig)
 
-	cov, err := dsig.Verify(tree.Root, sig, dsig.VerifyOptions{})
+	// The vectors are enveloping signatures over a ds:Object, identified by
+	// the unqualified Id of the XML Signature schema itself.
+	cov, err := dsig.Verify(tree.Root, sig, dsig.VerifyOptions{
+		IDAttributes: []xdm.QName{dsig.IDAttrDSig},
+	})
 	switch e.Expect {
 	case "verify":
 		if err != nil {
@@ -101,7 +107,7 @@ func check(t *testing.T, e entry) {
 		want := e.Coverage
 		if cov.WholeDocumentSigned != want.WholeDocumentSigned ||
 			!slices.Equal(cov.SignedElementIDs, want.SignedElementIDs) && len(cov.SignedElementIDs)+len(want.SignedElementIDs) > 0 ||
-			cov.KeyInfoForm != keyInfoForms[want.KeyInfoForm] || cov.Certificate == nil {
+			cov.KeyInfoForm != keyInfoForms[want.KeyInfoForm] || cov.PublicKey == nil {
 			t.Errorf("coverage: whole=%v ids=%v form=%v, want %+v",
 				cov.WholeDocumentSigned, cov.SignedElementIDs, cov.KeyInfoForm, want)
 		}

@@ -9,8 +9,9 @@ peer rejects it with no diagnostic.
 
 What `dsig.Verify` establishes, and all it establishes:
 
-> The signature was made by the key in `Coverage.Certificate`, over exactly
-> the nodes and attachments listed in `Coverage`.
+> The signature was made by the key in `Coverage.PublicKey` (the key of
+> `Coverage.Certificate` when there is one), over exactly the nodes and
+> attachments listed in `Coverage`.
 
 What it does **not** establish:
 
@@ -71,7 +72,7 @@ single profile.
 | DOCTYPE | Entry point for XXE and entity expansion. `xmlsec.Parse` never enables it and never supplies an entity resolver; `TestParseRefusesXXE` asserts it for every variant in the assessment below. |
 | Network or filesystem dereferencing | Only `""`, `#id` and `cid:` references resolve. `TestVerifyDereferencesNothingExternal` asserts it with an authentic signature, so the refusal is not merely a side effect of an earlier failure. |
 | RSA PKCS#1 v1.5 key transport (`rsa-1_5`) | The Bleichenbacher padding-oracle class. Not implemented, so not accepted. |
-| KeyInfo forms other than a certificate or a direct `SecurityTokenReference` | Accepted: `ds:X509Data` carrying exactly one `ds:X509Certificate`, beside which `X509SubjectName`, `X509IssuerSerial` and `X509SKI` are ignored: they only describe the certificate, and the key is always taken from the certificate itself. Refused: a second certificate, raw keys (`KeyValue`), key references (`KeyInfoReference`, `RetrievalMethod`) and digests (`X509Digest`), which would need a key-selection policy this library does not make. |
+| KeyInfo forms other than a certificate, a direct `SecurityTokenReference`, or a lone raw key | Accepted: `ds:X509Data` with exactly one `ds:X509Certificate` (with `X509SubjectName`, `X509IssuerSerial`, `X509SKI` beside it ignored); a lone `ds:KeyValue` holding `ds:RSAKeyValue` or a `dsig11:ECKeyValue` with a `NamedCurve` for P-256, P-384 or P-521; a lone `dsig11:DEREncodedKeyValue` holding an RSA or ECDSA key on those curves. Raw RSA keys need at least 2048 bits (`crypto/rsa` alone allows 1024), an odd modulus, and an odd exponent from 3 to 2³¹−1. EC points must be uncompressed and on the curve. Refused: a second certificate, explicit `ECParameters`, other curves, `DSAKeyValue`, the RFC 4050 `ECDSAKeyValue`, key references (`KeyInfoReference`, `RetrievalMethod`), digests (`X509Digest`), and any combination of forms. |
 
 ## Resource limits
 
@@ -127,9 +128,10 @@ is then valid, and every reference is digested before the caller sees
 8 MB element cost 5.1 s of CPU; the same message against a pinned
 certificate is refused at once.
 
-Pin the certificate whenever the sender is known in advance. When it is not,
-set `VerifyOptions.TrustCertificate`: it sees the signer's certificate
-before any cryptographic or digest work, so refusing an unknown sender costs
+Pin the certificate, or the key with `VerifyOptions.PublicKey`, whenever the
+sender is known in advance. When it is not,
+set `VerifyOptions.TrustKey`: it sees the signer's key and
+certificate before any cryptographic or digest work, so refusing an unknown sender costs
 nothing. And set `MaxReferences` to what the profile needs (a WS-Security
 message signing a header, a body and a few attachments needs well under 64).
 
@@ -164,11 +166,12 @@ test in `tests/security` or beside the package it exercises.
 
 ## What a caller must still do
 
-1. Decide whether `Coverage.Certificate` is trusted.
+1. Decide whether `Coverage.Certificate`, or `Coverage.PublicKey` when
+   there is no certificate, is trusted.
 2. Check `Coverage` against the profile, every time.
 3. Pass single-value allow-lists for the profile.
 4. Parse with `xmlsec.Parse`, and keep the received octets.
 5. Tighten the parse limits with `ParseWithLimits`, and pin the certificate
-   or judge it in `TrustCertificate`; see the cost sections above.
+   or judge it in `TrustKey`; see the cost sections above.
 6. Transmit `SignEnveloped` and `EncryptElement` output exactly, never
    re-serialized.

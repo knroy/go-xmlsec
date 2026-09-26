@@ -88,7 +88,7 @@ and encryption in full.
 `Coverage` lists, and nothing more. Before trusting a message:
 
 1. **Pin the certificate** with `VerifyOptions.Certificate` when you know the
-   sender, or judge it in `VerifyOptions.TrustCertificate`, which runs before
+   sender, or judge it in `VerifyOptions.TrustKey`, which runs before
    any cryptographic work. Otherwise the certificate comes from the message
    itself, and deciding whether to trust it is up to you: this library makes
    no trust decisions.

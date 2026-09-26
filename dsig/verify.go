@@ -76,13 +76,13 @@ type VerifyOptions struct {
 	// bounds how much work one message can force.
 	MaxReferences int
 
-	// TrustCertificate, if set, is called with the certificate the signature
-	// is about to be verified against, after ds:KeyInfo is resolved and
-	// before any cryptographic or digest work. Returning an error stops
-	// verification with ErrUntrusted, wrapping it. It lets a caller that
-	// cannot pin one certificate still refuse a sender's key before the
-	// message costs anything to process.
-	TrustCertificate func(*x509.Certificate) error
+	// TrustKey, if set, is called with the key the signature is about to be
+	// verified against, and its certificate when there is one (nil for a raw
+	// key), after ds:KeyInfo is resolved and before any cryptographic or
+	// digest work. Returning an error stops verification with ErrUntrusted,
+	// wrapping it. It lets a caller that cannot pin one key still refuse a
+	// sender before the message costs anything to process.
+	TrustKey func(cert *x509.Certificate, key crypto.PublicKey) error
 
 	// RequireExplicitCanonicalization refuses a same-document reference
 	// whose transforms end in a node set, instead of completing it with the
@@ -262,8 +262,8 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 	if pub == nil {
 		return nil, fmt.Errorf("%w: no key supplied and none in ds:KeyInfo", xmlsec.ErrUnsupportedKeyInfo)
 	}
-	if opts.TrustCertificate != nil {
-		if err := opts.TrustCertificate(cert); err != nil {
+	if opts.TrustKey != nil {
+		if err := opts.TrustKey(cert, pub); err != nil {
 			return nil, fmt.Errorf("%w: %w", xmlsec.ErrUntrusted, err)
 		}
 	}
