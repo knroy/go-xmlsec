@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    # Three operating systems: nothing here touches the filesystem today, but
+    # line endings in a checkout change what gofmt and golden octets see, and
+    # that is exactly the kind of difference that breaks quietly on Windows.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: gofmt
+        shell: bash
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then echo "not gofmt'd:"; echo "$unformatted"; exit 1; fi
+      - run: go vet ./...
+      - name: Build without cgo
+        shell: bash
+        run: CGO_ENABLED=0 go build ./...
+      - run: go test -race -cover ./...
+
+  hygiene:
+    # The module must know nothing of the profiles that consume it: no import
+    # of a peppol-* module, and no mention of one in Go source outside
+    # internal/ test fixtures. Docs may name the consumer; code may not.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: No peppol imports
+        run: |
+          if go list -deps -test ./... | grep -i peppol; then
+            echo "::error::go-xmlsec must not import any peppol module"; exit 1
+          fi
+      - name: No peppol in Go source outside internal/
+        run: |
+          if grep -rli peppol --include='*.go' --exclude-dir=internal .; then
+            echo "::error::the string \"peppol\" appears in Go source outside internal/"; exit 1
+          fi

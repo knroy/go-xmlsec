@@ -1,0 +1,60 @@
+name: Release
+
+# Only a tag push reaches this workflow, and only someone with push access can
+# push a tag: that is the whole argument for the one write grant below. No
+# pull_request, pull_request_target or workflow_dispatch trigger, ever.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: The tag must match the committed constant
+        run: |
+          set -euo pipefail
+          constant=$(sed -n 's/^const Version = "\(.*\)"$/\1/p' internal/version/version.go)
+          echo "tag=${GITHUB_REF_NAME}  version.Version=${constant}"
+          if [ "${GITHUB_REF_NAME}" != "v${constant}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match version.Version (${constant})."
+            echo "The constant is the source of truth; the tag follows it. Nothing has been created."
+            echo "  git tag -d ${GITHUB_REF_NAME} && git push --delete origin ${GITHUB_REF_NAME}"
+            exit 1
+          fi
+
+      - name: The changelog must have a section for this version
+        run: |
+          set -euo pipefail
+          v="${GITHUB_REF_NAME#v}"
+          awk -v v="## v${v}" '
+            index($0, v) == 1 { inside = 1; next }
+            inside && /^## / { exit }
+            inside { print }
+          ' CHANGELOG.md > "${RUNNER_TEMP}/notes.md"
+          if [ ! -s "${RUNNER_TEMP}/notes.md" ]; then
+            echo "::error::CHANGELOG.md has no non-empty \"## v${v}\" section."
+            exit 1
+          fi
+
+      - run: go vet ./...
+      - run: go test -race ./...
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" \
+            --notes-file "${RUNNER_TEMP}/notes.md" --prerelease

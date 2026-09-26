@@ -1,0 +1,17 @@
+# Documentation
+
+* **[Usage](usage.md)** — signing and verifying (WS-Security and enveloped),
+  encrypting keys, elements and attachments, and the order to compose them in.
+* **[Security](security.md)** — the threat model, what `Coverage` is for, the
+  deliberate refusals, the resource limits, and what a caller must still do.
+* **[Testing](testing.md)** — what runs, the conformance test IDs, how to run
+  any of it, and what is not tested yet.
+* **[TODO](todo.md)** — what is left before v1: the acceptance criteria that
+  do not hold yet, the open items, and where the implementation departs from
+  its design document.
+* **[CHANGELOG.md](../CHANGELOG.md)** — every change, with the commit.
+* **[Releasing](../RELEASE.md)** — the four steps, and why the version is a
+  hand-edited constant.
+
+Start with [security.md](security.md) if you are here to verify signatures on
+messages you did not write. It is the part most likely to matter.
