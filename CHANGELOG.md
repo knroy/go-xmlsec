@@ -5,6 +5,21 @@ versioning](https://semver.org): within v1 no exported name is removed or
 changed. See [RELEASE.md](RELEASE.md) for the compatibility promise and how a
 release is cut.
 
+## Unreleased
+
+Every RECOMMENDED and OPTIONAL feature of the implemented specifications that
+v1.0.0 left out, each an opt-in: nothing a v1.0.0 caller accepts or produces
+changes.
+
+### Added
+
+| Change | What it does | Commit |
+|---|---|---|
+| XPath, XPath Filter 2.0 and XSLT transforms as opt-ins | `dsig.Sign` produces them from `TransformSpec.XPath`, `XPathNamespaces`, `XPathFilters` and `Stylesheet`. `dsig.Verify` evaluates them only for programs in `VerifyOptions.AllowedXPathExpressions` or `AllowedXSLTStylesheets` (exact text, prefix bindings checked, compiled from the allow-list; stylesheets matched under Exclusive C14N), refusing anything else with `ErrTransformRefused` before any cryptographic work. `here()` supported; XSLT sandboxed with no resolvers and bounded output; `Coverage` drops any target a filter partly removed, and XSLT output covers nothing. Byte-identical transform output with Santuario; `here()` verified by xmlsec1. | [`13a61dc`][13a61dc] |
+| External URI dereferencing through a caller resolver | `xmlsec.URIResolver`, passed as `dsig.SignOptions.ResolveURI`, `dsig.VerifyOptions.ResolveURI` or `xenc.DecryptOptions.ResolveURI`, supplies the octets of an absolute non-`cid:` URI in a `ds:Reference` or `xenc:CipherReference` (XML Signature §4.4.3.1); the library still never fetches. On verification it is called only after the allow-lists, `TrustKey` and the signature value pass; external references are reported in `Coverage.ExternalURIs`; errors wrap the new `xmlsec.ErrDereference`. Relative URIs stay refused. | [`57349cb`][57349cb] |
+| PKCS7 binary security tokens | `xmlsec.BSTValueTypePKCS7`: `AddBinarySecurityToken` emits a DER certs-only PKCS#7 SignedData; `ParseBinarySecurityToken`, token references and `dsig.Verify` read one strictly (SignedData v1, data content, X.509 only, at most 16 certificates; CRLs and signer infos ignored) and return the one certificate that issued none of the others, or `ErrUnsupportedKeyInfo`. Byte-identical to OpenSSL `crl2pkcs7` and the JDK's PKCS#7 encoder. | [`bec715d`][bec715d] |
+| Finite-field Diffie-Hellman and PBKDF2 (XML Encryption 1.1 §5.6.2, §5.4.2) | `xenc.DecryptAgreedKeyDH`, `DHPublicKey`, `DHPrivateKey`, `GenerateDHKey` and `EncryptOptions.RecipientDH`/`RecipientKeyName` add `dh-es` and the legacy `dh` in 2048–8192-bit groups with subgroup validation; `UnwrapEncryptedKeyPassword` and `EncryptOptions.Password`/`PBKDF2Iterations` add PBKDF2, also usable as a key agreement's KDF, with received iteration counts bounded to 1000–10,000,000 before any work. New `DecryptOptions.AllowedKeyDerivationAlgorithms` (default ConcatKDF) and `AllowedPRFAlgorithms`; none of the new algorithms is in a default set. Checked against xmlsec1 in both directions. | [`6736ffd`][6736ffd] |
+
 ## v1.0.0 — 2026-09-26
 
 First release.
@@ -92,3 +107,7 @@ First release.
 [e4c7509]: https://github.com/knroy/go-xmlsec/commit/e4c7509
 [cc53cf7]: https://github.com/knroy/go-xmlsec/commit/cc53cf7
 [e90defe]: https://github.com/knroy/go-xmlsec/commit/e90defe
+[13a61dc]: https://github.com/knroy/go-xmlsec/commit/13a61dc
+[57349cb]: https://github.com/knroy/go-xmlsec/commit/57349cb
+[bec715d]: https://github.com/knroy/go-xmlsec/commit/bec715d
+[6736ffd]: https://github.com/knroy/go-xmlsec/commit/6736ffd
