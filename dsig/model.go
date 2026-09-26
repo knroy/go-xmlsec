@@ -65,7 +65,8 @@ type Reference struct {
 	// Sign never produces one.)
 	Transforms []TransformSpec
 
-	// DigestAlgorithm is a Digest* constant. Required.
+	// DigestAlgorithm is a Digest* constant. Required. The legacy
+	// verification-only xmlsec.DigestSHA1 is refused.
 	DigestAlgorithm string
 }
 
@@ -120,7 +121,7 @@ var withoutComments = map[c14n.Algorithm]c14n.Algorithm{
 }
 
 // ecdsaAlgorithms are the Sig* constants that take an ECDSA key. The others
-// take RSA.
+// take RSA, except the legacy dsa-sha1 and HMAC ones (legacy.go).
 var ecdsaAlgorithms = map[string]bool{
 	xmlsec.SigECDSASHA256: true,
 	xmlsec.SigECDSASHA384: true,

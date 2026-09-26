@@ -2,7 +2,7 @@ package xmlsec
 
 import "crypto"
 
-// Signature algorithm URIs. SHA-1 variants are deliberately absent.
+// Signature algorithm URIs, for signing and verification.
 const (
 	SigRSASHA256   = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
 	SigRSASHA384   = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha384"
@@ -17,6 +17,31 @@ const (
 	DigestSHA256 = "http://www.w3.org/2001/04/xmlenc#sha256"
 	DigestSHA384 = "http://www.w3.org/2001/04/xmldsig-more#sha384"
 	DigestSHA512 = "http://www.w3.org/2001/04/xmlenc#sha512"
+)
+
+// Legacy XML Signature 1.1 algorithms (section 6.1), implemented for
+// VERIFICATION ONLY. Sign never produces them, SignatureHash and DigestHash
+// do not return them, and no default set includes them: dsig.Verify accepts
+// one only when the caller names it in the matching VerifyOptions allow-list.
+const (
+	// DigestSHA1 is SHA-1 (section 6.2.1), REQUIRED; "use is DISCOURAGED".
+	DigestSHA1 = "http://www.w3.org/2000/09/xmldsig#sha1"
+
+	// SigRSASHA1 is RSA PKCS#1 v1.5 with SHA-1 (section 6.4.2), RECOMMENDED
+	// for signature verification only.
+	SigRSASHA1 = "http://www.w3.org/2000/09/xmldsig#rsa-sha1"
+
+	// SigDSASHA1 is DSA with SHA-1 (section 6.4.1), REQUIRED for signature
+	// verification only, with (L, N) = (1024, 160) keys.
+	SigDSASHA1 = "http://www.w3.org/2000/09/xmldsig#dsa-sha1"
+
+	// The HMAC MACs (section 6.3.1): SHA-1 and SHA-256 REQUIRED, SHA-384 and
+	// SHA-512 RECOMMENDED. The key is only ever dsig.VerifyOptions.HMACKey,
+	// never ds:KeyInfo.
+	SigHMACSHA1   = "http://www.w3.org/2000/09/xmldsig#hmac-sha1"
+	SigHMACSHA256 = "http://www.w3.org/2001/04/xmldsig-more#hmac-sha256"
+	SigHMACSHA384 = "http://www.w3.org/2001/04/xmldsig-more#hmac-sha384"
+	SigHMACSHA512 = "http://www.w3.org/2001/04/xmldsig-more#hmac-sha512"
 )
 
 // Transform URIs.

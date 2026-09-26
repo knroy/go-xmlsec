@@ -9,8 +9,8 @@ import (
 )
 
 // An empty allow-list means the default set; an algorithm outside it is
-// accepted only when a list names it. Today the default sets are everything
-// implemented.
+// accepted only when a list names it. The legacy, verification-only
+// algorithms are implemented and outside the default sets.
 func TestAllowedDefaultSet(t *testing.T) {
 	const legacy = "urn:example:legacy"
 	if err := allowed("signature", legacy, nil, defaultSignature); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
@@ -40,7 +40,20 @@ func TestAllowedDefaultSet(t *testing.T) {
 			t.Errorf("%s not in the default set", a)
 		}
 	}
-	if defaultSignature("http://www.w3.org/2000/09/xmldsig#rsa-sha1") || defaultDigest("http://www.w3.org/2000/09/xmldsig#sha1") || defaultC14N("urn:x") {
+	if defaultSignature("urn:x") || defaultDigest("urn:x") || defaultC14N("urn:x") {
 		t.Error("an unimplemented algorithm is in the default set")
+	}
+	for alg := range legacySignatures {
+		if _, ok := signatureHash(alg); defaultSignature(alg) || !ok {
+			t.Errorf("legacy %s: in the default set, or not implemented", alg)
+		}
+	}
+	for alg := range legacyDigests {
+		if _, ok := digestHash(alg); defaultDigest(alg) || !ok {
+			t.Errorf("legacy %s: in the default set, or not implemented", alg)
+		}
+	}
+	if len(legacySignatures) != 6 || len(legacyDigests) != 1 {
+		t.Error("legacy algorithm set changed")
 	}
 }

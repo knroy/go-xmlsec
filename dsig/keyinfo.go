@@ -40,8 +40,9 @@ var namedCurves = map[elliptic.Curve]string{
 // dsig11:DEREncodedKeyValue holding a raw key; or a lone
 // dsig11:KeyInfoReference to a ds:KeyInfo in the same document holding one
 // of those. idAttrs are the ID attributes the reference resolves against
-// beyond wsu:Id and xml:id.
-func resolveKeyInfo(doc, ki *xdm.Node, idAttrs []xdm.QName, strict bool) (*x509.Certificate, crypto.PublicKey, KeyInfoSpec, error) {
+// beyond wsu:Id and xml:id. dsaKeyValue admits a ds:DSAKeyValue, which Verify
+// sets only for a dsa-sha1 signature, itself only ever explicitly allowed.
+func resolveKeyInfo(doc, ki *xdm.Node, idAttrs []xdm.QName, strict, dsaKeyValue bool) (*x509.Certificate, crypto.PublicKey, KeyInfoSpec, error) {
 	if ki == nil {
 		return nil, nil, KeyInfoNone, nil
 	}
@@ -51,7 +52,7 @@ func resolveKeyInfo(doc, ki *xdm.Node, idAttrs []xdm.QName, strict bool) (*x509.
 		if err != nil {
 			return nil, nil, KeyInfoNone, err
 		}
-		return resolveKeyInfo(doc, target, idAttrs, strict)
+		return resolveKeyInfo(doc, target, idAttrs, strict, dsaKeyValue)
 	}
 	if len(kids) == 1 {
 		switch k := kids[0]; {
@@ -63,7 +64,7 @@ func resolveKeyInfo(doc, ki *xdm.Node, idAttrs []xdm.QName, strict bool) (*x509.
 			cert, err := resolve(doc, k)
 			return withKey(cert, KeyInfoSecurityTokenReference, err)
 		case k.IsElement(NSDSig, "KeyValue"):
-			pub, err := parseKeyValue(k)
+			pub, err := parseKeyValue(k, dsaKeyValue)
 			return nil, pub, KeyInfoKeyValue, err
 		case k.IsElement(nsDSig11, "DEREncodedKeyValue"):
 			pub, err := parseDEREncodedKeyValue(k)
@@ -146,8 +147,9 @@ func withKey(cert *x509.Certificate, form KeyInfoSpec, err error) (*x509.Certifi
 }
 
 // parseKeyValue reads ds:KeyValue holding ds:RSAKeyValue or
-// dsig11:ECKeyValue. DSAKeyValue and the RFC 4050 ECDSAKeyValue are refused.
-func parseKeyValue(kv *xdm.Node) (crypto.PublicKey, error) {
+// dsig11:ECKeyValue, or ds:DSAKeyValue when dsaKeyValue is set. The RFC 4050
+// ECDSAKeyValue is refused.
+func parseKeyValue(kv *xdm.Node, dsaKeyValue bool) (crypto.PublicKey, error) {
 	kids := kv.ChildElements()
 	if len(kids) != 1 {
 		return nil, malformed("ds:KeyValue must hold exactly one key")
@@ -157,6 +159,8 @@ func parseKeyValue(kv *xdm.Node) (crypto.PublicKey, error) {
 		return parseRSAKeyValue(k)
 	case k.IsElement(nsDSig11, "ECKeyValue"):
 		return parseECKeyValue(k)
+	case dsaKeyValue && k.IsElement(NSDSig, "DSAKeyValue"):
+		return parseDSAKeyValue(k)
 	}
 	return nil, fmt.Errorf("%w: {%s}%s in ds:KeyValue", xmlsec.ErrUnsupportedKeyInfo, kids[0].Name.URI, kids[0].Name.Local)
 }

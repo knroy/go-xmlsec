@@ -437,20 +437,38 @@ func TestSignRefusals(t *testing.T) {
 		{"whole document without enveloped", func(o *dsig.SignOptions) {
 			o.References = ref(string(c14n.Exclusive10))
 		}, xmlsec.ErrMalformed},
-		{"sha1", func(o *dsig.SignOptions) {
-			o.SignatureAlgorithm = "http://www.w3.org/2000/09/xmldsig#rsa-sha1"
-		}, xmlsec.ErrUnsupportedAlgorithm},
+		// The legacy algorithms are verification-only.
+		{"rsa-sha1", func(o *dsig.SignOptions) { o.SignatureAlgorithm = xmlsec.SigRSASHA1 }, xmlsec.ErrUnsupportedAlgorithm},
+		{"dsa-sha1", func(o *dsig.SignOptions) { o.SignatureAlgorithm = xmlsec.SigDSASHA1 }, xmlsec.ErrUnsupportedAlgorithm},
+		{"hmac-sha1", func(o *dsig.SignOptions) { o.SignatureAlgorithm = xmlsec.SigHMACSHA1 }, xmlsec.ErrUnsupportedAlgorithm},
+		{"hmac-sha256", func(o *dsig.SignOptions) { o.SignatureAlgorithm = xmlsec.SigHMACSHA256 }, xmlsec.ErrUnsupportedAlgorithm},
+		{"hmac-sha384", func(o *dsig.SignOptions) { o.SignatureAlgorithm = xmlsec.SigHMACSHA384 }, xmlsec.ErrUnsupportedAlgorithm},
+		{"hmac-sha512", func(o *dsig.SignOptions) { o.SignatureAlgorithm = xmlsec.SigHMACSHA512 }, xmlsec.ErrUnsupportedAlgorithm},
+		{"sha1 digest", func(o *dsig.SignOptions) { o.References[0].DigestAlgorithm = xmlsec.DigestSHA1 }, xmlsec.ErrUnsupportedAlgorithm},
+		{"unknown signature", func(o *dsig.SignOptions) { o.SignatureAlgorithm = "urn:x" }, xmlsec.ErrUnsupportedAlgorithm},
 		{"inclusive SignedInfo on a detached signature", func(o *dsig.SignOptions) {
 			o.CanonicalizationAlgorithm = string(c14n.Inclusive10)
 		}, xmlsec.ErrUnsupportedAlgorithm},
 	}
+	legacy := map[string]bool{"rsa-sha1": true, "dsa-sha1": true, "hmac-sha1": true, "hmac-sha256": true,
+		"hmac-sha384": true, "hmac-sha512": true, "sha1 digest": true}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			opts := base
 			opts.References = ref(xmlsec.TransformEnvelopedSignature, string(c14n.Exclusive10))
 			c.mod(&opts)
-			if _, err := dsig.Sign(doc, key, opts); !errors.Is(err, c.want) {
+			_, err := dsig.Sign(doc, key, opts)
+			if !errors.Is(err, c.want) {
 				t.Fatalf("got %v, want %v", err, c.want)
+			}
+			if !legacy[c.name] {
+				return
+			}
+			if !strings.Contains(err.Error(), "verification only") {
+				t.Fatalf("error does not say verification only: %v", err)
+			}
+			if _, err := dsig.SignEnveloped(doc, key, opts); !errors.Is(err, c.want) {
+				t.Fatalf("SignEnveloped: got %v, want %v", err, c.want)
 			}
 		})
 	}

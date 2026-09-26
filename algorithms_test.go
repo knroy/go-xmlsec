@@ -14,10 +14,14 @@ func TestHashLookups(t *testing.T) {
 		ok   bool
 	}{
 		{"signature", SignatureHash, SigECDSASHA384, crypto.SHA384, true},
-		{"signature sha1", SignatureHash, "http://www.w3.org/2000/09/xmldsig#rsa-sha1", 0, false},
+		// The legacy, verification-only algorithms are never returned: they
+		// are neither signable nor in any default set.
+		{"signature rsa-sha1", SignatureHash, SigRSASHA1, 0, false},
+		{"signature dsa-sha1", SignatureHash, SigDSASHA1, 0, false},
+		{"signature hmac-sha256", SignatureHash, SigHMACSHA256, 0, false},
 		{"signature digest URI", SignatureHash, DigestSHA256, 0, false},
 		{"digest", DigestHash, DigestSHA512, crypto.SHA512, true},
-		{"digest sha1", DigestHash, "http://www.w3.org/2000/09/xmldsig#sha1", 0, false},
+		{"digest sha1", DigestHash, DigestSHA1, 0, false},
 		{"digest empty", DigestHash, "", 0, false},
 		{"mgf", MGFHash, MGF1SHA256, crypto.SHA256, true},
 		{"mgf sha1", MGFHash, "http://www.w3.org/2009/xmlenc11#mgf1sha1", 0, false},

@@ -24,7 +24,9 @@ import (
 
 // SignOptions configures signature generation.
 type SignOptions struct {
-	// SignatureAlgorithm is a Sig* constant. Required.
+	// SignatureAlgorithm is a Sig* constant. Required. The legacy
+	// verification-only algorithms (SigRSASHA1, SigDSASHA1, SigHMAC*) are
+	// refused with xmlsec.ErrUnsupportedAlgorithm.
 	SignatureAlgorithm string
 
 	// CanonicalizationAlgorithm canonicalizes ds:SignedInfo itself,
@@ -129,6 +131,9 @@ func SignEnveloped(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions) ([]b
 // sign builds the signature, attaching it to parent first if non-nil so
 // that references and ds:SignedInfo are processed in their final position.
 func sign(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions, parent *xdm.Node) (*xdm.Node, error) {
+	if err := refuseLegacy(opts.SignatureAlgorithm); err != nil {
+		return nil, err
+	}
 	sigHash, ok := xmlsec.SignatureHash(opts.SignatureAlgorithm)
 	if !ok {
 		return nil, fmt.Errorf("%w: signature %q", xmlsec.ErrUnsupportedAlgorithm, opts.SignatureAlgorithm)
@@ -222,6 +227,9 @@ func sign(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions, parent *xdm.N
 // schema invalid (XML-DSig 4.2: implementations "MUST generate laxly schema
 // valid Signature elements"), or that no peer would accept.
 func checkReference(r Reference) error {
+	if err := refuseLegacy(r.DigestAlgorithm); err != nil {
+		return err
+	}
 	if r.ID != "" && !xdm.IsNCName(r.ID) {
 		return fmt.Errorf("%w: Reference.ID %q is not an NCName", xmlsec.ErrMalformed, r.ID)
 	}

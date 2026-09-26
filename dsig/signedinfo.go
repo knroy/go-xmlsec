@@ -14,11 +14,11 @@ type parsedSignature struct {
 	signedInfo *xdm.Node
 	c14n       c14n.Options
 	sigAlg     string
+	sigMethod  *xdm.Node
 
-	sigMethodChildren int
-	refs              []parsedReference
-	value             []byte
-	keyInfo           *xdm.Node // nil when absent
+	refs    []parsedReference
+	value   []byte
+	keyInfo *xdm.Node // nil when absent
 }
 
 type parsedReference struct {
@@ -66,11 +66,11 @@ func parseSignature(sig *xdm.Node, maxRefs int) (*parsedSignature, error) {
 		return nil, err
 	}
 	p.c14n = c14n.Options{Algorithm: c14n.Algorithm(cm.Algorithm), InclusiveNamespacePrefixes: cm.InclusiveNamespacePrefixes}
-	// Children are refused after the allow-list, in verify, so that an HMAC
-	// method (whose HMACOutputLength is a child) is reported as the
-	// disallowed algorithm it is rather than as malformed.
+	// Children are checked after the allow-list, in verify, so that an HMAC
+	// method (whose HMACOutputLength is a child) not allowed is reported as
+	// the disallowed algorithm it is rather than as malformed.
 	p.sigAlg = si[1].AttrValue("Algorithm")
-	p.sigMethodChildren = len(si[1].ChildElements())
+	p.sigMethod = si[1]
 
 	refs := si[2:]
 	if len(refs) > maxRefs {
