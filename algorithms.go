@@ -75,8 +75,11 @@ const (
 	TransformAttachmentCiphertext = "http://docs.oasis-open.org/wss/oasis-wss-SwAProfile-1.1#Attachment-Ciphertext-Transform"
 )
 
-// Transform URIs that are recognised only in order to be refused with
-// ErrTransformRefused. See the package documentation.
+// Transform URIs that carry a program: an XPath expression (XML Signature
+// 6.6.3, XPath Filter 2.0) or an XSLT stylesheet (6.6.5). Verification
+// refuses them with ErrTransformRefused unless the caller allows the exact
+// program; see dsig.VerifyOptions.AllowedXPathExpressions and
+// AllowedXSLTStylesheets. Encryption refuses them on a CipherReference.
 const (
 	TransformXSLT         = "http://www.w3.org/TR/1999/REC-xslt-19991116"
 	TransformXPath        = "http://www.w3.org/TR/1999/REC-xpath-19991116"

@@ -17,7 +17,7 @@ golden-file key.
 |---|---|---|
 | Unit and conformance | `*_test.go` beside each package, named after the source file they test; `internal/swa` holds the SwA MIME header and content canonicalization | every push, Linux, macOS and Windows, under `-race` |
 | Differential against `xmlsec1`, Apache Santuario and WSS4J | `tests/interop`, build tag `interop`, run by `tests/interop.sh` | every push, Linux |
-| Security regressions | `tests/security`: XXE, external fetches, key substitution, algorithm confusion, comment truncation, encryption downgrade | every push, all three systems; a local HTTP listener proves nothing is fetched |
+| Security regressions | `tests/security`: XXE, external fetches, key substitution, algorithm confusion, comment truncation, encryption downgrade, transform programs outside the allow-list and prefix rebinding | every push, all three systems; a local HTTP listener proves nothing is fetched |
 | Fuzzing | `FuzzVerify`, `FuzzDecryptEncryptedKey`, `FuzzDecryptData` | nightly, one hour per target |
 | Static analysis | `staticcheck` v0.8.1, `gosec` v2.29.0, pinned | every push: both clean, no `#nosec` suppressions |
 | W3C interop vectors | `tests/w3c`, a nested module | every push, all three systems |
@@ -47,11 +47,18 @@ Named `TestConformance_<ID>_<description>` for the requirement they prove.
 | `TestUnverifiable` | XML 1.1 and a relative namespace URI each reach `c14n` from untrusted input and surface as `ErrUnverifiable` wrapping the cause |
 | `TestWithCommentsTransforms` | each `#WithComments` transform, exclusive included, signs and verifies |
 | `TestAlgorithms`, `TestAlgorithmCombinations` | every `Sig*` and `Digest*` constant; every data × MGF × OAEP digest combination |
-| `TestSignRefusals` | XSLT, XPath, SHA-1, no final canonicalization, whole-document reference without enveloped, inclusive SignedInfo on a detached signature |
+| `TestSignRefusals` | XSLT without a stylesheet, XPath without an expression, SHA-1, no final canonicalization, whole-document reference without enveloped, inclusive SignedInfo on a detached signature |
+| `TestXPathTransform`, `TestXPathFilter2Transform` (`dsig/xpath_test.go`) | the XPath transform before and after enveloped-signature, twice in a row, over reparsed octets, under a `#id` reference, with `here()` removing only its own signature, with the `xml` prefix, ending on a node set (implicit Canonical XML 1.0); XPath Filter 2.0 intersect, subtract, union, chained, over namespace nodes and with `here()`. Each is refused when not opted in, verifies when allowed, still verifies after a dropped node changes, and fails after a kept one changes; `Coverage` reports exactly what was kept |
+| `TestXPathFilteredElementNotCovered` | an XPath or Filter 2.0 transform that drops the element a `#id` reference names: the signature verifies, the element is not in `Coverage`, and changing it leaves the signature valid |
+| `TestXPathVerifyAdmission`, `TestXPathFilter2VerifyAdmission` | an expression outside the allow-list, a rebound prefix, bindings two entries give differently, and an XSLT allow-list are refused with `ErrTransformRefused`; an extra, missing or wrong XPath element, element content and a bad `Filter` are `ErrMalformed`; surrounding whitespace does not matter |
+| `TestXPathSignErrors`, `TestXPathHereDetached`, `TestXPathShadowedPrefixes`, `TestXPathOmittedURICoverage` | syntax, unbound-prefix and dynamic errors, invalid bindings, a non-node Filter 2.0 result and unparseable octets are `ErrMalformed`; `here()` in a detached signature fails; a prefix may shadow the document's; a reference without URI whose filter drops something reports `OmittedURISigned` false |
+| `TestXSLTTransform`, `TestXSLTStylesheetNamespaces` (`dsig/xslt_test.go`) | XSLT over a node set and over octets, verified against an allow-list; nothing reported covered; a stylesheet rebinding `ds`, declaring a nested namespace and sitting under a default namespace keeps its meaning |
+| `TestXSLTVerifyAdmission`, `TestXSLTSandbox`, `TestXSLTOutputBound` | another stylesheet, and a prefix rebound only inside an XPath expression, are refused; `document()`, `doc()`, `unparsed-text()`, `xsl:include`, `xsl:import`, a terminating message and a serialization error fail; the output bound is `ErrLimitExceeded` |
 | `TestParseRefusesDOCTYPE` | open item X-1: the pinned options refuse a DOCTYPE, asserted rather than read from documentation |
 | `TestParseRefusesXXE`, `TestParseFetchesNothing`, `TestVerifyDereferencesNothingExternal` | every XXE and external-reference route in the [assessment](security.md#assessment) is refused or inert, with zero requests reaching a local listener |
 | `TestExternalReferences`, `TestExternalCipherReference` | an absolute-URI reference signs and verifies through `ResolveURI`, raw and through a canonicalization that parses the octets, and is reported in `Coverage.ExternalURIs`; no resolver, a relative or unparsable URI and `cid:` are refused without calling it; resolver errors wrap `ErrDereference`; an external `CipherReference` decrypts raw or base64, and refused transforms never reach the resolver |
 | `TestResolverCalledOnlyForAuthenticSignatures`, `TestCipherReferenceResolverAfterAllowList` | the resolver is never called for an untrusted key, a different pinned key, a disallowed signature or digest algorithm, a URI rewritten after signing, or a disallowed data algorithm |
+| `TestAttackerProgramRefusedBeforeEvaluation`, `TestXPathPrefixRebindingRefused`, `TestAllowedXSLTFetchesNothing` (`tests/security`) | an attacker's XPath, Filter 2.0 expression or stylesheet outside the allow-list is `ErrTransformRefused` ahead of the wrong-key failure, so before anything is evaluated; the allowed expression text with its prefix bound elsewhere is refused; an allowed stylesheet reaching for `file:` or `http:` through `document()`, `xsl:include` or `xsl:import` fails, with zero requests reaching a local listener |
 | `TestRawKeyRoundTrip`, `TestRawKeyInfoStructure`, `TestCoveragePublicKey` | each raw-key form with RSA and P-256/384/521, self-described and pinned; a different pinned key refused; malformed and refused raw keys (short RSA, even modulus or exponent, off-curve and compressed points, explicit parameters, unknown curves) |
 | `TestPinnedCertificateIgnoresEmbeddedKey`, `TestAlgorithmConfusion` | an attacker's own key is refused against a pinned certificate; HMAC, SHA-1 and key-type confusion are refused |
 | `TestXPointerReferences`, `TestBase64OfNodeSet`, `TestOmittedURI`, `TestKeyInfoReference`, `TestPinnedKeyIgnoresUnsupportedKeyInfo` | the XML Signature 1.1 processing rules: XPointer forms keeping comments, base64 over a node set, the one URI-less reference, same-document `KeyInfoReference`, and a pinned key tolerating an unsupported `KeyInfo` |
@@ -102,6 +109,8 @@ package, does not implement XML Encryption 1.1 `rsa-oaep`.
 | `TestSantuarioXPointerReferences` | Santuario, both ways | `#xpointer(/)` and `#xpointer(id('…'))` with comments; byte-identical `SignatureValue`; a changed comment is refused |
 | `TestSantuarioVerifiesOurInPlaceInclusiveSignature` | ours → Santuario | an inclusive-canonicalization signature computed in place (`SignOptions.Parent`) |
 | `TestWeVerifySantuarioExternalReference`, `TestSantuarioVerifiesOurExternalReference` | Santuario, both ways | a reference to `http://example.invalid/…`, as raw octets and through exclusive C14N, served from a local file by a Santuario `ResourceResolver` and by our `ResolveURI`: nothing is fetched; Santuario refuses other octets |
+| `TestSantuarioTransforms` | Santuario, both ways, digest equality | the XPath transform, the absolute `not(//ancestor-or-self::x)`, which both sides digest as the empty node set, XPath Filter 2.0 intersect, subtract and union, and XSLT; equal `DigestValue`s, so byte-identical transform output; changing a dropped node verifies, changing a kept one fails, on both sides |
+| `TestXmlsec1VerifiesOurHere` | ours → xmlsec1 | `here()` in an XPath and an XPath Filter 2.0 transform. Santuario 4 has no `here()`: its JDK XPath engine reports the function unknown |
 | `TestReferenceImplementationsDecryptOurECDHES`, `TestWeDecryptSantuarioECDHES`, `TestWeDecryptXmlsec1ECDHES` | both ways | ECDH-ES with ConcatKDF on P-256, P-384 and P-521 |
 | `TestReferenceImplementationsDecryptOurKeyWrap`, `TestWeDecryptTheirKeyWrap` | both ways | AES key wrap |
 | `TestDecryptReplaceKeepsNoNamespace` | ours → both | a decrypted element that undeclares a default namespace stays in no namespace |
@@ -111,7 +120,10 @@ package, does not implement XML Encryption 1.1 `rsa-oaep`.
 **ID attributes.** The Santuario harness takes leading `--id-attr NAME`
 options (repeatable, unqualified names) that register extra ID attributes,
 for example `santuario --id-attr ID verify doc.xml cert.pem`; `sign-enveloped`
-takes an optional seventh argument, the reference URI. `TestSantuarioSAMLAssertionByID`
+takes an optional seventh argument, the reference URI. `sign-transform` signs
+with enveloped-signature, one XPath, XPath Filter 2.0 or XSLT transform and
+Exclusive C14N; `verify-insecure` verifies with Santuario's secure
+validation off, which otherwise refuses XSLT. `TestSantuarioSAMLAssertionByID`
 checks a SAML-style assertion signed over `ID` in both directions, with
 byte-identical `SignatureValue`, and that Santuario fails without the
 registration.
@@ -163,7 +175,7 @@ beside the assertion that uses it:
 | Enveloped metadata document | a document element declaring an unused namespace, with a comment, signed whole | S-3 and S-4, `TestSignedInfoCanonicalizedInPlace` (the unused namespace is what makes in-place canonicalization observable), `tests/interop` |
 | SOAP 1.1 envelope | minimal, for header construction and ID resolution | `wss` |
 | Invoice and SOAP order | the smallest documents that show each API | `dsig/example_test.go`, quoted in the README |
-| Adversarial documents | XXE and DTD variants, relocated and duplicated IDs, algorithm and key substitutions | `tests/security`, `TestVerifyNegative`, `TestSignRefusals` |
+| Adversarial documents | XXE and DTD variants, relocated and duplicated IDs, algorithm and key substitutions, attacker transform programs | `tests/security`, `TestVerifyNegative`, `TestSignRefusals` |
 
 **Reference implementations.** Built into one image by `tests/Dockerfile`:
 

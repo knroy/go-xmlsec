@@ -12,8 +12,9 @@ var (
 	// cryptographic work.
 	ErrAlgorithmNotAllowed = errors.New("xmlsec: algorithm not allowed")
 
-	// ErrTransformRefused is returned for the XSLT and XPath transforms,
-	// which this library refuses by design.
+	// ErrTransformRefused is returned for an XSLT, XPath or XPath Filter 2.0
+	// transform whose stylesheet or expression the caller has not allowed,
+	// before any cryptographic work.
 	ErrTransformRefused = errors.New("xmlsec: transform refused")
 
 	// ErrUnverifiable is returned when a document can never be verified

@@ -24,9 +24,10 @@ because a signature is only as correct as the canonical octets it covers.
 - **XML Encryption**: RSA-OAEP key transport with an explicit MGF, AES key
   wrap, ECDH-ES key agreement, and AES-GCM for elements, element content,
   SOAP header blocks (`wsse11:EncryptedHeader`) and attachments.
-- **Hardened by default**: no DOCTYPE, no network or file access, no SHA-1, no
-  XSLT or XPath transforms, algorithm allow-lists checked before any
-  cryptography.
+- **Hardened by default**: no DOCTYPE, no network or file access, no SHA-1,
+  algorithm allow-lists checked before any cryptography. The XPath, XPath
+  Filter 2.0 and XSLT transforms verify only for the exact expressions or
+  stylesheets a caller allows.
 
 ## Install
 
@@ -116,7 +117,7 @@ default produces a signature that looks valid and that no peer accepts.
 | Signature | RSA PKCS#1 v1.5 and ECDSA, each with SHA-256, SHA-384, SHA-512 |
 | Digest | SHA-256, SHA-384, SHA-512 |
 | Canonicalization | Canonical XML 1.0 and 1.1, Exclusive Canonical XML 1.0, with or without comments, from `go-xml/c14n` |
-| Transforms | enveloped signature, base64, SwA `Attachment-Content-Signature` and `Attachment-Complete-Signature` |
+| Transforms | enveloped signature, base64, SwA `Attachment-Content-Signature` and `Attachment-Complete-Signature`; XPath, XPath Filter 2.0 and XSLT, verified only for allowed expressions and stylesheets |
 | Key transport | RSA-OAEP (XML Encryption 1.1), MGF1 with SHA-256, SHA-384, SHA-512 |
 | Key wrap | AES-128, AES-192, AES-256 (RFC 3394) |
 | Key agreement | ECDH-ES on P-256, P-384, P-521, with ConcatKDF |
@@ -124,10 +125,12 @@ default produces a signature that looks valid and that no peer accepts.
 
 Never produced, and accepted only when a caller names each one: SHA-1,
 DSA, HMAC, `rsa-oaep-mgf1p`, `rsa-1_5`, AES-CBC, 3DES and `kw-tripledes`, which
-the specifications require but which are weak. Refused outright: XSLT and
-XPath transforms and DOCTYPE. The library never fetches anything: a URI
-outside the document and its attachments is dereferenced only through a
-resolver the caller supplies (`ResolveURI`), and refused without one. The reasons, and how this measures against each specification
+the specifications require but which are weak. The XPath, XPath Filter 2.0
+and XSLT transforms are produced on request and verified only for
+expressions and stylesheets the caller allows by exact text. Refused
+outright: DOCTYPE. The library never fetches anything: a URI outside the
+document and its attachments is dereferenced only through a resolver the
+caller supplies (`ResolveURI`), and refused without one. The reasons, and how this measures against each specification
 requirement by requirement, are in [docs/security.md](docs/security.md#conformance).
 
 ## How it is tested

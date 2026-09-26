@@ -37,7 +37,10 @@ version, not backported.
 * **Ignoring `Coverage`.** A valid signature over the wrong elements is
   reported as exactly that. A caller that does not check `Coverage` has the
   vulnerability, not this library.
-* **The refusals.** SHA-1, XSLT and XPath transforms are refused on purpose.
+* **The refusals.** SHA-1 is refused on purpose, and the XPath, XPath
+  Filter 2.0 and XSLT transforms by default. What an allowed expression or
+  stylesheet does is the caller's choice; a way to run one that is not
+  allowed, or to make an allowed stylesheet read a resource, is in scope.
 * **Canonicalization defects** belong to
   [go-xml](https://github.com/knroy/go-xml/security) — though a report here is
   welcome and will be forwarded.

@@ -79,6 +79,67 @@ Exclusive C14N in `AllowedCanonicalizationAlgorithms`.
 SwA profile's `EncryptedData` Type URIs, not signature transforms. A
 `ds:Transform` naming either is refused: no WS-Security peer accepts it.
 
+### XPath, XPath Filter 2.0 and XSLT transforms
+
+These transforms carry a program, so `Verify` refuses them with
+`ErrTransformRefused` unless you allow the exact program. A signer chooses
+its own, in the `TransformSpec`:
+
+| Transform | `TransformSpec` fields |
+|---|---|
+| `TransformXPath` (XML Signature §6.6.3) | `XPath`, the expression; `XPathNamespaces`, the bindings of its prefixes, declared on `ds:XPath` |
+| `TransformXPathFilter2` (XPath Filter 2.0) | `XPathFilters`, each a `Filter` (`"intersect"`, `"subtract"` or `"union"`) and an `Expr`; `XPathNamespaces` as above |
+| `TransformXSLT` (XML Signature §6.6.5) | `Stylesheet`, the `xsl:stylesheet` element, copied into `ds:Transform` |
+
+```go
+noDrafts := dsig.TransformSpec{
+	Algorithm:       xmlsec.TransformXPath,
+	XPath:           "not(ancestor-or-self::m:Draft)",
+	XPathNamespaces: map[string]string{"m": "urn:example:m"},
+}
+sig, err := dsig.Sign(doc, key, dsig.SignOptions{
+	// ...
+	References: []dsig.Reference{{URI: "", DigestAlgorithm: xmlsec.DigestSHA256,
+		Transforms: []dsig.TransformSpec{
+			{Algorithm: xmlsec.TransformEnvelopedSignature},
+			noDrafts,
+			{Algorithm: string(c14n.Exclusive10)},
+		}}},
+	Parent: root, // the element the signature goes in
+})
+
+cov, err := dsig.Verify(doc, sig, dsig.VerifyOptions{
+	Certificate: cert,
+	AllowedXPathExpressions: []dsig.XPathExpression{
+		{Expr: "not(ancestor-or-self::m:Draft)", Namespaces: map[string]string{"m": "urn:example:m"}},
+	},
+})
+```
+
+A received expression is accepted when, with surrounding whitespace
+trimmed, it equals an allowed `Expr` and each prefix in the entry's
+`Namespaces` is bound to the same URI where the expression stands; it is
+compiled from the entry, never from the message. A received stylesheet is
+accepted when it equals an entry of `AllowedXSLTStylesheets` under Exclusive
+C14N with every prefix the entry binds rendered. Anything else is refused
+before any cryptographic work.
+
+- Expressions are XPath 1.0, evaluated in go-xml's XPath 1.0 compatibility
+  mode. `here()` is the `ds:XPath` (or `dsig-xpath:XPath`) element, so it
+  needs a signature computed in place (`SignOptions.Parent`).
+- The XPath transform evaluates its expression once for every node of its
+  input, namespace and attribute nodes included, and keeps the input nodes
+  for which it is true: the output never holds more than the input, for
+  example after enveloped-signature or under a `#id` reference.
+- XSLT runs with no resolver of any kind: `xsl:include`, `xsl:import`,
+  `document()`, `doc()` and `unparsed-text()` fail, and nothing is read
+  from a file or the network. Its output is bounded by `xmlsec.MaxParseBytes`.
+- A transform that drops part of what a reference names takes it out of
+  `Coverage`: an element is listed only when all of its subtree was digested,
+  `WholeDocumentSigned` only when nothing but the signature was dropped. An
+  XSLT output is new content, so a reference through XSLT appears only in
+  `Coverage.References`.
+
 ## WS-Security
 
 WS-Security has each step **prepended** to the `wsse:Security` header (SOAP
@@ -266,6 +327,7 @@ More options:
 | `RequireExplicitCanonicalization` | Refuse a reference that relies on the Canonical XML 1.0 implied by XML Signature §4.4.3.2, even when that algorithm is in the allow-list. Off by default, because most signers rely on it. |
 | `StrictSecurityTokenReference` | Resolve a `wsse:SecurityTokenReference` with the Basic Security Profile rules; see Token references above. |
 | `HMACKey []byte` | The secret for an HMAC signature, the only HMAC key there is: never taken from the message, not combinable with `Certificate` or `PublicKey`, and a non-HMAC signature then fails. The HMAC algorithm must also be named in the allow-list. |
+| `AllowedXPathExpressions []dsig.XPathExpression`, `AllowedXSLTStylesheets []*xdm.Node` | Opt in to the XPath, XPath Filter 2.0 and XSLT transforms for exactly these programs; see [XPath, XPath Filter 2.0 and XSLT transforms](#xpath-xpath-filter-20-and-xslt-transforms). Empty refuses them. |
 | `ResolveOmittedURI func() ([]byte, error)` | Supplies the data of the one `ds:Reference` without a URI that XML Signature §4.4.3.1 allows; `Coverage.OmittedURISigned` reports that it was covered. Without it, such a reference is refused. |
 | `ResolveURI xmlsec.URIResolver` | Supplies the octets of a reference to an absolute URI such as `http:`; see External references below. Without it, such a reference is refused. |
 
@@ -290,7 +352,7 @@ Errors worth distinguishing, all matchable with `errors.Is`:
 | `ErrAlgorithmNotAllowed` | outside your allow-list; rejected before any cryptography |
 | `ErrAmbiguousID` | an ID appears more than once |
 | `ErrDigestMismatch` / `ErrSignatureInvalid` | the content or the signature value does not match |
-| `ErrTransformRefused` | XSLT or XPath |
+| `ErrTransformRefused` | an XPath, XPath Filter 2.0 or XSLT transform whose program you did not allow |
 | `ErrUntrusted` | your `TrustKey` refused the signer |
 | `ErrDereference` | your `ResolveURI` failed; wraps its error |
 
