@@ -4,22 +4,25 @@
 
 `internal/version/version.go` holds `const Version = "X.Y.Z"`, edited by hand.
 What CI asserts and what the release workflow refuses are both derived from
-that line. `0.0.0` means nothing has been released.
+that line.
 
 | Check | Runs on | Fails when |
 |---|---|---|
-| `TestVersionIsReleasedAndDescribed` | every push and pull request | the constant is not a `0.N.N` triple; `CHANGELOG.md` has no `## vX.Y.Z` section for it; an `## Unreleased` heading sits below that section |
+| `TestVersionIsReleasedAndDescribed` | every push and pull request | the constant is not a `1.N.N` triple; `CHANGELOG.md` has no `## vX.Y.Z` section for it; an `## Unreleased` heading sits below that section |
 | `release.yml` | the tag push | the tag does not equal the constant; the changelog section is missing or empty |
 
-## Staying on v0
+## Compatibility within v1
 
-The major version is 0 until the public API has been reviewed as a whole and
-frozen: a `v1.0.0` promises every exported name, and on a security library it
-also says "independently validated". The review was done on 2026-09-26 (the
-"API review before v1" entry in the changelog); what is left is the decision
-to freeze. A module version is permanent once the
-Go proxy has seen it. `TestVersionIsReleasedAndDescribed` enforces the 0, so
-moving to 1 is a deliberate change to that test.
+`v1.0.0` promises every exported name. Within v1, a minor release may add API
+and a patch release only fixes; neither removes or changes anything exported.
+A breaking change needs the module path `github.com/knroy/go-xmlsec/v2`.
+`TestVersionIsReleasedAndDescribed` enforces the major version 1, so moving
+past it is a deliberate change to that test. A module version is permanent
+once the Go proxy has seen it.
+
+A security fix that can only be made by refusing input v1 accepted, such as a
+newly broken algorithm leaving a default set, is made in a minor release and
+called out in the changelog: refusing an attack is not an API break.
 
 ## Steps
 
@@ -49,8 +52,7 @@ In this order; the version commit precedes the tag.
 1. Refuses a tag that disagrees with the constant.
 2. Refuses a missing or empty changelog section, and extracts it.
 3. Runs `go vet` and `go test -race` on the tagged commit.
-4. Creates the GitHub release, marked pre-release while on v0, with the
-   changelog section as its body.
+4. Creates the GitHub release, with the changelog section as its body.
 
 Steps 1–3 write nothing: on failure, delete the tag, fix, re-tag.
 

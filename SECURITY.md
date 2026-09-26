@@ -12,6 +12,11 @@ issue needs one. A concrete input is worth more than a description.
 Expect an acknowledgement within a week. This is a single-maintainer project,
 not a vendor with an on-call rotation; factor that in before depending on it.
 
+## Supported versions
+
+The latest v1 release. Fixes are released as a new v1 minor or patch
+version, not backported.
+
 ## What counts as a vulnerability
 
 * **A signature accepted that should not be.** A tampered document, an

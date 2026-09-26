@@ -7,7 +7,7 @@ Parsing and canonicalization come from [go-xml](https://github.com/knroy/go-xml)
 this library never serializes XML for a digest any other way. That matters,
 because a signature is only as correct as the canonical octets it covers.
 
-> **Status: v0.** The API may change. Output is verified in both directions
+> **Status: v1.** The API is stable: no breaking change within v1. Output is verified in both directions
 > against two independent implementations, `xmlsec1` and Apache Santuario, on
 > every commit, and signatures are byte-identical to Santuario's. See
 > [what is tested](#how-it-is-tested).

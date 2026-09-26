@@ -8,15 +8,12 @@ import (
 )
 
 func TestVersionIsReleasedAndDescribed(t *testing.T) {
-	if !regexp.MustCompile(`^0\.(0|[1-9]\d*)\.(0|[1-9]\d*)$`).MatchString(Version) {
-		t.Fatalf("Version %q is not a v0 release triple; see RELEASE.md", Version)
+	if !regexp.MustCompile(`^1\.(0|[1-9]\d*)\.(0|[1-9]\d*)$`).MatchString(Version) {
+		t.Fatalf("Version %q is not a v1 release triple; see RELEASE.md", Version)
 	}
 	log, err := os.ReadFile("../../CHANGELOG.md")
 	if err != nil {
 		t.Fatal(err)
-	}
-	if Version == "0.0.0" {
-		return // unreleased: nothing to describe yet
 	}
 	if !regexp.MustCompile(`(?m)^## v` + regexp.QuoteMeta(Version) + `( |$)`).Match(log) {
 		t.Fatalf("CHANGELOG.md has no \"## v%s\" section; rename \"## Unreleased\" as part of the release commit", Version)
