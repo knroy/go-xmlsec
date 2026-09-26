@@ -54,6 +54,7 @@ Named `TestConformance_<ID>_<description>` for the requirement they prove.
 | `TestImplicitCanonicalization` | a received reference ending in a node set verifies through Canonical XML 1.0, and the implied algorithm is refused when outside the allow-list |
 | `TestX509DataDescriptiveElements` | subject name, issuer-serial and SKI beside one certificate are accepted and ignored; a second certificate, a CRL, a `KeyName` or no certificate are refused |
 | `TestFindByID` | duplicate IDs are refused across `wsu:Id` and `xml:id` |
+| `TestFindByIDAttributes`, `TestSAMLAssertionByID`, `TestPlainIdReference`, `TestDefaultIDSetUnchanged` | opt-in `ID`/`Id` resolution; duplicates refused across every counted attribute; an attacker assertion with the signed `ID` refused; the default set unchanged |
 | `TestPrefixBoundElsewhere` | a `wsu` or `wsse` prefix bound to another namespace higher up does not corrupt the header |
 | `TestVersionIsReleasedAndDescribed` | the version constant and the changelog agree; see [RELEASE.md](../RELEASE.md) |
 
@@ -86,6 +87,14 @@ package, does not implement XML Encryption 1.1 `rsa-oaep`.
 | `TestWSS4JDecryptsOurEncryption` | WSS4J | an encrypted body with the `EncryptedKey` in the header, naming the recipient's token and the `EncryptedData`; WSS4J must decrypt it to the original |
 | `TestXmlsec1DecryptsOurEncryption`, `TestSantuarioDecryptsOurEncryption` | ours → each | AES-128-GCM element, RSA-OAEP with explicit SHA-256 MGF and digest |
 | `TestWeDecryptXmlsec1Encryption`, `TestWeDecryptSantuarioEncryption` | each → ours | the same |
+
+**ID attributes.** The Santuario harness takes leading `--id-attr NAME`
+options (repeatable, unqualified names) that register extra ID attributes,
+for example `santuario --id-attr ID verify doc.xml cert.pem`; `sign-enveloped`
+takes an optional seventh argument, the reference URI. `TestSantuarioSAMLAssertionByID`
+checks a SAML-style assertion signed over `ID` in both directions, with
+byte-identical `SignatureValue`, and that Santuario fails without the
+registration.
 
 **Byte equality.** RSA PKCS#1 v1.5 signing is deterministic, so the same
 document signed with the same key must produce the same `SignatureValue`

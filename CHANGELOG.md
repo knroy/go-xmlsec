@@ -32,6 +32,7 @@ First implementation. Not yet tagged.
 | `VerifyOptions.RequireExplicitCanonicalization` | Refuses a reference relying on the implied Canonical XML 1.0 even when that algorithm is allowed, for profiles that name their canonicalization. | *this commit* |
 | `xmlsec.ParseWithLimits` | Parses under tighter byte, depth and node limits; limits can only be tightened. Exceeding any limit is now `ErrLimitExceeded` from both `Parse` and `ParseWithLimits`. | *this commit* |
 | Golden files, `wss/golden_test.go` | Byte-exact expected output for a signed SOAP envelope with two attachments, a signed-then-encrypted envelope (ciphertext masked, plaintext compared), and two enveloped signatures. Regenerated only with `-update`; LF on every system; a committed test-only key makes them reproducible. | *this commit* |
+| `SignOptions.IDAttributes`, `VerifyOptions.IDAttributes`, `wss.FindByIDAttributes` | Opt-in extra ID attributes for `"#id"` references, with `dsig.IDAttrSAML` (`ID`) and `dsig.IDAttrDSig` (`Id`), so SAML assertions and XAdES documents can be signed and verified. Duplicate detection spans every counted attribute; the default is unchanged. Santuario interoperates, byte-identical. | *this commit* |
 | Versioning, CI and release workflow | `internal/version.Version` as the source of truth, checked against this file on every CI run and against the tag on release. CI on Linux, macOS and Windows; hygiene checks for `peppol` imports and strings. | [`2281ef3`][2281ef3] |
 
 ### Fixed

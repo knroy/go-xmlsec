@@ -49,7 +49,7 @@ Reference forms:
 
 | URI | Transforms | Covers |
 |---|---|---|
-| `"#id"` | a canonicalization, last | the element with that `wsu:Id` or `xml:id` |
+| `"#id"` | a canonicalization, last | the element with that `wsu:Id` or `xml:id`, or an attribute named in `IDAttributes` |
 | `"cid:..."` | `TransformAttachmentContentOnly` | the attachment body octets, exactly as on the wire |
 | `""` | `TransformEnvelopedSignature`, then a canonicalization | the whole document minus the enclosing signature |
 
@@ -64,6 +64,28 @@ a named one.
 `Attachment-Content-Only` is the identity on `Attachment.Body`. The digest
 covers the octets as transmitted — compressed, if the part is compressed.
 Never decompress before verifying.
+
+## SAML, XAdES and other ID attributes
+
+By default `"#id"` resolves only `wsu:Id` and `xml:id`. To sign or verify
+documents that use another ID attribute, name it in `SignOptions.IDAttributes`
+and `VerifyOptions.IDAttributes`. `dsig.IDAttrSAML` is SAML 2.0's unqualified
+`ID`, and `dsig.IDAttrDSig` is the unqualified `Id` used by XML Signature's
+own schema, XAdES and many other profiles.
+
+```go
+cov, err := dsig.Verify(doc, sig, dsig.VerifyOptions{
+    Certificate:  idpCert,
+    IDAttributes: []xdm.QName{dsig.IDAttrSAML},
+})
+// Then confirm cov.SignedElements[0] is the assertion you will read.
+```
+
+The listed attributes add to `wsu:Id` and `xml:id` and never replace them.
+Name only what your profile defines as an ID, and use the same list when
+signing and verifying. `wss.FindByIDAttributes` does the same lookup
+directly. `SecurityTokenID` and `SecurityTokenReference` resolution still use
+`wsu:Id` and `xml:id` only.
 
 ## Enveloped signature
 

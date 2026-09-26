@@ -37,9 +37,15 @@ Defences here:
 * `Coverage` is built from what each reference actually digested during
   resolution, never inferred from the URI text.
 * `wss.FindByID` refuses an ID that appears more than once, across `wsu:Id`
-  and `xml:id` together. `xdm.ElementByID` is never used on the verify path:
-  on duplicates it returns the first depth-first match (confirmed against
-  go-xml v1.4.0), which is exactly the ambiguity the attack needs.
+  and `xml:id` together. With `IDAttributes` set, the refusal covers the
+  whole effective set: a value carried by any two counted attributes, such
+  as `wsu:Id` on one element and `ID` on another, is `ErrAmbiguousID`. Extra
+  ID attributes are opt-in because each one widens what an attacker can use
+  to plant a second target: with the default set, an `ID` or `Id` attribute
+  is neither resolved nor counted. `xdm.ElementByID` is never used on the
+  verify path: on duplicates it returns the first depth-first match
+  (confirmed against go-xml v1.4.0), which is exactly the ambiguity the
+  attack needs.
 * The enveloped-signature transform removes the enclosing signature by
   identity, not every `ds:Signature` in the document.
 
@@ -148,7 +154,7 @@ test in `tests/security` or beside the package it exercises.
 | Entity expansion | billion laughs | refused: DOCTYPE |
 | External references | XInclude, `xml-stylesheet`, `xsi:schemaLocation`, `xml:base` | parsed, nothing fetched or expanded |
 | Remote dereferencing | authentic signatures whose references name `http:`, `file:`, `cid:` wrapping a URL, and an XPointer `document()` | refused, nothing fetched |
-| Signature wrapping | relocated signed element; duplicated IDs across `wsu:Id` and `xml:id` | `Coverage` exposes the relocation; duplicates refused |
+| Signature wrapping | relocated signed element; duplicated IDs across `wsu:Id` and `xml:id`, and across `ID`/`Id` and the defaults when configured; an attacker assertion carrying the signed SAML `ID` | `Coverage` exposes the relocation; duplicates refused |
 | Key substitution | attacker's key and certificate against a pinned certificate | refused |
 | Algorithm confusion | HMAC, RSA-SHA1, empty method, ECDSA URI with an RSA key and the reverse, ECDSA r = s = 0 | refused |
 | Comment truncation (CVE-2017-11427 class) | signed text split by a comment | `StringValue` of the covered element returns the whole value |
