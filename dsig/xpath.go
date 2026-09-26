@@ -11,6 +11,7 @@ import (
 	"github.com/knroy/go-xml/xpath"
 	"github.com/knroy/go-xmlsec"
 	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xmlsec/internal/xpathfilter"
 )
 
 // XPathExpression is an XPath or XPath Filter 2.0 expression a verifier
@@ -116,18 +117,8 @@ func admitTransform(t *TransformSpec, opts VerifyOptions) error {
 // carries: the same trimmed text, with each of the entry's prefixes bound to
 // the same URI in x's scope.
 func allowedExpression(x *xdm.Node, list []XPathExpression) (XPathExpression, bool) {
-	got := strings.TrimSpace(x.StringValue())
 	for _, e := range list {
-		if strings.TrimSpace(e.Expr) != got {
-			continue
-		}
-		bound := true
-		for p, u := range e.Namespaces {
-			if v, ok := x.LookupPrefix(p); !ok || v != u {
-				bound = false
-			}
-		}
-		if bound {
+		if xpathfilter.Allowed(x, e.Expr, e.Namespaces) {
 			return e, true
 		}
 	}
@@ -197,43 +188,6 @@ func checkXPathSpec(t TransformSpec) error {
 	return nil
 }
 
-// prefixMap resolves an expression's prefixes from its bindings alone.
-type prefixMap map[string]string
-
-func (m prefixMap) ResolvePrefix(p string) (string, bool) {
-	if p == "xml" {
-		return xdm.NSXML, true
-	}
-	u, ok := m[p]
-	return u, ok
-}
-func (prefixMap) DefaultElementNamespace() string  { return "" }
-func (prefixMap) DefaultFunctionNamespace() string { return xdm.NSFN }
-
-// compileXPath compiles an XML-DSig expression, which is XPath 1.0, under
-// XPath 1.0 compatibility mode.
-func compileXPath(expr string, ns map[string]string) (*xpath.Compiled, error) {
-	c, err := xpath.CompileWith(strings.TrimSpace(expr), xpath.CompileOptions{Namespaces: prefixMap(ns)})
-	if err != nil {
-		return nil, fmt.Errorf("%w: XPath %q: %v", xmlsec.ErrMalformed, expr, err)
-	}
-	return c.WithCompatMode(true), nil
-}
-
-// library is the XPath 1.0 core function library plus XML-DSig's here()
-// (6.6.3.1): the element bearing the expression, which must be in the
-// document being evaluated.
-func library(here, doc *xdm.Node) xpath.FunctionLibrary {
-	lib := xpath.NewLibrary(xpath.Builtins())
-	lib.Add(xpath.Function{Name: xdm.QName{URI: xdm.NSFN, Local: "here"}, Call: func(*xpath.Context, []xdm.Sequence) (xdm.Sequence, error) {
-		if here.Root() != doc {
-			return nil, fmt.Errorf("%w: here() outside the document the expression is evaluated against", xmlsec.ErrMalformed)
-		}
-		return xdm.Sequence{here}, nil
-	}})
-	return lib
-}
-
 type nsKey struct {
 	elem   *xdm.Node
 	prefix string
@@ -297,17 +251,17 @@ func (d *data) filter(t TransformSpec, sig *xdm.Node) error {
 
 	var keep func(*xdm.Node) (bool, error)
 	if t.Algorithm == xmlsec.TransformXPath {
-		c, err := compileXPath(t.XPath, t.XPathNamespaces)
+		c, err := xpathfilter.Compile(t.XPath, t.XPathNamespaces)
 		if err != nil {
 			return err
 		}
-		lib := library(here[0], doc)
+		lib := xpathfilter.Library(here[0], doc)
 		keep = func(n *xdm.Node) (bool, error) { return c.EvalBool(xpath.NewContext(n, lib).WithFocus(n, 1, 1)) }
 	} else {
 		sets := make([]selection, len(t.XPathFilters))
 		for i, f := range t.XPathFilters {
 			var err error
-			if sets[i], err = selectFilter(f.Expr, t.XPathNamespaces, library(here[i], doc), doc); err != nil {
+			if sets[i], err = selectFilter(f.Expr, t.XPathNamespaces, xpathfilter.Library(here[i], doc), doc); err != nil {
 				return err
 			}
 		}
@@ -394,7 +348,7 @@ type selection struct {
 // root as context node (section 3.2).
 func selectFilter(expr string, ns map[string]string, lib xpath.FunctionLibrary, doc *xdm.Node) (selection, error) {
 	s := selection{nodes: map[*xdm.Node]bool{}, ns: map[nsKey]bool{}}
-	c, err := compileXPath(expr, ns)
+	c, err := xpathfilter.Compile(expr, ns)
 	if err != nil {
 		return s, err
 	}
