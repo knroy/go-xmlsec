@@ -224,6 +224,9 @@ default set: every secure algorithm this library implements. An algorithm
 kept only for legacy interoperability is outside that set and is accepted
 only when named explicitly.
 
+Legacy algorithms verify only when listed: `SigRSASHA1`, `SigDSASHA1`, the
+`SigHMAC*` constants and `DigestSHA1`. `Sign` never produces them.
+
 To pin a sender known by a raw key rather than a certificate, set
 `VerifyOptions.PublicKey` instead of `Certificate`; setting both is an
 error. With a key pinned, a `KeyInfo` form this library does not accept is
@@ -240,6 +243,7 @@ More options:
 | `TrustKey func(cert *x509.Certificate, key crypto.PublicKey) error` | Called with the signer's key, and its certificate when there is one, before any cryptographic or digest work; an error stops verification with `ErrUntrusted`. Use it when you cannot pin one certificate but know which you accept: a refused sender costs nothing to process. |
 | `RequireExplicitCanonicalization` | Refuse a reference that relies on the Canonical XML 1.0 implied by XML Signature §4.4.3.2, even when that algorithm is in the allow-list. Off by default, because most signers rely on it. |
 | `StrictSecurityTokenReference` | Resolve a `wsse:SecurityTokenReference` with the Basic Security Profile rules; see Token references above. |
+| `HMACKey []byte` | The secret for an HMAC signature, the only HMAC key there is: never taken from the message, not combinable with `Certificate` or `PublicKey`, and a non-HMAC signature then fails. The HMAC algorithm must also be named in the allow-list. |
 | `ResolveOmittedURI func() ([]byte, error)` | Supplies the data of the one `ds:Reference` without a URI that XML Signature §4.4.3.1 allows; `Coverage.OmittedURISigned` reports that it was covered. Without it, such a reference is refused. |
 
 Then check `Coverage`, every time:
@@ -354,3 +358,23 @@ in scope at the target, and put the nodes in place of the `EncryptedData`.
 `DecryptData` also follows a same-document `CipherReference` with the base64
 transform. `EncryptionMethod` is read strictly: a child the algorithm does not
 permit, or a `KeySize` inconsistent with it, is refused.
+
+### Receiving from a legacy peer
+
+A peer that still sends the older algorithms can be decrypted, never
+answered in kind: name every legacy part, and nothing else.
+
+```go
+// AES-CBC data under rsa-oaep-mgf1p (SHA-1).
+key, err := xenc.DecryptEncryptedKey(ek, decrypter,
+    []string{xmlsec.KeyTransportRSAOAEPMGF1P}, []string{xmlsec.MGF1SHA1}, []string{xmlsec.DigestSHA1})
+pt, err := xenc.DecryptData(ed, key, []string{xmlsec.EncAES128CBC})
+
+// RSA v1.5: a separate function, and a key pair used for nothing else.
+key, err = xenc.DecryptEncryptedKeyPKCS1v15(ek, ed, v15OnlyDecrypter,
+    []string{xmlsec.KeyTransportRSA15}, []string{xmlsec.EncTripleDESCBC})
+```
+
+An absent `DigestMethod` or `MGF` means SHA-1 and is named the same way.
+`kw-tripledes` unwraps through `UnwrapEncryptedKey` when named. No encryption
+function will produce any of these.

@@ -121,10 +121,11 @@ default produces a signature that looks valid and that no peer accepts.
 | Key agreement | ECDH-ES on P-256, P-384, P-521, with ConcatKDF |
 | Data encryption | AES-128-GCM, AES-192-GCM, AES-256-GCM; attachments as SwA `Attachment-Content-Only` or `Attachment-Complete` |
 
-Refused on purpose: SHA-1 as a digest or signature algorithm,
-`rsa-oaep-mgf1p`, `rsa-1_5`, AES-CBC and 3DES, XSLT and XPath transforms,
-DOCTYPE, and dereferencing any URI outside the document and its
-attachments. The reasons, and how this measures against each specification
+Never produced, and accepted only when a caller names each one: SHA-1,
+DSA, HMAC, `rsa-oaep-mgf1p`, `rsa-1_5`, AES-CBC, 3DES and `kw-tripledes`, which
+the specifications require but which are weak. Refused outright: XSLT and
+XPath transforms, DOCTYPE, and dereferencing any URI outside the document
+and its attachments. The reasons, and how this measures against each specification
 requirement by requirement, are in [docs/security.md](docs/security.md#conformance).
 
 ## How it is tested

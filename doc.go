@@ -42,8 +42,10 @@
 //
 // # Deliberate refusals
 //
-//   - SHA-1, in every role, including the rsa-oaep-mgf1p key transport.
-//   - The rsa-1_5 key transport: the Bleichenbacher padding-oracle class.
+//   - Producing any weak algorithm: SHA-1, DSA, HMAC, rsa-oaep-mgf1p,
+//     rsa-1_5, AES-CBC, 3DES. The specifications require them, so they are
+//     verified or decrypted, but only when a caller names each one; they are
+//     never in a default allow-list.
 //   - The XSLT transform: it executes attacker-supplied code during
 //     verification of an unauthenticated message.
 //   - The XPath and XPath Filter 2.0 transforms: they evaluate

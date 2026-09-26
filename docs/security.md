@@ -66,7 +66,7 @@ accepted only when a caller names it.
 
 | Refused | Why |
 |---|---|
-| SHA-1 as a digest or signature algorithm, and `rsa-oaep-mgf1p` or RSA-OAEP without an explicit MGF or digest | Weak, and nothing in the target profiles needs them. The one SHA-1 use is `ThumbprintSHA1`, a certificate identifier the X.509 Token Profile defines for token references; it selects nothing and protects nothing. See Conformance for the specifications that require the others. |
+| Producing SHA-1 digests or signatures, DSA, HMAC, `rsa-oaep-mgf1p`, SHA-1 OAEP digest or MGF, RSA v1.5, AES-CBC, 3DES or `kw-tripledes` | Weak, or open to the Bleichenbacher and CBC padding-oracle attacks (XML Encryption §6.1). The specifications require them, so they are implemented for **verification and decryption only**: never produced, never in a default set, accepted only when a caller names each one. The one other SHA-1 use is `ThumbprintSHA1`, a certificate identifier the X.509 Token Profile defines for token references; it selects nothing and protects nothing. |
 | XSLT transform | Executes attacker-supplied code while verifying an unauthenticated message. OPTIONAL in XML Signature, so refusing it is conformant. |
 | XPath and XPath Filter 2.0 transforms, on a `ds:Reference` or a `CipherReference` | Evaluate attacker-supplied expressions during verification. RECOMMENDED, not required, by XML Signature; `go-xml` makes XPath Filter implementable, and the threat model is unchanged. |
 | Unknown children of `ds:Transform`, `ds:CanonicalizationMethod` or `xenc:EncryptionMethod` | A refused transform carries its program as a child; ignoring unknown children would be a way round the refusal. XML Encryption §3.2 requires the `EncryptionMethod` refusal. |
@@ -74,10 +74,9 @@ accepted only when a caller names it.
 | Network or filesystem dereferencing | Only same-document references (`""`, `#id`, the two XPointer forms), `cid:` and a same-document `CipherReference` resolve. `TestVerifyDereferencesNothingExternal` asserts it with an authentic signature. XML Signature RECOMMENDS HTTP dereferencing; refusing it removes a server-side request forgery surface. |
 | An SwA `EncryptedData` Type (`Attachment-Content-Only`, `Attachment-Complete`) used as a `ds:Transform` | The profile does not define them as signature transforms, and WS-Security peers refuse them; signing with one produced signatures no peer accepts. |
 | An Attachment-Complete header repeated, or a decrypted header the SwA profile does not list | Which value a peer uses is undefined, and an unlisted header such as Content-Transfer-Encoding would change how the part is read. |
-| RSA PKCS#1 v1.5 key transport (`rsa-1_5`), AES-CBC, 3DES | The Bleichenbacher and CBC padding-oracle attacks. See Conformance. |
 | RSA signing keys under 2048 bits | XML Signature §6.4.2 requires at least 2048 bits for creating signatures. Verification of smaller certificate keys is unchanged; raw RSA keys in `KeyInfo` need 2048 bits too. |
-| KeyInfo forms other than a certificate, a token reference, a lone raw key, or a same-document `KeyInfoReference` | Accepted: `ds:X509Data` with exactly one `ds:X509Certificate` (with `X509SubjectName`, `X509IssuerSerial`, `X509SKI` beside it ignored); a lone `ds:KeyValue` holding `ds:RSAKeyValue` or a `dsig11:ECKeyValue` with a `NamedCurve` for P-256, P-384 or P-521; a lone `dsig11:DEREncodedKeyValue` holding an RSA or ECDSA key on those curves; a `dsig11:KeyInfoReference` to a `ds:KeyInfo` in the same document, never to another reference. Raw RSA keys need at least 2048 bits, an odd modulus, and an odd exponent from 3 to 2³¹−1. EC points must be uncompressed and on the curve. Refused: a second certificate, explicit `ECParameters`, other curves, `DSAKeyValue`, the RFC 4050 `ECDSAKeyValue`, `RetrievalMethod`, `X509Digest`, and any combination of forms. With a key pinned, an unsupported form is ignored rather than refused. |
-| Finite-field `dh-es`, PBKDF2, `kw-tripledes` | OPTIONAL in XML Encryption 1.1, or weak. |
+| KeyInfo forms other than a certificate, a token reference, a lone raw key, or a same-document `KeyInfoReference` | Accepted: `ds:X509Data` with exactly one `ds:X509Certificate` (with `X509SubjectName`, `X509IssuerSerial`, `X509SKI` beside it ignored); a lone `ds:KeyValue` holding `ds:RSAKeyValue` or a `dsig11:ECKeyValue` with a `NamedCurve` for P-256, P-384 or P-521; a lone `dsig11:DEREncodedKeyValue` holding an RSA or ECDSA key on those curves; a `dsig11:KeyInfoReference` to a `ds:KeyInfo` in the same document, never to another reference. Raw RSA keys need at least 2048 bits, an odd modulus, and an odd exponent from 3 to 2³¹−1. EC points must be uncompressed and on the curve. Refused: a second certificate, explicit `ECParameters`, other curves, `DSAKeyValue` (except for an explicitly allowed `dsa-sha1`), the RFC 4050 `ECDSAKeyValue`, `RetrievalMethod`, `X509Digest`, and any combination of forms. With a key pinned, an unsupported form is ignored rather than refused. |
+| Finite-field `dh-es`, PBKDF2 | OPTIONAL in XML Encryption 1.1. |
 
 ## Conformance
 
@@ -86,15 +85,14 @@ tests named in [testing.md](testing.md).
 
 | Specification | Status |
 |---|---|
-| W3C XML Signature 1.1 | Every MUST met on generation and validation, including the base64 transform on node sets, parsing octets into a node set, the XPointer forms, `KeyInfoReference`, an omitted `URI` (through `ResolveOmittedURI`), and 2048-bit signing keys. **Not met:** the REQUIRED algorithms SHA-1, DSA-SHA1 with `DSAKeyValue`, and HMAC-SHA1/SHA256. Also not met, as RECOMMENDED only: RSA-SHA1, the XPath transforms and HTTP dereferencing. |
-| W3C XML Encryption 1.1 | Every MUST met on the structures and processing rules, including Content encryption, same-document `CipherReference`, `KeyInfo` resolution (`FindEncryptedKey`), NFC plaintext, `xmlns=""`, strict `EncryptionMethod` parsing, and the secure REQUIRED algorithms: AES-GCM, RSA-OAEP with explicit MGF, AES key wrap, ECDH-ES with ConcatKDF. **Not met:** the REQUIRED algorithms AES-CBC, 3DES, `rsa-oaep-mgf1p` and SHA-1, and RSA v1.5 for 3DES keys. |
+| W3C XML Signature 1.1 | Every MUST met on generation and validation, including the base64 transform on node sets, parsing octets into a node set, the XPointer forms, `KeyInfoReference`, an omitted `URI` (through `ResolveOmittedURI`), and 2048-bit signing keys. The REQUIRED SHA-1, DSA-SHA1 with `DSAKeyValue` (1024/160 keys) and HMAC-SHA1/SHA256, and the RECOMMENDED RSA-SHA1 and HMAC-SHA384/512, are implemented for verification only, as explicit opt-ins; HMAC takes its key only from `VerifyOptions.HMACKey` and enforces `HMACOutputLength` of at least half the hash and 80 bits, in whole bytes (CVE-2009-0217). **Not met**, as RECOMMENDED only: the XPath transforms and HTTP dereferencing. |
+| W3C XML Encryption 1.1 | Every MUST met on the structures and processing rules, including Content encryption, same-document `CipherReference`, `KeyInfo` resolution (`FindEncryptedKey`), NFC plaintext, `xmlns=""`, strict `EncryptionMethod` parsing, and the secure REQUIRED algorithms: AES-GCM, RSA-OAEP with explicit MGF, AES key wrap, ECDH-ES with ConcatKDF. The REQUIRED legacy algorithms, AES-CBC, 3DES, `rsa-oaep-mgf1p` with SHA-1, `kw-tripledes`, and RSA v1.5 for 3DES keys, are implemented for decryption only, as explicit opt-ins. |
 | OASIS SOAP Message Security 1.1.1, X.509 Token Profile 1.1.1 | Header elements prepended in processing order, SOAP attributes namespaced, one timestamp validated on receipt, direct, key identifier and issuer-serial references, `wsse11:TokenType`, `EncryptedHeader`. PKCS7 tokens are not implemented (OPTIONAL). |
 | WS-I Basic Security Profile 1.1 | Output conforms, except R5620 and R5621, which list only AES-CBC, 3DES, `rsa-1_5` and `rsa-oaep-mgf1p`: this library encrypts with AES-GCM and XML Encryption 1.1 RSA-OAEP, which WSS4J accepts. Receiving is lenient by default; `StrictSecurityTokenReference` and `RequireExplicitCanonicalization` enforce the profile's rules on what is received. |
 
-The missing REQUIRED algorithms are refused today because each is weak or
-has a known attack. They are being added as opt-ins: for verification and
-decryption only, never produced, and never in the default set, so a caller
-must name each one.
+Every REQUIRED algorithm is therefore implemented. The weak ones are
+verification- and decryption-only opt-ins: never produced, never in a
+default set, accepted only when a caller names each one.
 
 ## Resource limits
 
@@ -162,6 +160,16 @@ message signing a header, a body and a few attachments needs well under 64).
 * Digest comparison uses `crypto/subtle.ConstantTimeCompare`.
 * A decryption failure after a key is unwrapped returns one generic error,
   whatever the cause.
+* CBC decryption, when allowed, returns one error for every failure, after
+  decrypting the whole ciphertext and checking the padding in constant time.
+  That narrows but cannot close the padding oracle, because CBC is
+  unauthenticated: an attacker can still learn from what the application
+  does next. Only AES-GCM closes it.
+* `xenc.DecryptEncryptedKeyPKCS1v15` rejects implicitly: a bad PKCS#1 block
+  yields a random key of the data algorithm's size, and the failure surfaces
+  only as the generic data error. Give it a key pair used for nothing else
+  (XML Encryption §6.1.3); a hardware `Decrypter` that fails faster on bad
+  padding reopens the timing channel.
 * RSA-OAEP and AES-GCM failures return a fixed message, not the cause.
 * Session keys are returned to the caller, who should `clear` them after use.
   No key material is held in package state.
@@ -184,7 +192,8 @@ test in `tests/security` or beside the package it exercises.
 | Key substitution | attacker's key and certificate against a pinned certificate | refused |
 | Algorithm confusion | HMAC, RSA-SHA1, empty method, ECDSA URI with an RSA key and the reverse, ECDSA r = s = 0 | refused |
 | Comment truncation (CVE-2017-11427 class) | signed text split by a comment | `StringValue` of the covered element returns the whole value |
-| Encryption downgrade | AES size swap, AES-CBC, `rsa-oaep-mgf1p`, `rsa-1_5`, SHA-1 MGF | refused |
+| Encryption downgrade | AES size swap, AES-CBC, 3DES, `rsa-oaep-mgf1p`, `rsa-1_5`, SHA-1 MGF and digest | refused under empty allow-lists; each decrypts only when named |
+| HMAC truncation (CVE-2009-0217) | `HMACOutputLength` 0, 8, 72, 79, 81, 120, 132; HMAC keyed with the certificate | refused |
 | Crashes | nil and wrong-kind arguments to every exported function; three fuzz targets | fixed: 13 functions panicked on nil and now return errors |
 | Resource exhaustion | limits in parsing, depth, references, transforms | bounded; see the memory and verification-cost sections above |
 

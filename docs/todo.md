@@ -5,7 +5,6 @@
 | Item | Notes |
 |---|---|
 | Gate 2 against phase4 | Needs the captured-message corpus (X-5), and the consumer that builds whole AS4 messages: Gate 2 compares a message, not a signature. The signature-level equivalent, byte equality with Santuario, is in place (`tests/interop`). |
-| Legacy algorithms the specifications REQUIRE: SHA-1, DSA-SHA1 with `DSAKeyValue`, HMAC, RSA-SHA1, AES-CBC, 3DES, `rsa-oaep-mgf1p`, RSA v1.5 | **In progress.** Being added for verification and decryption only, outside the default allow-lists, never produced: see [security.md](security.md#conformance). |
 
 ## Acceptance criteria
 
