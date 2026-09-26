@@ -57,6 +57,8 @@ Named `TestConformance_<ID>_<description>` for the requirement they prove.
 | `TestXPointerReferences`, `TestBase64OfNodeSet`, `TestOmittedURI`, `TestKeyInfoReference`, `TestPinnedKeyIgnoresUnsupportedKeyInfo` | the XML Signature 1.1 processing rules: XPointer forms keeping comments, base64 over a node set, the one URI-less reference, same-document `KeyInfoReference`, and a pinned key tolerating an unsupported `KeyInfo` |
 | `TestSignInPlace`, `TestSignInPlaceRefusals` | in-place signing with any canonicalization, and a failed `Sign` leaving the document unchanged |
 | `TestStrictSecurityTokenReference` | the Basic Security Profile rules on a received token reference |
+| `TestPKCS7RoundTrip`, `TestParsePKCS7Errors`, `TestAddBinarySecurityTokenPKCS7Errors`, `TestSecurityTokenReferencePKCS7` | PKCS7 tokens: the leaf found whatever the certificate order, lenient and strict resolution, signing and verifying through one; truncated, trailing, wrong content types, versions and tags, no or too many certificates, non-X.509 certificates, ambiguous leaves and key identifiers that do not match are refused; CRLs and signer infos are ignored |
+| `TestMarshalPKCS7IsDER`, `TestPKCS7OpenSSLFixtures` | the PKCS7 encoding is DER, byte-identical to OpenSSL's `crl2pkcs7` for the same certificates, and OpenSSL's output parses in either certificate order |
 | `TestNilInputs` (`wss`, `xenc`) | a nil or wrong-kind argument is an error, never a panic |
 | `TestImplicitCanonicalization` | a received reference ending in a node set verifies through Canonical XML 1.0, and the implied algorithm is refused when outside the allow-list |
 | `TestX509DataDescriptiveElements` | subject name, issuer-serial and SKI beside one certificate are accepted and ignored; a second certificate, a CRL, a `KeyName` or no certificate are refused |
@@ -96,6 +98,7 @@ package, does not implement XML Encryption 1.1 `rsa-oaep`.
 | `TestWSS4JDecryptsOurAttachmentEncryption`, `TestWeDecryptWSS4JAttachmentEncryption` | WSS4J, both ways | Attachment-Content-Only and Attachment-Complete encryption, AES-128-GCM under RSA-OAEP |
 | `TestWSS4JProcessesSignThenEncrypt` | WSS4J | sign then encrypt in WS-Security order, with the recipient key named by token reference, subject key identifier and issuer-serial, plus an encrypted signature; WSS4J decrypts, then verifies. A control that appends the `EncryptedKey` (the old order) is refused |
 | `TestWSS4JDecryptsOurEncryptedHeaderAndContent` | WSS4J | a `wsse11:EncryptedHeader` and encrypted Body content |
+| `TestPKCS7TokenWithJDK` | JDK and Santuario, both ways | a header signed with a PKCS7 token of a leaf and its CA: the JDK's PKCS#7 codec reads both certificates and Santuario verifies with the leaf; the JDK encodes the same certificates to byte-identical DER, and its token resolves to the leaf under `StrictSecurityTokenReference`. WSS4J 4.0.1 reads no PKCS7 token, so it is not the peer here |
 | `TestSantuarioXPointerReferences` | Santuario, both ways | `#xpointer(/)` and `#xpointer(id('…'))` with comments; byte-identical `SignatureValue`; a changed comment is refused |
 | `TestSantuarioVerifiesOurInPlaceInclusiveSignature` | ours → Santuario | an inclusive-canonicalization signature computed in place (`SignOptions.Parent`) |
 | `TestWeVerifySantuarioExternalReference`, `TestSantuarioVerifiesOurExternalReference` | Santuario, both ways | a reference to `http://example.invalid/…`, as raw octets and through exclusive C14N, served from a local file by a Santuario `ResourceResolver` and by our `ResolveURI`: nothing is fetched; Santuario refuses other octets |
@@ -173,9 +176,17 @@ beside the assertion that uses it:
 The harness (`tests/santuario/Harness.java`) exposes Santuario and WSS4J as
 commands: `verify`, `sign-enveloped`, `sign-detached`, `encrypt`, `decrypt`,
 `encrypt-ecdh`, `encrypt-kw`, `decrypt-kw`, `wss4j-verify`, `wss4j-decrypt`,
-`wss4j-process` (both keys: decrypt, then verify), the attachment
-commands, and `sign-external` and `verify-external`, which serve one external
-URI from a local file through a `ResourceResolver`; `--id-attr NAME` registers extra ID attributes.
+`wss4j-process` (both keys: decrypt, then verify), the attachment commands,
+`sign-external` and `verify-external`, which serve one external URI from a
+local file through a `ResourceResolver`, and `pkcs7` (the JDK's PKCS#7 codec:
+read one token, write another); `--id-attr NAME` registers extra ID
+attributes.
+
+**PKCS#7 fixtures.** `wss/testdata/pkcs7/openssl.p7b` and
+`openssl-sorted.p7b` were written by OpenSSL 3.6 (`openssl crl2pkcs7 -nocrl
+-certfile chain.pem -outform DER`) from a P-256 root, intermediate and leaf,
+in two input orders; the command is repeated beside the test that reads
+them. They are binary in `.gitattributes`.
 
 The Alpine package is not pinned to a patch release; the version in use is
 printed by `xmlsec1 --version` in the container.

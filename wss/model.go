@@ -12,7 +12,6 @@ const roleUltimateReceiver = "http://www.w3.org/2003/05/soap-envelope/role/ultim
 // Token and key identifier URIs of the X.509 Token Profile and SOAP Message
 // Security 1.1.
 const (
-	valueTypePKCS7          = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-x509-token-profile-1.0#PKCS7"
 	valueTypeSKI            = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-x509-token-profile-1.0#X509SubjectKeyIdentifier"
 	valueTypeThumbprintSHA1 = "http://docs.oasis-open.org/wss/oasis-wss-soap-message-security-1.1#ThumbprintSHA1"
 )

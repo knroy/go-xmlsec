@@ -77,6 +77,7 @@ public final class Harness {
                 case "wss4j-encrypt-attachments" -> wss4jEncryptAttachments(a[1], a[2], a[3], a[4], a[5], new Parts(a, 6));
                 case "sign-external" -> signExternal(a[1], a[2], a[3], a[4], a[5], a[6], a.length > 7 ? a[7] : "");
                 case "verify-external" -> verifyExternal(a[1], a[2], a[3], a[4]);
+                case "pkcs7" -> pkcs7(a[1], a[2], java.util.Arrays.copyOfRange(a, 3, a.length));
                 default -> throw new IllegalArgumentException("unknown command " + a[0]);
             }
         } catch (Exception e) {
@@ -421,6 +422,25 @@ public final class Harness {
         }
         XMLUtils.outputDOM(doc, System.out);
         System.out.println();
+    }
+
+    /**
+     * pkcs7 in.der out.der cert.pem...: the JDK's PKCS#7 codec, since WSS4J
+     * 4.0.1 has no PKCS7 token (its DOM processor handles X509v3 and
+     * PKIPath only). Prints "subject DN" for each certificate in in.der,
+     * then writes the certificates as a certs-only SignedData to out.der.
+     */
+    static void pkcs7(String in, String out, String[] certs) throws Exception {
+        CertificateFactory cf = CertificateFactory.getInstance("X.509");
+        for (java.security.cert.Certificate c : cf.generateCertPath(
+                new ByteArrayInputStream(Files.readAllBytes(Path.of(in))), "PKCS7").getCertificates()) {
+            System.out.println("subject " + ((X509Certificate) c).getSubjectX500Principal().getName());
+        }
+        java.util.List<X509Certificate> l = new java.util.ArrayList<>();
+        for (String p : certs) {
+            l.add(cert(p));
+        }
+        Files.write(Path.of(out), cf.generateCertPath(l).getEncoded("PKCS7"));
     }
 
     static final char[] PASS = "changeit".toCharArray();

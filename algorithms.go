@@ -123,6 +123,11 @@ const (
 const (
 	BSTValueTypeX509v3      = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-x509-token-profile-1.0#X509v3"
 	BSTValueTypeX509PKIPath = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-x509-token-profile-1.0#X509PKIPathv1"
+
+	// BSTValueTypePKCS7 is a PKCS#7 SignedData carrying a certificate path
+	// as an unordered set (X.509 Token Profile 1.1.1 section 3.1). The Basic
+	// Security Profile prefers BSTValueTypeX509PKIPath (R5202).
+	BSTValueTypePKCS7 = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-x509-token-profile-1.0#PKCS7"
 )
 
 // BSTEncodingBase64 is the only EncodingType this library emits or accepts.

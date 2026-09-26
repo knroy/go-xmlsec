@@ -20,6 +20,7 @@ import (
 	"github.com/knroy/go-xmlsec"
 	"github.com/knroy/go-xmlsec/dsig"
 	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xmlsec/wss"
 )
 
 var (
@@ -378,5 +379,47 @@ func TestPinnedKeyIgnoresUnsupportedKeyInfo(t *testing.T) {
 				t.Fatalf("coverage %+v", cov)
 			}
 		})
+	}
+}
+
+// A signature keyed by a PKCS7 token verifies against the token's leaf, with
+// the Basic Security Profile's reference rules enforced.
+func TestSecurityTokenReferencePKCS7(t *testing.T) {
+	key := newKey(t, rsaKey)
+	doc := parse(t, []byte(envelope))
+	bodyID, err := wss.AssignID(doc, xmltree.DocumentElement(doc).ChildElements()[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	hdr, err := wss.NewHeader(doc, xmlsec.NSSOAP12, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok, err := hdr.AddBinarySecurityToken(key.Certificate, nil, xmlsec.BSTValueTypePKCS7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sig, err := dsig.Sign(doc, key, dsig.SignOptions{
+		SignatureAlgorithm:        xmlsec.SigRSASHA256,
+		CanonicalizationAlgorithm: string(c14n.Exclusive10),
+		References:                []dsig.Reference{{URI: "#" + bodyID, Transforms: excC14N, DigestAlgorithm: xmlsec.DigestSHA256}},
+		KeyInfo:                   dsig.KeyInfoSecurityTokenReference,
+		SecurityTokenID:           tok,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := hdr.Append(sig); err != nil {
+		t.Fatal(err)
+	}
+	doc = parse(t, serialize(t, doc))
+	opts := as4Allow
+	opts.StrictSecurityTokenReference = true
+	cov, err := dsig.Verify(doc, findSignature(doc), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cov.KeyInfoForm != dsig.KeyInfoSecurityTokenReference || !cov.Certificate.Equal(key.Certificate) {
+		t.Fatalf("form %v, certificate %v", cov.KeyInfoForm, cov.Certificate)
 	}
 }

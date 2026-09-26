@@ -121,6 +121,28 @@ On an Envelope that uses a default SOAP namespace, `wss.NewHeader` declares a
 prefix so that `mustUnderstand` and `actor`/`role` stay SOAP attributes. A
 reference to a PKIPath or PKCS7 token carries `wsse11:TokenType`.
 
+### Token types
+
+`AddBinarySecurityToken(cert, chain, valueType)` takes one of three
+`ValueType`s from the X.509 Token Profile:
+
+| `valueType` | Carries | Receiver reads |
+|---|---|---|
+| `xmlsec.BSTValueTypeX509v3` | `cert` alone; `chain` is ignored | that certificate |
+| `xmlsec.BSTValueTypeX509PKIPath` | `cert` and `chain` (leaf first, excluding `cert`) as a PkiPath | the last certificate of the path |
+| `xmlsec.BSTValueTypePKCS7` | `cert` and `chain`, in any order, as a DER certificates-only PKCS#7 SignedData | the one certificate that issued none of the others |
+
+A PKCS#7 set is unordered, so the receiver finds the leaf by issuer and
+subject name and, where both are present, authority and subject key
+identifier. `AddBinarySecurityToken` refuses a set in which `cert` would not
+be found that way, and more than 16 certificates, with
+`ErrUnsupportedKeyInfo`; `ParseBinarySecurityToken` refuses such a token the
+same way. On receipt a PKCS7 token must be DER, of type `signedData`,
+`SignedData` version 1 with `data` content, carrying only X.509
+certificates; CRLs and signer infos, which the profile allows, are ignored.
+The Basic Security Profile prefers PKIPath (R5202): send PKCS7 only to a
+peer that asks for it. WSS4J does not read PKCS7 tokens.
+
 ### Timestamps
 
 ```go

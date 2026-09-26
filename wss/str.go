@@ -50,7 +50,7 @@ func NewSecurityTokenReference(doc *xdm.Node, tokenID, valueType string) (*xdm.N
 		}
 	}
 	str := newSTR()
-	if valueType == xmlsec.BSTValueTypeX509PKIPath || valueType == valueTypePKCS7 {
+	if valueType == xmlsec.BSTValueTypeX509PKIPath || valueType == xmlsec.BSTValueTypePKCS7 {
 		str.AddNamespace("wsse11", xmlsec.NSWSSE11)
 		xmltree.SetAttr(str, "wsse11", xmlsec.NSWSSE11, "TokenType", valueType)
 	}
@@ -159,7 +159,7 @@ func ResolveSecurityTokenReferenceStrict(doc, str *xdm.Node) (*x509.Certificate,
 		return nil, fmt.Errorf("%w: wsse:Reference ValueType %q, token %q (BSP R3059, R3058)", xmlsec.ErrMalformed, got, vt)
 	}
 	tt := xmltree.AttrValue(str, xmlsec.NSWSSE11, "TokenType")
-	if tt != "" && tt != vt || tt == "" && (vt == xmlsec.BSTValueTypeX509PKIPath || vt == valueTypePKCS7) {
+	if tt != "" && tt != vt || tt == "" && (vt == xmlsec.BSTValueTypeX509PKIPath || vt == xmlsec.BSTValueTypePKCS7) {
 		return nil, fmt.Errorf("%w: wsse11:TokenType %q for a %q token (BSP R5215, R5212)", xmlsec.ErrMalformed, tt, vt)
 	}
 	// The child of the token's header that holds the reference.

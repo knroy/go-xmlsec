@@ -199,12 +199,13 @@ func TestMatchSecurityTokenReference(t *testing.T) {
 	}
 }
 
-// strictFixture is a header holding an X509v3 token and a PKIPath token,
+// strictFixture is a header holding an X509v3, a PKIPath and a PKCS7 token,
 // plus a second header for another actor holding a third.
 type strictFixture struct {
 	doc, body       *xdm.Node
 	h               *Header
-	v3, pki, other  string
+	v3, pki, p7     string
+	other           string
 	cert, otherCert *x509.Certificate
 }
 
@@ -219,6 +220,9 @@ func newStrictFixture(t *testing.T) strictFixture {
 		t.Fatal(err)
 	}
 	if f.pki, err = f.h.AddBinarySecurityToken(f.cert, nil, xmlsec.BSTValueTypeX509PKIPath); err != nil {
+		t.Fatal(err)
+	}
+	if f.p7, err = f.h.AddBinarySecurityToken(f.cert, nil, xmlsec.BSTValueTypePKCS7); err != nil {
 		t.Fatal(err)
 	}
 	h2, err := NewHeader(f.doc, xmlsec.NSSOAP11, "urn:other", false)
@@ -252,7 +256,7 @@ func strTo(id, valueType, tokenType string) *xdm.Node {
 }
 
 func TestResolveSecurityTokenReferenceStrict(t *testing.T) {
-	v3, pki := xmlsec.BSTValueTypeX509v3, xmlsec.BSTValueTypeX509PKIPath
+	v3, pki, p7 := xmlsec.BSTValueTypeX509v3, xmlsec.BSTValueTypeX509PKIPath, xmlsec.BSTValueTypePKCS7
 	type place int
 	const (
 		after  place = iota // appended to the token's header
@@ -269,6 +273,9 @@ func TestResolveSecurityTokenReferenceStrict(t *testing.T) {
 		{"X509v3", func(f strictFixture) string { return f.v3 }, v3, "", after, nil},
 		{"X509v3 with TokenType", func(f strictFixture) string { return f.v3 }, v3, v3, after, nil},
 		{"PKIPath with TokenType (R5215)", func(f strictFixture) string { return f.pki }, pki, pki, after, nil},
+		{"PKCS7 with TokenType (R5212, R5213)", func(f strictFixture) string { return f.p7 }, p7, p7, after, nil},
+		{"PKCS7 without TokenType (R5212)", func(f strictFixture) string { return f.p7 }, p7, "", after, xmlsec.ErrMalformed},
+		{"PKCS7 with the PKIPath ValueType (R5213)", func(f strictFixture) string { return f.p7 }, pki, p7, after, xmlsec.ErrMalformed},
 		{"no ValueType (R3059)", func(f strictFixture) string { return f.v3 }, "", "", after, xmlsec.ErrMalformed},
 		{"wrong ValueType (R3058)", func(f strictFixture) string { return f.v3 }, pki, "", after, xmlsec.ErrMalformed},
 		{"PKIPath without TokenType (R5215)", func(f strictFixture) string { return f.pki }, pki, "", after, xmlsec.ErrMalformed},
@@ -335,7 +342,7 @@ func TestNewSecurityTokenReference(t *testing.T) {
 	}{
 		{"X509v3: no TokenType", "tok", xmlsec.BSTValueTypeX509v3, xmlsec.BSTValueTypeX509v3, ""},
 		{"PKIPath read from the token (R5215)", "pki", "", xmlsec.BSTValueTypeX509PKIPath, xmlsec.BSTValueTypeX509PKIPath},
-		{"PKCS7 (R5212)", "p7", valueTypePKCS7, valueTypePKCS7, valueTypePKCS7},
+		{"PKCS7 (R5212)", "p7", xmlsec.BSTValueTypePKCS7, xmlsec.BSTValueTypePKCS7, xmlsec.BSTValueTypePKCS7},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			str, err := NewSecurityTokenReference(doc, c.id, c.valueType)

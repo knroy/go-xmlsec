@@ -4,3 +4,5 @@
 # checkout settings. The test key is PEM, kept LF likewise.
 **/testdata/golden/** text eol=lf
 *.pem text eol=lf
+# DER fixtures are binary: never converted on checkout.
+*.p7b binary

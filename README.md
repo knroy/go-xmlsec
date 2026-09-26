@@ -19,7 +19,7 @@ because a signature is only as correct as the canonical octets it covers.
 - **Signature coverage**: verification reports exactly which elements and
   attachments a signature covers, the defence against XML Signature Wrapping.
 - **WS-Security**: the `wsse:Security` header in processing order, binary
-  security tokens, direct, key-identifier and issuer-serial token references,
+  security tokens (X509v3, PKIPath and PKCS7), direct, key-identifier and issuer-serial token references,
   `wsu:Id`, and timestamps checked on receipt.
 - **XML Encryption**: RSA-OAEP key transport with an explicit MGF, AES key
   wrap, ECDH-ES key agreement, and AES-GCM for elements, element content,
