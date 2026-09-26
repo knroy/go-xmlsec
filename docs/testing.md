@@ -130,8 +130,8 @@ What `xmlsec1` needs that a WS-Security peer does not:
   `xmlsec1` with `--lax-key-search`, because 1.3 otherwise refuses a key
   `KeyInfo` does not name.
 * **The EncryptedKey inside `EncryptedData/ds:KeyInfo`.** That is how both
-  find the session key. This library does not place it there (see
-  [todo.md](todo.md)), so the harness does.
+  find the session key. `xenc.FindEncryptedKey` reads this form, but placing
+  the key there is left to the caller, so the harness does.
 
 Set `GOXMLSEC_REQUIRE_INTEROP=1` to make a missing tool fail rather than
 skip; the script and CI set it.
@@ -210,9 +210,10 @@ byte-for-byte. They are kept in a separate, private repository,
 personal data, so they are not redistributed. Its CI runs them against this
 library. **All 122 verify**, whole document signed, key from the
 certificate; each signature and every digest was also checked
-independently, and Santuario agrees on every one. The corpus found the two
-behaviours recorded in [todo.md](todo.md) as decided departures: implicit
-Canonical XML 1.0 on verification, and descriptive `X509Data` elements. The
+independently, and Santuario agrees on every one. The corpus found two
+behaviours this library had refused and now accepts, as the specification
+allows: implicit Canonical XML 1.0 on verification, and descriptive
+`X509Data` elements beside the certificate. The
 documents exercise CRLF line endings, a UTF-8 byte-order mark, character
 references and non-ASCII text.
 
@@ -273,5 +274,6 @@ fail to encode.
 
 ## Not tested yet
 
-* **Gate 2**: byte equality with phase4 over whole captured AS4 messages. The
-  signature-level equivalent, byte equality with Santuario, is in place.
+* **A one-hour fuzz run on the current code.** The nightly workflow runs one
+  hour per target; the last local runs were shorter and predate the
+  conformance work.

@@ -7,9 +7,8 @@
   security assessment and its results, and what a caller must still do.
 * **[Testing](testing.md)** — what runs, the conformance test IDs, how to run
   any of it, and what is not tested yet.
-* **[TODO](todo.md)** — what is left before v1: the acceptance criteria that
-  do not hold yet, the open items, and where the implementation departs from
-  its design document.
+* **[TODO](todo.md)** — open work against the specifications: none required,
+  and the recommended and optional features deliberately left out.
 * **[CHANGELOG.md](../CHANGELOG.md)** — every change, with the commit.
 * **[Releasing](../RELEASE.md)** — the four steps, and why the version is a
   hand-edited constant.

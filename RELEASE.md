@@ -13,11 +13,11 @@ that line. `0.0.0` means nothing has been released.
 
 ## Staying on v0
 
-The major version is 0 until the acceptance criteria in
-[docs/todo.md](docs/todo.md) hold — in particular Gate 2 and a green interop
-harness against two independent implementations. A `v1.0.0` on a security
-library says "independently validated", and a module version is permanent
-once the Go proxy has seen it. The test enforces the 0.
+The major version is 0 until the public API has been reviewed as a whole and
+frozen: a `v1.0.0` promises every exported name, and on a security library it
+also says "independently validated". A module version is permanent once the
+Go proxy has seen it. `TestVersionIsReleasedAndDescribed` enforces the 0, so
+moving to 1 is a deliberate change to that test.
 
 ## Steps
 
