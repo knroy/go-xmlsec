@@ -28,7 +28,20 @@ type VerifyOptions struct {
 	// is digested before the caller can refuse their certificate. Set it
 	// whenever the sender is known in advance: a signature from any other key
 	// is then refused before any reference is processed.
+	//
+	// A pinned key replaces whatever ds:KeyInfo describes, which is then not
+	// compared with it: a signature by another key fails as
+	// ErrSignatureInvalid. ds:KeyInfo is still read, so a form this library
+	// does not accept, or a malformed one, is refused even when a key is
+	// pinned.
 	Certificate *x509.Certificate
+
+	// PublicKey, if set, is the only key accepted, as Certificate but for a
+	// sender known by a raw key: an *rsa.PublicKey or *ecdsa.PublicKey.
+	// Setting both is an error. The 2048-bit RSA minimum applied to a raw key
+	// read from ds:KeyInfo does not apply to a pinned key, which crypto/rsa
+	// bounds at 1024 bits.
+	PublicKey crypto.PublicKey
 
 	// AllowedSignatureAlgorithms restricts the accepted ds:SignatureMethod
 	// values. Empty means every Sig* constant. A caller enforcing a profile
@@ -98,10 +111,17 @@ type Coverage struct {
 	// references, in reference order.
 	SignedAttachmentIDs []string
 
-	// Certificate is the certificate the signature was verified against.
+	// Certificate is the certificate the signature was verified against. It
+	// is nil when the key was a raw one: VerifyOptions.PublicKey, or a
+	// KeyInfoKeyValue or KeyInfoDEREncodedKeyValue form.
 	Certificate *x509.Certificate
 
-	// KeyInfoForm records how the key was described in the signature.
+	// PublicKey is the key the signature was verified with, always set: the
+	// certificate's key when there is a certificate.
+	PublicKey crypto.PublicKey
+
+	// KeyInfoForm records how the key was described in the signature. When a
+	// key was pinned, that description was read but not used.
 	KeyInfoForm KeyInfoSpec
 
 	// References are the verified references in order, retained because
@@ -157,7 +177,7 @@ func (c *Coverage) CoversAttachments(attachmentIDs ...string) bool {
 // A non-nil error means the signature is invalid or malformed. A nil error
 // means the signature is cryptographically valid over precisely the nodes
 // described in Coverage, and nothing more. It says nothing about whether
-// the certificate is trusted.
+// the certificate or key is trusted.
 func Verify(doc *xdm.Node, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 	cov, err := verify(doc, sig, opts)
 	if errors.Is(err, c14n.ErrRelativeNamespaceURI) || errors.Is(err, c14n.ErrXML11) {
@@ -172,6 +192,9 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 	}
 	if sig.Root() != doc.Root() {
 		return nil, errors.New("dsig: signature is not inside the document")
+	}
+	if opts.Certificate != nil && opts.PublicKey != nil {
+		return nil, errors.New("dsig: VerifyOptions.Certificate and PublicKey are both set")
 	}
 	maxRefs := opts.MaxReferences
 	if maxRefs <= 0 {
@@ -226,15 +249,18 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 		}
 	}
 
-	cert, form, err := resolveKeyInfo(doc, p.keyInfo)
+	cert, pub, form, err := resolveKeyInfo(doc, p.keyInfo)
 	if err != nil {
 		return nil, err
 	}
-	if opts.Certificate != nil {
-		cert = opts.Certificate
+	switch {
+	case opts.Certificate != nil:
+		cert, pub = opts.Certificate, opts.Certificate.PublicKey
+	case opts.PublicKey != nil:
+		cert, pub = nil, opts.PublicKey
 	}
-	if cert == nil {
-		return nil, fmt.Errorf("%w: no certificate supplied and none in ds:KeyInfo", xmlsec.ErrUnsupportedKeyInfo)
+	if pub == nil {
+		return nil, fmt.Errorf("%w: no key supplied and none in ds:KeyInfo", xmlsec.ErrUnsupportedKeyInfo)
 	}
 	if opts.TrustCertificate != nil {
 		if err := opts.TrustCertificate(cert); err != nil {
@@ -249,11 +275,11 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 	if _, err := c14n.DigestNodeSet(h, c14n.Subtree(p.signedInfo), p.c14n); err != nil {
 		return nil, err
 	}
-	if err := verifyDigest(cert.PublicKey, p.sigAlg, sigHash, h.Sum(nil), p.value); err != nil {
+	if err := verifyDigest(pub, p.sigAlg, sigHash, h.Sum(nil), p.value); err != nil {
 		return nil, err
 	}
 
-	cov := &Coverage{Certificate: cert, KeyInfoForm: form}
+	cov := &Coverage{Certificate: cert, PublicKey: pub, KeyInfoForm: form}
 	for i, r := range p.refs {
 		dh, _ := xmlsec.DigestHash(r.digestAlg)
 		h := dh.New()

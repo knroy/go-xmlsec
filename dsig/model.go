@@ -85,6 +85,20 @@ const (
 	// pointing at a wsse:BinarySecurityToken that the caller has placed in
 	// the wsse:Security header.
 	KeyInfoSecurityTokenReference
+
+	// KeyInfoKeyValue emits the raw public key as ds:KeyValue: a
+	// ds:RSAKeyValue, or a dsig11:ECKeyValue naming P-256, P-384 or P-521.
+	// No certificate travels, so the verifier must already trust the key.
+	// Sign takes the key from KeyProvider.Certificate, which it still
+	// requires, and refuses a key Verify would refuse: RSA under 2048 bits,
+	// or another curve.
+	KeyInfoKeyValue
+
+	// KeyInfoDEREncodedKeyValue emits the raw public key as
+	// dsig11:DEREncodedKeyValue, the base64 of its DER SubjectPublicKeyInfo.
+	// As with KeyInfoKeyValue, the key is RSA or ECDSA on P-256, P-384 or
+	// P-521.
+	KeyInfoDEREncodedKeyValue
 )
 
 func isC14N(alg string) bool { return c14n.Algorithm(alg).Valid() }

@@ -63,8 +63,13 @@ func fuzzSigned(key xmlsec.KeyProvider) (detached, enveloped []byte) {
 		panic(err)
 	}
 	detached = must(c14n.Bytes(doc, c14n.Options{Algorithm: c14n.Inclusive10WithComments}))
+	return detached, fuzzEnveloped(key, dsig.KeyInfoX509Data)
+}
 
-	enveloped = must(dsig.SignEnveloped(must(xmlsec.Parse([]byte(metadata))).Root, key, dsig.SignOptions{
+// fuzzEnveloped returns an enveloped signature, as signEnveloped builds, with
+// ds:KeyInfo in the given form.
+func fuzzEnveloped(key xmlsec.KeyProvider, form dsig.KeyInfoSpec) []byte {
+	return must(dsig.SignEnveloped(must(xmlsec.Parse([]byte(metadata))).Root, key, dsig.SignOptions{
 		SignatureAlgorithm:        xmlsec.SigRSASHA256,
 		CanonicalizationAlgorithm: string(c14n.Inclusive10),
 		References: []dsig.Reference{{
@@ -74,9 +79,8 @@ func fuzzSigned(key xmlsec.KeyProvider) (detached, enveloped []byte) {
 				{Algorithm: string(c14n.Inclusive10)},
 			},
 		}},
-		KeyInfo: dsig.KeyInfoX509Data,
+		KeyInfo: form,
 	}))
-	return detached, enveloped
 }
 
 // resign recomputes ds:SignatureValue over sig's SignedInfo as it stands, so
@@ -135,6 +139,14 @@ func FuzzVerify(f *testing.F) {
 	good := "47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
 	f.Add(detached, []byte("payload"))
 	f.Add(enveloped, []byte(nil))
+	// Raw keys: RSA as ds:KeyValue and DER, and an ECKeyValue by hand.
+	f.Add(fuzzEnveloped(key, dsig.KeyInfoKeyValue), []byte(nil))
+	f.Add(fuzzEnveloped(key, dsig.KeyInfoDEREncodedKeyValue), []byte(nil))
+	f.Add([]byte(strings.Replace(fuzzSignedInfo(fuzzReference("", fuzzExc, good)), `</ds:Signature>`,
+		`<ds:KeyInfo><ds:KeyValue><dsig11:ECKeyValue xmlns:dsig11="http://www.w3.org/2009/xmldsig11#">`+
+			`<dsig11:NamedCurve URI="urn:oid:1.2.840.10045.3.1.7"/><dsig11:PublicKey>`+
+			base64.StdEncoding.EncodeToString(must(covECKey.PublicKey.Bytes()))+
+			`</dsig11:PublicKey></dsig11:ECKeyValue></ds:KeyValue></ds:KeyInfo></ds:Signature>`, 1)), []byte(nil))
 	f.Add([]byte(fuzzSigOpen+`</ds:Signature>`), []byte(nil))
 	f.Add([]byte(fuzzSignedInfo(strings.Repeat(fuzzReference("", fuzzExc, good), 100))), []byte(nil))
 	f.Add([]byte(fuzzSignedInfo(fuzzReference("", `<ds:Transform Algorithm="`+xmlsec.TransformXSLT+`">`+

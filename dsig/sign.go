@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/x509"
 	"encoding/asn1"
 	"encoding/base64"
 	"errors"
@@ -221,8 +222,51 @@ func addKeyInfo(sig, doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions) er
 		}
 		xmltree.Element(sig, "ds", NSDSig, "KeyInfo").AppendChild(str)
 		return nil
+	case KeyInfoKeyValue, KeyInfoDEREncodedKeyValue:
+		return addRawKey(sig, key.Certificate, opts.KeyInfo)
 	}
 	return fmt.Errorf("dsig: unknown KeyInfoSpec %d", opts.KeyInfo)
+}
+
+// addRawKey emits the certificate's key, which sign has checked is the
+// signer's, as ds:KeyValue or dsig11:DEREncodedKeyValue. A key the verifier
+// would refuse as a raw key is refused here.
+func addRawKey(sig *xdm.Node, cert *x509.Certificate, form KeyInfoSpec) error {
+	if err := checkRawKey(cert.PublicKey); err != nil {
+		return err
+	}
+	ki := xmltree.Element(sig, "ds", NSDSig, "KeyInfo")
+	b64 := base64.StdEncoding.EncodeToString
+	if form == KeyInfoDEREncodedKeyValue {
+		e, err := dsig11Element(ki, "DEREncodedKeyValue")
+		if err != nil {
+			return err
+		}
+		xmltree.Text(e, b64(cert.RawSubjectPublicKeyInfo))
+		return nil
+	}
+	kv := xmltree.Element(ki, "ds", NSDSig, "KeyValue")
+	if k, ok := cert.PublicKey.(*rsa.PublicKey); ok {
+		r := xmltree.Element(kv, "ds", NSDSig, "RSAKeyValue")
+		xmltree.Text(xmltree.Element(r, "ds", NSDSig, "Modulus"), b64(k.N.Bytes()))
+		xmltree.Text(xmltree.Element(r, "ds", NSDSig, "Exponent"), b64(big.NewInt(int64(k.E)).Bytes()))
+		return nil
+	}
+	k := cert.PublicKey.(*ecdsa.PublicKey) // checkRawKey admits only RSA and ECDSA
+	ec, err := dsig11Element(kv, "ECKeyValue")
+	if err != nil {
+		return err
+	}
+	xmltree.SetAttr(xmltree.Element(ec, "dsig11", nsDSig11, "NamedCurve"), "", "", "URI", namedCurves[k.Curve])
+	pt, _ := k.Bytes() // cannot fail on a curve in namedCurves
+	xmltree.Text(xmltree.Element(ec, "dsig11", nsDSig11, "PublicKey"), b64(pt))
+	return nil
+}
+
+// dsig11Element appends a dsig11 element to parent, declaring the prefix.
+func dsig11Element(parent *xdm.Node, local string) (*xdm.Node, error) {
+	e := xmltree.Element(parent, "dsig11", nsDSig11, local)
+	return e, xmltree.Declare(e, "dsig11", nsDSig11)
 }
 
 // signDigest signs in the XML-DSig encoding: PKCS#1 v1.5 for RSA, and the

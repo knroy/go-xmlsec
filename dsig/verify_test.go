@@ -116,7 +116,6 @@ func TestVerifyStructure(t *testing.T) {
 		// ds:KeyInfo
 		{"empty KeyInfo", covKI(``), dsig.VerifyOptions{}, xmlsec.ErrUnsupportedKeyInfo},
 		{"KeyInfo with two children", covKI(`<ds:KeyName>a</ds:KeyName><ds:KeyName>b</ds:KeyName>`), dsig.VerifyOptions{}, xmlsec.ErrUnsupportedKeyInfo},
-		{"KeyValue", covKI(`<ds:KeyValue/>`), dsig.VerifyOptions{}, xmlsec.ErrUnsupportedKeyInfo},
 		{"X509Data with two certificates", covKI(`<ds:X509Data><ds:X509Certificate>AAAA</ds:X509Certificate><ds:X509Certificate>AAAA</ds:X509Certificate></ds:X509Data>`), dsig.VerifyOptions{}, xmlsec.ErrUnsupportedKeyInfo},
 		{"X509Data with issuer serial", covKI(`<ds:X509Data><ds:X509IssuerSerial/></ds:X509Data>`), dsig.VerifyOptions{}, xmlsec.ErrUnsupportedKeyInfo},
 		{"X509Certificate not base64", covKI(`<ds:X509Data><ds:X509Certificate>!!</ds:X509Certificate></ds:X509Data>`), dsig.VerifyOptions{}, xmlsec.ErrMalformed},
