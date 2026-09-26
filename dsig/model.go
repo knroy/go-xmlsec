@@ -50,7 +50,7 @@ type Reference struct {
 
 	// Transforms are applied in order. The final transform's output must be
 	// an octet stream: for same-document references the last transform is
-	// a canonicalization or base64; for cid: references the first is an SwA
+	// a canonicalization, base64 or XSLT; for cid: references the first is an SwA
 	// signature transform. Octets followed by a canonicalization are parsed
 	// with xmlsec.Parse (XML-DSig 4.4.3.2); base64 of a node set decodes its
 	// text (XML-DSig 6.6.2).
@@ -72,6 +72,39 @@ type TransformSpec struct {
 	// PrefixList child of an exclusive canonicalization transform, with ""
 	// for the default namespace. Ignored for other algorithms.
 	InclusiveNamespacePrefixes []string
+
+	// XPath is the expression of an xmlsec.TransformXPath transform (XML-DSig
+	// 6.6.3), carried in its ds:XPath child: it is evaluated as a boolean
+	// with each node of the input node set as context node, and the output
+	// holds the nodes for which it is true. here() is the ds:XPath element,
+	// so it works only for a signature computed in place
+	// (SignOptions.Parent). The expression is XPath 1.0, evaluated in the
+	// XPath 1.0 compatibility mode of go-xml's XPath 2.0 engine. Ignored for
+	// other algorithms.
+	XPath string
+
+	// XPathNamespaces binds the prefixes that XPath, or the XPathFilters
+	// expressions, use. Sign declares them on each ds:XPath or
+	// dsig-xpath:XPath element; Verify reports the bindings of the allowed
+	// expressions it compiled. Ignored for other algorithms.
+	XPathNamespaces map[string]string
+
+	// XPathFilters are the dsig-xpath:XPath elements of an
+	// xmlsec.TransformXPathFilter2 transform, applied in order (XPath Filter
+	// 2.0). Ignored for other algorithms.
+	XPathFilters []XPathFilter
+
+	// Stylesheet is the xsl:stylesheet or xsl:transform element of an
+	// xmlsec.TransformXSLT transform (XML-DSig 6.6.5); Sign places a copy
+	// inside ds:Transform. The stylesheet runs with no resolver of any kind:
+	// xsl:include, xsl:import, document() and every other way to read a
+	// resource fail. Verify reports the allowed stylesheet the received one
+	// matched. Ignored for other algorithms.
+	Stylesheet *xdm.Node
+
+	// el is the ds:Transform element this transform was read from, or that
+	// Sign built for it: here() and the stylesheet are taken from it.
+	el *xdm.Node
 }
 
 // KeyInfoForm is a ds:KeyInfo form: the one Sign emits (SignOptions.KeyInfo)

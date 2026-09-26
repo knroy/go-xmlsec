@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/url"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -192,10 +193,6 @@ func sign(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions, parent *xdm.N
 		if !ok {
 			return nil, fmt.Errorf("%w: digest %q", xmlsec.ErrUnsupportedAlgorithm, r.DigestAlgorithm)
 		}
-		h := dh.New()
-		if _, err := digestReference(h, doc, sig, r.URI, r.Transforms, opts.Attachments, false, opts.IDAttributes, opts.ResolveURI); err != nil {
-			return nil, err
-		}
 		ref := xmltree.Element(si, "ds", xmlsec.NSDSig, "Reference")
 		if r.ID != "" {
 			xmltree.SetAttr(ref, "", "", "Id", r.ID)
@@ -204,14 +201,22 @@ func sign(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions, parent *xdm.N
 			xmltree.SetAttr(ref, "", "", "Type", r.Type)
 		}
 		xmltree.SetAttr(ref, "", "", "URI", r.URI)
-		if len(r.Transforms) > 0 {
+		// The transforms are built before digesting: here() and an XSLT
+		// stylesheet are read from them where they stand.
+		transforms := slices.Clone(r.Transforms)
+		if len(transforms) > 0 {
 			ts := xmltree.Element(ref, "ds", xmlsec.NSDSig, "Transforms")
-			for _, t := range r.Transforms {
+			for i, t := range transforms {
 				tr := algElement(ts, "Transform", t.Algorithm)
-				if err := inclusiveNamespaces(tr, t); err != nil {
+				if err := transformParams(tr, t); err != nil {
 					return nil, err
 				}
+				transforms[i].el = tr
 			}
+		}
+		h := dh.New()
+		if _, err := digestReference(h, doc, sig, r.URI, transforms, opts.Attachments, false, opts.IDAttributes, opts.ResolveURI); err != nil {
+			return nil, err
 		}
 		algElement(ref, "DigestMethod", r.DigestAlgorithm)
 		xmltree.Text(xmltree.Element(ref, "ds", xmlsec.NSDSig, "DigestValue"), base64.StdEncoding.EncodeToString(h.Sum(nil)))
@@ -248,6 +253,18 @@ func checkReference(r Reference) error {
 			return fmt.Errorf("%w: Reference.Type %q is not a URI", xmlsec.ErrMalformed, r.Type)
 		}
 	}
+	for _, t := range r.Transforms {
+		switch t.Algorithm {
+		case xmlsec.TransformXPath, xmlsec.TransformXPathFilter2:
+			if err := checkXPathSpec(t); err != nil {
+				return err
+			}
+		case xmlsec.TransformXSLT:
+			if !isStylesheet(t.Stylesheet) {
+				return fmt.Errorf("%w: an XSLT transform needs TransformSpec.Stylesheet, an xsl:stylesheet element", xmlsec.ErrMalformed)
+			}
+		}
+	}
 	first := ""
 	if len(r.Transforms) > 0 {
 		first = r.Transforms[0].Algorithm
@@ -270,7 +287,17 @@ func algElement(parent *xdm.Node, local, alg string) *xdm.Node {
 	return e
 }
 
-func inclusiveNamespaces(tr *xdm.Node, t TransformSpec) error {
+// transformParams appends a ds:Transform's parameter children: the
+// ec:InclusiveNamespaces of an exclusive canonicalization, the XPath
+// elements of the XPath transforms, or the XSLT stylesheet.
+func transformParams(tr *xdm.Node, t TransformSpec) error {
+	switch t.Algorithm {
+	case xmlsec.TransformXPath, xmlsec.TransformXPathFilter2:
+		return xpathElements(tr, t)
+	case xmlsec.TransformXSLT:
+		copyStylesheet(tr, t.Stylesheet)
+		return nil
+	}
 	if !c14n.Algorithm(t.Algorithm).Exclusive() || len(t.InclusiveNamespacePrefixes) == 0 {
 		return nil
 	}

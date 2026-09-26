@@ -130,7 +130,12 @@ func parseReference(r *xdm.Node) (parsedReference, error) {
 // child accepted is ec:InclusiveNamespaces, and only under an exclusive
 // algorithm.
 func parseTransform(t *xdm.Node) (TransformSpec, error) {
-	spec := TransformSpec{Algorithm: t.AttrValue("Algorithm")}
+	spec := TransformSpec{Algorithm: t.AttrValue("Algorithm"), el: t}
+	if isProgramTransform(spec.Algorithm) {
+		// Its children are its program, read by admitTransform against the
+		// caller's allow-lists.
+		return spec, nil
+	}
 	for _, k := range t.ChildElements() {
 		if !k.IsElement(xmlsec.NSExcC14N, "InclusiveNamespaces") || !c14n.Algorithm(spec.Algorithm).Exclusive() ||
 			spec.InclusiveNamespacePrefixes != nil {

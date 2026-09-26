@@ -86,6 +86,35 @@ type VerifyOptions struct {
 	// today every c14n Algorithm constant.
 	AllowedCanonicalizationAlgorithms []string
 
+	// AllowedXPathExpressions opts in to the XPath (xmlsec.TransformXPath)
+	// and XPath Filter 2.0 (xmlsec.TransformXPathFilter2) transforms, for
+	// exactly the expressions listed. Empty, the default, refuses both with
+	// xmlsec.ErrTransformRefused. A received expression is accepted when,
+	// with surrounding whitespace trimmed, it equals an entry's Expr and each
+	// prefix in the entry's Namespaces is bound to the same URI where it
+	// stands; it is then compiled from the entry, with the entry's bindings.
+	// Anything else is refused with xmlsec.ErrTransformRefused, before any
+	// cryptographic work and before anything is compiled or evaluated. An
+	// XPath Filter 2.0 Filter attribute is taken as received.
+	//
+	// A transform that drops part of what a reference names takes it out of
+	// Coverage: an element is reported only when all of its subtree was
+	// digested, the whole document only when nothing but the signature was
+	// dropped. Evaluation costs one expression per node of the input.
+	AllowedXPathExpressions []XPathExpression
+
+	// AllowedXSLTStylesheets opts in to the XSLT transform
+	// (xmlsec.TransformXSLT), for exactly the stylesheets listed. Empty, the
+	// default, refuses it with xmlsec.ErrTransformRefused. A received
+	// stylesheet is accepted when it equals an entry under Exclusive C14N
+	// with every prefix the entry binds rendered, so no prefix the entry's
+	// expressions use can be rebound; anything else is refused before any
+	// cryptographic work. The stylesheet runs with no resolver of any kind,
+	// and its output is bounded like a parsed document. Its output is new
+	// content, so a reference through XSLT appears in Coverage.References
+	// only, never as a covered element, document or attachment.
+	AllowedXSLTStylesheets []*xdm.Node
+
 	// Attachments resolves cid: references encountered during verification.
 	Attachments xmlsec.AttachmentSet
 
@@ -151,7 +180,10 @@ type VerifyOptions struct {
 	ResolveURI xmlsec.URIResolver
 }
 
-// Coverage describes exactly what a verified signature covered.
+// Coverage describes exactly what a verified signature covered. A
+// reference whose XPath or XPath Filter 2.0 transform dropped part of its
+// target (other than the signature itself), or that went through XSLT,
+// covers less than its URI names: it is listed in References only.
 type Coverage struct {
 	// SignedElementIDs are the IDs of elements covered by a same-document
 	// reference, in reference order: the id value, whichever attribute
@@ -343,6 +375,13 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 				}
 			}
 		}
+		for j := range r.transforms {
+			if isProgramTransform(r.transforms[j].Algorithm) {
+				if err := admitTransform(&r.transforms[j], opts); err != nil {
+					return nil, err
+				}
+			}
+		}
 		// The implicit Canonical XML 1.0 is subject to the allow-list like
 		// any named one.
 		if impliesC14N(!r.omitted && isSameDocument(r.uri), r.transforms) {
@@ -421,8 +460,9 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 		dh, _ := digestHash(r.digestAlg)
 		h := dh.New()
 		var got dereferenced
+		covered := true
 		if r.omitted {
-			err = digestOmitted(h, r.transforms, opts.ResolveOmittedURI)
+			covered, err = digestOmitted(h, r.transforms, opts.ResolveOmittedURI)
 		} else {
 			got, err = digestReference(h, doc, sig, r.uri, r.transforms, opts.Attachments, true, opts.IDAttributes, opts.ResolveURI)
 		}
@@ -434,7 +474,7 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 		}
 		switch {
 		case r.omitted:
-			cov.OmittedURISigned = true
+			cov.OmittedURISigned = covered
 		case got.whole:
 			cov.WholeDocumentSigned = true
 		case got.element != nil:
@@ -454,13 +494,16 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 }
 
 // digestOmitted digests the data object of a Reference without a URI, as
-// VerifyOptions.ResolveOmittedURI supplies it.
-func digestOmitted(h hash.Hash, transforms []TransformSpec, resolve func() ([]byte, error)) error {
+// VerifyOptions.ResolveOmittedURI supplies it, and reports whether the
+// transforms kept all of it.
+func digestOmitted(h hash.Hash, transforms []TransformSpec, resolve func() ([]byte, error)) (bool, error) {
 	b, err := resolve()
 	if err != nil {
-		return fmt.Errorf("dsig: ResolveOmittedURI: %w", err)
+		return false, fmt.Errorf("dsig: ResolveOmittedURI: %w", err)
 	}
-	return data{octets: b}.digest(h, nil, "(omitted)", transforms, true)
+	d := data{octets: b}
+	err = d.digest(h, nil, "(omitted)", transforms, true)
+	return d.covers(nil), err
 }
 
 // The default sets: what an empty allow-list accepts. An algorithm

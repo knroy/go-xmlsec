@@ -172,9 +172,9 @@ func TestSignErrors(t *testing.T) {
 			o.Attachments, _ = xmlsec.NewAttachmentSet(&xmlsec.Attachment{ID: "att-1@example.com",
 				MIMEHeaders: map[string][]string{"Content-Type": {"text/plain; charset"}}})
 		}, xmlsec.ErrMalformed},
-		{"XPath Filter 2.0", key, func(o *dsig.SignOptions) {
+		{"XPath Filter 2.0 without filters", key, func(o *dsig.SignOptions) {
 			o.References = ref(body, xmlsec.TransformXPathFilter2)
-		}, xmlsec.ErrTransformRefused},
+		}, xmlsec.ErrMalformed},
 		{"unknown transform", key, func(o *dsig.SignOptions) { o.References = ref(body, "urn:x") }, xmlsec.ErrUnsupportedAlgorithm},
 		{"ECDSA algorithm with an RSA key", key, func(o *dsig.SignOptions) {
 			o.SignatureAlgorithm = xmlsec.SigECDSASHA256

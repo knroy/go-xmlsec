@@ -16,16 +16,21 @@ import (
 )
 
 // impliesC14N reports whether a reference relies on the implicit Canonical
-// XML 1.0 of XML-DSig 4.4.3.2: it dereferences to a node set (sameDocument)
-// and no transform of its own turns that into octets. Canonicalization and
-// base64 each yield octets.
+// XML 1.0 of XML-DSig 4.4.3.2: its data object is a node set after the last
+// transform. A same-document dereference (sameDocument) yields a node set;
+// canonicalization, base64 and XSLT yield octets; the XPath transforms
+// yield a node set again.
 func impliesC14N(sameDocument bool, transforms []TransformSpec) bool {
+	nodeSet := sameDocument
 	for _, t := range transforms {
-		if isC14N(t.Algorithm) || t.Algorithm == xmlsec.TransformBase64 {
-			return false
+		switch a := t.Algorithm; {
+		case isC14N(a) || a == xmlsec.TransformBase64 || a == xmlsec.TransformXSLT:
+			nodeSet = false
+		case a == xmlsec.TransformXPath || a == xmlsec.TransformXPathFilter2:
+			nodeSet = true
 		}
 	}
-	return sameDocument
+	return nodeSet
 }
 
 // isSameDocument reports whether uri is a same-document reference (XML-DSig
@@ -138,7 +143,14 @@ func digestReference(h hash.Hash, doc, sig *xdm.Node, uri string, transforms []T
 	if in.ns != nil && len(transforms) == 0 && !implicit {
 		return out, fmt.Errorf("%w: same-document reference %q has no canonicalization transform", xmlsec.ErrMalformed, uri)
 	}
-	return out, in.digest(h, sig, uri, transforms, implicit)
+	if err := in.digest(h, sig, uri, transforms, implicit); err != nil {
+		return out, err
+	}
+	if !in.covers(out.element) {
+		// A filter dropped part of the target: it is not covered.
+		out = dereferenced{}
+	}
+	return out, nil
 }
 
 // data is a reference's data object between transforms (XML-DSig 4.4.3.2):
@@ -154,11 +166,35 @@ type data struct {
 
 	// attachment is the cid: target, for the SwA transforms.
 	attachment *xmlsec.Attachment
+
+	// cut holds the nodes of the document an XPath or XPath Filter 2.0
+	// transform dropped, other than the signature's own. reparsed marks a
+	// node set parsed from octets, whose nodes are not the document's;
+	// opaque marks data that no longer shows what of the target it came
+	// from: an XSLT output, or a filter over a reparsed node set that
+	// dropped something.
+	cut      []*xdm.Node
+	reparsed bool
+	opaque   bool
+}
+
+// covers reports whether the transforms kept all of el's subtree, or with
+// el nil, all of the data object.
+func (d *data) covers(el *xdm.Node) bool {
+	if d.opaque {
+		return false
+	}
+	for _, x := range d.cut {
+		if el == nil || within(x, el) {
+			return false
+		}
+	}
+	return true
 }
 
 // digest applies transforms to d and writes the resulting octets into h;
 // sig, uri and implicit are as for digestReference.
-func (d data) digest(h hash.Hash, sig *xdm.Node, uri string, transforms []TransformSpec, implicit bool) error {
+func (d *data) digest(h hash.Hash, sig *xdm.Node, uri string, transforms []TransformSpec, implicit bool) error {
 	if len(transforms) > MaxTransformsPerReference {
 		return fmt.Errorf("%w: %d transforms on %q", xmlsec.ErrLimitExceeded, len(transforms), uri)
 	}
@@ -168,10 +204,14 @@ func (d data) digest(h hash.Hash, sig *xdm.Node, uri string, transforms []Transf
 		case alg == xmlsec.TransformEnvelopedSignature:
 			// XML-DSig 6.6.4: its input is a node set. Octets are not parsed
 			// for it: the parsed tree would hold no signature to remove.
-			if d.ns == nil {
+			switch f, ok := d.ns.(filtered); {
+			case d.ns == nil:
 				return fmt.Errorf("%w: enveloped-signature needs a node set", xmlsec.ErrMalformed)
+			case ok:
+				d.ns = f.without(sig)
+			default:
+				d.ns = c14n.ExcludeSubtree(d.ns.Root(), sig)
 			}
-			d.ns = c14n.ExcludeSubtree(d.ns.Root(), sig)
 
 		case isC14N(alg):
 			if d.ns == nil {
@@ -182,7 +222,7 @@ func (d data) digest(h hash.Hash, sig *xdm.Node, uri string, transforms []Transf
 				if err != nil {
 					return fmt.Errorf("%w: parsing octets for %s: %w", xmlsec.ErrMalformed, alg, err)
 				}
-				d.ns, d.stripComments = c14n.Document(tree.Root), false
+				d.ns, d.stripComments, d.reparsed = c14n.Document(tree.Root), false, true
 			}
 			c := c14n.Algorithm(alg)
 			if plain, ok := withoutComments[c]; ok && d.stripComments {
@@ -237,8 +277,15 @@ func (d data) digest(h hash.Hash, sig *xdm.Node, uri string, transforms []Transf
 			return fmt.Errorf("%w: %s is an EncryptedData Type, not a signature transform; use %s or %s",
 				xmlsec.ErrUnsupportedAlgorithm, alg, xmlsec.TransformAttachmentContentSignature, xmlsec.TransformAttachmentCompleteSignature)
 
-		case alg == xmlsec.TransformXSLT, alg == xmlsec.TransformXPath, alg == xmlsec.TransformXPathFilter2:
-			return fmt.Errorf("%w: %s", xmlsec.ErrTransformRefused, alg)
+		case alg == xmlsec.TransformXPath, alg == xmlsec.TransformXPathFilter2:
+			if err := d.filter(t, sig); err != nil {
+				return err
+			}
+
+		case alg == xmlsec.TransformXSLT:
+			if err := d.transformXSLT(t); err != nil {
+				return err
+			}
 
 		default:
 			return fmt.Errorf("%w: transform %s", xmlsec.ErrUnsupportedAlgorithm, alg)

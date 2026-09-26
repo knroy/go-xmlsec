@@ -425,12 +425,12 @@ func TestSignRefusals(t *testing.T) {
 		mod  func(*dsig.SignOptions)
 		want error
 	}{
-		{"xslt", func(o *dsig.SignOptions) {
+		{"xslt without a stylesheet", func(o *dsig.SignOptions) {
 			o.References = ref(xmlsec.TransformEnvelopedSignature, xmlsec.TransformXSLT)
-		}, xmlsec.ErrTransformRefused},
-		{"xpath", func(o *dsig.SignOptions) {
+		}, xmlsec.ErrMalformed},
+		{"xpath without an expression", func(o *dsig.SignOptions) {
 			o.References = ref(xmlsec.TransformEnvelopedSignature, xmlsec.TransformXPath)
-		}, xmlsec.ErrTransformRefused},
+		}, xmlsec.ErrMalformed},
 		{"no final canonicalization", func(o *dsig.SignOptions) {
 			o.References = ref(xmlsec.TransformEnvelopedSignature)
 		}, xmlsec.ErrMalformed},
