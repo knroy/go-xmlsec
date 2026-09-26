@@ -42,12 +42,12 @@ v1 waits for all of them. Numbers refer to the design document.
 
 ## Where the implementation departs from the design document
 
-Each is deliberate and is flagged for review before the first tag, since a
-public API is hard to reshape afterwards.
+Each is deliberate. Those not marked **Decided** are flagged for review before
+the first tag, since a public API is hard to reshape afterwards.
 
 | Departure | Why |
 |---|---|
-| Minimum Go 1.26, not 1.25 | `rsa.EncryptOAEPWithOptions` is the only standard-library route to an MGF1 hash that differs from the OAEP digest. |
+| Minimum Go 1.26, not 1.25 | **Decided.** `rsa.EncryptOAEPWithOptions` is the only standard-library route to an MGF1 hash that differs from the OAEP digest. |
 | `SignOptions.SecurityTokenID` added | `Sign` otherwise has no way to know which token the `SecurityTokenReference` should point at. It is checked to carry the signing certificate. |
 | `Sign` refuses inclusive `ds:SignedInfo` canonicalization | The signature is detached when `SignedInfo` is canonicalized; under inclusive canonicalization the result depends on where the caller later places it, so it would never verify. |
 | `EncryptAttachment`: the transform argument becomes `EncryptedData/@Type`, and the `CipherReference` carries `Attachment-Ciphertext-Transform` | That is what the SwA profile specifies and what phase4 and WSS4J emit. The design document put the content transform on the `CipherReference`. |

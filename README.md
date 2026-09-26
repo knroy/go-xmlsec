@@ -9,6 +9,8 @@ anything it digests except through `go-xml/c14n`.
 go get github.com/knroy/go-xmlsec
 ```
 
+Requires Go 1.26 or later.
+
 ## Status: v0, not yet independently validated
 
 Read this before depending on it.
