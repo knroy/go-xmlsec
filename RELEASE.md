@@ -15,7 +15,9 @@ that line. `0.0.0` means nothing has been released.
 
 The major version is 0 until the public API has been reviewed as a whole and
 frozen: a `v1.0.0` promises every exported name, and on a security library it
-also says "independently validated". A module version is permanent once the
+also says "independently validated". The review was done on 2026-09-26 (the
+"API review before v1" entry in the changelog); what is left is the decision
+to freeze. A module version is permanent once the
 Go proxy has seen it. `TestVersionIsReleasedAndDescribed` enforces the 0, so
 moving to 1 is a deliberate change to that test.
 

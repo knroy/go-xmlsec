@@ -182,8 +182,8 @@ cov, err := dsig.Verify(doc, sig, dsig.VerifyOptions{
 
 The listed attributes add to `wsu:Id` and `xml:id` and never replace them.
 Name only what your profile defines as an ID, and use the same list when
-signing and verifying. `wss.FindByID` does the same lookup
-directly.
+signing and verifying. `wss.FindByID(doc, id, attrs...)` does the same
+lookup directly.
 
 ## Enveloped signature
 
@@ -284,6 +284,8 @@ opts := xenc.EncryptOptions{
 }
 ek, err := xenc.GenerateEncryptedKey(opts)
 defer clear(ek.SessionKey)
+// For a second recipient, wrap the same key: set opts.SessionKey =
+// ek.SessionKey and opts.Recipient, and call GenerateEncryptedKey again.
 
 ciphertext, ed, err := xenc.EncryptAttachment(att, ek.SessionKey, xmlsec.TransformAttachmentContentOnly, opts)
 // Replace the MIME body with ciphertext, Content-Type application/octet-stream,

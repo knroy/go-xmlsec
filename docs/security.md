@@ -123,7 +123,7 @@ about 40 times the input in memory, before anything is authenticated:
 | 1,000,000-deep nesting | 6.7 MB | refused at depth 1000 | 34 MB |
 | over the byte limit | 65 MB | refused | 318 MB |
 
-The pinned limits are the design document's values and cannot be loosened.
+The pinned limits cannot be loosened.
 A server should tighten them to what its profile needs with
 `xmlsec.ParseWithLimits`: memory scales with `MaxBytes` and `MaxNodes`, so
 tightening them bounds every row above.

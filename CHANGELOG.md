@@ -2,9 +2,8 @@
 
 Notable changes, newest first. Versions follow [semantic
 versioning](https://semver.org). The module stays on **v0** until the
-acceptance criteria in [docs/todo.md](docs/todo.md) hold: `v0` says the API may
-move and the library has not been independently validated, which is true. See
-[RELEASE.md](RELEASE.md) for how a release is cut.
+public API is frozen: `v0` says the API may move. See
+[RELEASE.md](RELEASE.md) for when that changes and how a release is cut.
 
 ## Unreleased
 
@@ -26,7 +25,7 @@ First implementation. Not yet tagged.
 | Differential against Apache Santuario 4.0.4 | `tests/santuario/Harness.java` drives Santuario; signatures and encryption in both directions, and `SignatureValue` byte equality with Santuario for enveloped (inclusive and exclusive C14N) and WS-Security signatures. `tests/interop.sh` runs both reference implementations in one image. | *this commit* |
 | `staticcheck` and `gosec` in CI | Both clean, versions pinned, no suppressions. | *this commit* |
 | Test data documented | `docs/testing.md` lists every key, document, reference implementation and corpus the tests use, and where each comes from. | *this commit* |
-| WSS4J 4.0.1 in the differential | It processes a WS-Security header built by this library with Basic Security Profile enforcement on, and decrypts our encryption. Acceptance criteria 4 and 6. | *this commit* |
+| WSS4J 4.0.1 in the differential | It processes a WS-Security header built by this library with Basic Security Profile enforcement on, and decrypts our encryption. | *this commit* |
 | `EncryptedKey.SetKeyInfo`, `EncryptedKey.AddDataReference`, `EncryptOptions.DataID` | Compose an `EncryptedKey` the way a WS-Security receiver finds it: a `ds:KeyInfo` naming the recipient's key, and an `xenc:ReferenceList` naming each `EncryptedData` by its `Id`. Without them WSS4J could not decrypt our output. | *this commit* |
 | `VerifyOptions.TrustKey` | A callback that sees the signer's key, and certificate when there is one, before any cryptographic or digest work, refusing with `ErrUntrusted`. Closes the pre-trust verification cost found by the security assessment. | *this commit* |
 | `VerifyOptions.RequireExplicitCanonicalization` | Refuses a reference relying on the implied Canonical XML 1.0 even when that algorithm is allowed, for profiles that name their canonicalization. | *this commit* |

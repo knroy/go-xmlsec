@@ -74,7 +74,8 @@ type TransformSpec struct {
 	InclusiveNamespacePrefixes []string
 }
 
-// KeyInfoForm selects the ds:KeyInfo form.
+// KeyInfoForm is a ds:KeyInfo form: the one Sign emits (SignOptions.KeyInfo)
+// or the one Verify found (Coverage.KeyInfoForm).
 type KeyInfoForm int
 
 const (
