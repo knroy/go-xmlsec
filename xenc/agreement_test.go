@@ -6,6 +6,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
@@ -145,7 +146,6 @@ func TestDecryptAgreedKeyErrors(t *testing.T) {
 		{"two KeyInfo children", edit(am, `<ds:KeyName>k</ds:KeyName>`+am), r.priv, lists{}, xmlsec.ErrMalformed},
 		{"dh-es", edit(am, `<xenc:AgreementMethod Algorithm="http://www.w3.org/2009/xmlenc11#dh-es">`), r.priv, lists{}, xmlsec.ErrAlgorithmNotAllowed},
 		{"allow-listed unimplemented agreement", edit(am, `<xenc:AgreementMethod Algorithm="urn:x">`), r.priv, lists{agreement: []string{"urn:x"}}, xmlsec.ErrUnsupportedAlgorithm},
-		{"KA-Nonce", edit(am, am+`<xenc:KA-Nonce>Zm9v</xenc:KA-Nonce>`), r.priv, lists{}, xmlsec.ErrMalformed},
 		{"no OriginatorKeyInfo", cut(`<xenc:OriginatorKeyInfo>`, `</xenc:OriginatorKeyInfo>`), r.priv, lists{}, xmlsec.ErrMalformed},
 		{"PBKDF2 not named", edit(`Algorithm="`+xmlsec.KeyDerivationConcatKDF+`"`, `Algorithm="`+xmlsec.KeyDerivationPBKDF2+`"`), r.priv, lists{}, xmlsec.ErrAlgorithmNotAllowed},
 		{"no ConcatKDFParams", cut(`<xenc11:ConcatKDFParams`, `</xenc11:ConcatKDFParams>`), r.priv, lists{}, xmlsec.ErrMalformed},
@@ -178,6 +178,13 @@ func TestDecryptAgreedKeyErrors(t *testing.T) {
 		})
 	}
 
+	// A KA-Nonce, which ConcatKDF defines no use for, is ignored (section
+	// 5.6).
+	nonce := edit(am, am+`<xenc:KA-Nonce>Zm9v</xenc:KA-Nonce>`)
+	if key, err := xenc.DecryptAgreedKey(covParse(t, nonce), r.priv, xenc.DecryptOptions{}); err != nil || !bytes.Equal(key, ek.SessionKey) {
+		t.Fatalf("KA-Nonce: %v", err)
+	}
+
 	// A ds:KeyName beside the originator's ds:KeyValue is ignored.
 	named := edit(`<xenc:OriginatorKeyInfo>`, `<xenc:OriginatorKeyInfo><ds:KeyName>originator</ds:KeyName>`)
 	if key, err := xenc.DecryptAgreedKey(covParse(t, named), r.priv, xenc.DecryptOptions{}); err != nil || !bytes.Equal(key, ek.SessionKey) {
@@ -194,5 +201,51 @@ func TestDecryptAgreedKeyErrors(t *testing.T) {
 	alias := strings.Replace(string(b), xmlsec.DigestSHA384, xmlsec.DigestSHA384XMLEnc, 1)
 	if key, err := xenc.DecryptAgreedKey(covParse(t, alias), r.priv, xenc.DecryptOptions{}); err != nil || !bytes.Equal(key, ek.SessionKey) {
 		t.Fatalf("xmlenc#sha384: %v", err)
+	}
+}
+
+// Section 5.6: an AgreementMethod directly in the EncryptedData's KeyInfo,
+// the agreed key being the data key.
+func TestDirectKeyAgreement(t *testing.T) {
+	r := newECRecipient(t, elliptic.P384(), "")
+	r.opts.DataAlgorithm, r.opts.DigestAlgorithm, r.opts.DirectKeyAgreement = xmlsec.EncAES256GCM, xmlsec.DigestSHA384, true
+	ed := dkEncrypt(t, r.opts)
+	s := dkString(t, ed)
+	for _, want := range []string{
+		`<ds:KeyInfo xmlns:ds="` + xmlsec.NSDSig + `"><xenc:AgreementMethod Algorithm="` + xmlsec.KeyAgreementECDHES + `">`,
+		`AlgorithmID="00` + hex.EncodeToString([]byte(xmlsec.EncAES256GCM)) + `"`,
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("no %s in\n%s", want, s)
+		}
+	}
+	if _, err := xenc.FindEncryptedKey(ed); !errors.Is(err, xmlsec.ErrUnsupportedKeyInfo) {
+		t.Fatalf("FindEncryptedKey: %v", err)
+	}
+	key, err := xenc.DecryptAgreedDataKey(ed, r.priv, xenc.DecryptOptions{})
+	if err != nil || len(key) != 32 {
+		t.Fatalf("%x, %v", key, err)
+	}
+	if pt, err := xenc.DecryptData(ed, key, xenc.DecryptOptions{}); err != nil || !strings.Contains(string(pt), ">hello</p>") {
+		t.Fatalf("%q, %v", pt, err)
+	}
+	for name, opts := range map[string]xenc.DecryptOptions{
+		"data outside allow-list":      {AllowedDataAlgorithms: []string{xmlsec.EncAES128GCM}},
+		"agreement outside allow-list": {AllowedKeyAgreementAlgorithms: []string{xmlsec.KeyAgreementDHES}},
+	} {
+		if key, err := xenc.DecryptAgreedDataKey(ed, r.priv, opts); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) || key != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	// DecryptAgreedKey is for an EncryptedKey, DecryptAgreedDataKey for an
+	// EncryptedData.
+	if _, err := xenc.DecryptAgreedKey(ed, r.priv, xenc.DecryptOptions{}); !errors.Is(err, xmlsec.ErrMalformed) {
+		t.Fatalf("DecryptAgreedKey on data: %v", err)
+	}
+	// The Legacy KDF's ds:DigestMethod has no place beside ECDH-ES's
+	// KeyDerivationMethod.
+	withDigest := covParse(t, strings.Replace(s, `<xenc11:KeyDerivationMethod`, `<ds:DigestMethod Algorithm="`+xmlsec.DigestSHA256+`"></ds:DigestMethod><xenc11:KeyDerivationMethod`, 1))
+	if _, err := xenc.DecryptAgreedDataKey(withDigest, r.priv, xenc.DecryptOptions{}); !errors.Is(err, xmlsec.ErrMalformed) {
+		t.Fatalf("DigestMethod: %v", err)
 	}
 }

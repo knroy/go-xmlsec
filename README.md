@@ -24,7 +24,9 @@ because a signature is only as correct as the canonical octets it covers.
 - **XML Encryption**: RSA-OAEP key transport with an explicit MGF, AES key
   wrap, ECDH-ES key agreement, and AES-GCM for elements, element content,
   SOAP header blocks (`wsse11:EncryptedHeader`), attachments and arbitrary
-  octets; decryption in place; as opt-ins, finite-field Diffie-Hellman
+  octets; decryption in place; every `KeyInfo` form of section 3.5:
+  `EncryptedKey` chains, `xenc11:DerivedKey` from a master key, and key
+  agreement directly on the data; as opt-ins, finite-field Diffie-Hellman
   (`dh-es`, `dh`), PBKDF2, and an allow-listed XPath on a `CipherReference`.
 - **Hardened by default**: no DOCTYPE, no network or file access, no SHA-1,
   algorithm allow-lists checked before any cryptography. The XPath, XPath
@@ -120,10 +122,10 @@ default produces a signature that looks valid and that no peer accepts.
 | Digest | SHA-256, SHA-384, SHA-512 |
 | Canonicalization | Canonical XML 1.0 and 1.1, Exclusive Canonical XML 1.0, with or without comments, from `go-xml/c14n` |
 | Transforms | enveloped signature, base64, SwA `Attachment-Content-Signature` and `Attachment-Complete-Signature`; XPath, XPath Filter 2.0 and XSLT, verified only for allowed expressions and stylesheets |
-| Key transport | RSA-OAEP (XML Encryption 1.1), MGF1 with SHA-256, SHA-384, SHA-512 |
+| Key transport | RSA-OAEP (XML Encryption 1.1), MGF1 with SHA-256, SHA-384, SHA-512; opt-in: MGF1 with SHA-224 |
 | Key wrap | AES-128, AES-192, AES-256 (RFC 3394) |
 | Key agreement | ECDH-ES on P-256, P-384, P-521, with ConcatKDF; opt-in: finite-field `dh-es` and `dh` in 2048- to 8192-bit groups |
-| Key derivation | ConcatKDF; opt-in: PBKDF2 with HMAC-SHA256, 384, 512, from a password or a shared secret |
+| Key derivation | ConcatKDF, from a master key or a shared secret; opt-in: PBKDF2 with HMAC-SHA256, 384, 512, from a password or a shared secret |
 | Data encryption | AES-128-GCM, AES-192-GCM, AES-256-GCM; attachments as SwA `Attachment-Content-Only` or `Attachment-Complete` |
 
 Never produced, and accepted only when a caller names each one: SHA-1,

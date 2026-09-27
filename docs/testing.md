@@ -79,6 +79,12 @@ Named `TestConformance_<ID>_<description>` for the requirement they prove.
 | `TestLegacyKDFKnownAnswers` | the Legacy KDF of section 5.6.2.2 on the specification's own Example 40 input, and on two-block outputs, against values computed independently with Python's `hashlib`. Example 41's printed result does not match Example 40's octets; see the test |
 | `TestPBKDF2KnownAnswers`, `TestUnwrapEncryptedKeyPasswordErrors`, `TestPBKDF2AsAgreementKDF` (`xenc/pbkdf2_test.go`) | PBKDF2-HMAC-SHA256 and the RFC 6070 PBKDF2-HMAC-SHA1 vector as the KEK of an `xenc11:DerivedKey`; every malformed or out-of-policy parameter; PBKDF2 as a key agreement's KDF against a KEK computed independently |
 | `TestDHAndPBKDF2NotAllowedByDefault`, `TestDHSubgroupAndGroupAttacksRefused`, `TestPBKDF2IterationCountBounded` (`tests/security`) | none of the three is accepted under empty allow-lists; small-subgroup, 512-bit and 16384-bit groups refused; an iteration count of 4,000,000,000 refused in under 250 ms, without derivation |
+| `TestFindEncryptedKeyOfEncryptedKey`, `TestFindDerivedKey` (`xenc/resolve_test.go`), `TestEncryptedKeyChain`, `TestAddKeyReference` (`xenc/keyref_test.go`) | an `EncryptedKey` as `FindEncryptedKey`'s input: inline, `RetrievalMethod` (one or several naming one key), `KeyName`/`CarriedKeyName`, and `KeyReference` (never `DataReference`); `FindDerivedKey` by the same four routes; a key naming itself, `RetrievalMethod`s naming two keys, a duplicated `DerivedKeyName` and a `KeyInfo` out of schema order refused; a two-hop chain decrypted end to end; `KeyReference` placed before `CarriedKeyName` |
+| `TestMasterKeyRoundTrip`, `TestPasswordDataKey`, `TestDeriveKeyForEncryptedKey`, `TestDeriveKeyErrors`, `TestDataKeyOptionErrors`, `TestMasterKeyAttachment` (`xenc/derivedkey_test.go`) | a data key derived by ConcatKDF from `EncryptOptions.MasterKey` (fresh `PartyUInfo`, so no two keys alike) or by PBKDF2 from `Password`, with no `EncryptedKey`; a `DerivedKey` naming an `EncryptedKey` by `KeyReference` (Example 25's form); Example 25's own 5-bit `PartyUInfo` refused; every allow-list, a missing master key, and every conflicting or weak option refused |
+| `TestDirectKeyAgreement` (`xenc/agreement_test.go`), `TestDirectKeyAgreementDH` (`xenc/dh_test.go`) | the `AgreementMethod` directly in the `EncryptedData` (ECDH-ES, `dh-es`, `dh`), the key sized by the data algorithm after its allow-list; a `KA-Nonce` beside ECDH-ES and `dh-es` ignored |
+| `TestEncryptedKeyCipherReference` (`xenc/keywrap_test.go`), `TestDecryptEncryptedKeyCipherReference`, `TestLegacyRSA15CipherReference` | an `EncryptedKey`'s ciphertext by same-document and external `CipherReference`, for key wrap, RSA-OAEP and RSA v1.5; a resolver failure under RSA v1.5 is an error before any RSA operation, not an implicit rejection |
+| `TestImpliedAlgorithms` (`xenc/model_test.go`), `TestMGF1SHA224` | an absent `EncryptionMethod` read from `DecryptOptions.Implied*Algorithm` only, still through the allow-list; MGF1 with SHA-224 produced when named and accepted only when named |
+| `TestEncryptedKeyCipherReferenceResolverAfterAllowList`, `TestEncryptedKeyChainsBounded`, `TestKeyRetrievalAmbiguityRefused` (`tests/security`) | an `EncryptedKey`'s `CipherReference` never reaches the resolver before key wrap, key transport, MGF, data, agreement, KDF digest and PBKDF2 allow-lists pass; a cycle of `EncryptedKey`s is walked one hop per call and a self-reference refused; `RetrievalMethod`s to two keys and a duplicated Id are `ErrAmbiguousID` |
 | `TestFindByID` | duplicate IDs are refused across `wsu:Id` and `xml:id` |
 | `TestFindByIDExtraAttributes`, `TestSAMLAssertionByID`, `TestPlainIdReference`, `TestDefaultIDSetUnchanged` | opt-in `ID`/`Id` resolution; duplicates refused across every counted attribute; an attacker assertion with the signed `ID` refused; the default set unchanged |
 | `TestPrefixBoundElsewhere` | a `wsu` or `wsse` prefix bound to another namespace higher up does not corrupt the header |
@@ -126,6 +132,9 @@ package, does not implement XML Encryption 1.1 `rsa-oaep`.
 | `TestXmlsec1DecryptsOurPBKDF2`, `TestWeDecryptXmlsec1PBKDF2` | xmlsec1, both ways | a password-derived KEK (`xenc11:DerivedKey`, PBKDF2 with HMAC-SHA256 and SHA-512) |
 | `TestWeDecryptXmlsec1AgreementWithPBKDF2` | xmlsec1 → ours | PBKDF2 as the KDF of ECDH-ES and of `dh-es`, the shared secret as the password |
 | `TestReferenceImplementationsDecryptOurKeyWrap`, `TestWeDecryptTheirKeyWrap` | both ways | AES key wrap |
+| `TestDerivedKeyConcatKDFBothWays`, `TestDerivedKeyPBKDF2BothWays` (`keyinfo_test.go`) | xmlsec1, both ways | an `xenc11:DerivedKey` directly in the `EncryptedData`: ConcatKDF from a master key (`--concatkdf-key`, found by `MasterKeyName`, with our random `PartyUInfo`), and PBKDF2 from a password |
+| `TestDirectKeyAgreementBothWays` | xmlsec1, both ways | ECDH-ES with the `AgreementMethod` directly in the `EncryptedData` |
+| `TestEncryptedKeyChainWithXmlsec1` | xmlsec1, both ways | an `EncryptedKey` whose KEK a nested `EncryptedKey` carries, reached from the `EncryptedData` by `RetrievalMethod`; each side follows it with `FindEncryptedKey` twice. xmlsec1 re-parses a retrieved element as its own document, so it cannot follow a second `RetrievalMethod`, and the second hop is nested |
 | `TestDecryptReplaceKeepsNoNamespace` | ours → both | a decrypted element that undeclares a default namespace stays in no namespace |
 | `TestReferenceImplementationsDecryptOurOctets` | ours → both | `EncryptOctets` binary octets with a `MimeType` and no XML `Type`, the `EncryptedData` the document element; Santuario through the harness's `decrypt-octets-kw` |
 | `TestReferenceImplementationsDecryptOurEncryptionProperties` | ours → both | an element whose `EncryptedData` carries `EncryptionProperties`, `MimeType` and `Encoding` |
@@ -171,7 +180,12 @@ What `xmlsec1` needs that a WS-Security peer does not:
 **Not cross-checked.** Santuario 4.0.4 implements neither finite-field
 Diffie-Hellman (it has no `xenc:DHKeyValue`) nor PBKDF2, and neither
 reference implements the Legacy KDF of `xmlenc#dh`: that is checked only by
-`TestLegacyKDFKnownAnswers` and our own round trip.
+`TestLegacyKDFKnownAnswers` and our own round trip. Santuario also has no
+`DerivedKey` outside a key agreement, no `AgreementMethod` directly under an
+`EncryptedData`, and no `EncryptedKey` chains, so those are checked against
+xmlsec1 only. Neither tool writes an `EncryptedKey` with a
+`CipherReference`, a `KeyReference`, or a missing `EncryptionMethod`; those
+are unit-tested only.
 
 Set `GOXMLSEC_REQUIRE_INTEROP=1` to make a missing tool fail rather than
 skip; the script and CI set it.
@@ -259,7 +273,10 @@ PBKDF2 vector (AGRMNT.9) parses and is accepted once PBKDF2 is named, but
 its KEK cannot be reproduced from any encoding of the shared secret tried;
 xmlsec1's own suite leaves it out too, and the reading implemented, the
 secret's octets as the password, is the one xmlsec1 uses
-(`TestWeDecryptXmlsec1AgreementWithPBKDF2`).
+(`TestWeDecryptXmlsec1AgreementWithPBKDF2`). The set holds no
+`DerivedKey`, `KeyReference` or `RetrievalMethod` vector, so no vector
+changed outcome when those were implemented; every one still resolves its
+`EncryptedKey` through `FindEncryptedKey`.
 
 **Real-world corpus.** 122 real Peppol SMP responses, fetched 2026-09-26 from
 62 SMP providers and at least 20 distinct producing implementations, stored

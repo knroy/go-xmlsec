@@ -24,6 +24,7 @@ var digestHashes = map[string]crypto.Hash{
 }
 
 var mgfHashes = map[string]crypto.Hash{
+	xmlsec.MGF1SHA224: crypto.SHA224,
 	xmlsec.MGF1SHA256: crypto.SHA256,
 	xmlsec.MGF1SHA384: crypto.SHA384,
 	xmlsec.MGF1SHA512: crypto.SHA512,

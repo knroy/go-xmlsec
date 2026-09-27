@@ -16,6 +16,22 @@
 // accepted only when a caller names it, and PBKDF2's legacy HMAC-SHA1 PRF
 // only when named in DecryptOptions.AllowedPRFAlgorithms.
 //
+// # Key information
+//
+// FindEncryptedKey and FindDerivedKey find the key of an EncryptedData or
+// an EncryptedKey the ways section 3.5 provides: a child of its
+// ds:KeyInfo, a same-document ds:RetrievalMethod, a ds:KeyName, or the
+// xenc:ReferenceList naming it. Each takes one hop. An EncryptedKey's
+// KEK may itself be an EncryptedKey (EncryptedKey.AddKeyReference names
+// it); an xenc11:DerivedKey is derived from a shared master key by
+// DeriveKey (EncryptOptions.MasterKey on encryption); an
+// xenc:AgreementMethod directly under an EncryptedData is read by
+// DecryptAgreedDataKey and DecryptAgreedDataKeyDH
+// (EncryptOptions.DirectKeyAgreement). An EncryptedKey may carry its
+// ciphertext by xenc:CipherReference, resolved as an EncryptedData's. An
+// element without xenc:EncryptionMethod is decrypted only under an
+// algorithm the DecryptOptions Implied fields name.
+//
 // # Allow-lists
 //
 // Every Decrypt and Unwrap function takes a DecryptOptions whose allow-lists
@@ -66,6 +82,10 @@ const (
 	// TypeEncryptedKey is the ds:RetrievalMethod Type of a reference to an
 	// xenc:EncryptedKey (section 3.5.1).
 	TypeEncryptedKey = "http://www.w3.org/2001/04/xmlenc#EncryptedKey"
+
+	// TypeDerivedKey is the ds:RetrievalMethod Type of a reference to an
+	// xenc11:DerivedKey (section 3.5.2).
+	TypeDerivedKey = "http://www.w3.org/2001/04/xmlenc#DerivedKey"
 )
 
 // EncryptOptions configures encryption.
@@ -141,7 +161,9 @@ type EncryptOptions struct {
 
 	// Password, when set and there is no other key, derives the KEK of a
 	// KeyWrap* algorithm by PBKDF2 with HMAC-SHA256, a fresh 16-octet salt
-	// and PBKDF2Iterations.
+	// and PBKDF2Iterations. Given to an Encrypt function with no session
+	// key, it derives the data key the same way, named by an
+	// xenc11:DerivedKey in the EncryptedData's ds:KeyInfo.
 	Password []byte
 
 	// PBKDF2Iterations is the PBKDF2 iteration count for Password, from
@@ -181,6 +203,28 @@ type EncryptOptions struct {
 	// octets (section 3.3.1). It must not be a same-document reference.
 	// The other Encrypt functions refuse it.
 	CipherReferenceURI string
+
+	// MasterKey, when set and the Encrypt function is given no session
+	// key, derives the data key from it by ConcatKDF with DigestAlgorithm
+	// (section 5.4.1), and puts the xenc11:DerivedKey naming the derivation
+	// in the EncryptedData's ds:KeyInfo (section 3.5.2). A fresh 16-octet
+	// PartyUInfo makes each derived key new. It must be at least as long as
+	// the data key. A receiver sharing it calls FindDerivedKey and
+	// DeriveKey.
+	MasterKey []byte
+
+	// DerivedKeyName and MasterKeyName, if set, are emitted as the
+	// xenc11:DerivedKeyName and xenc11:MasterKeyName of the DerivedKey
+	// MasterKey produces.
+	DerivedKeyName, MasterKeyName string
+
+	// DirectKeyAgreement, when the Encrypt function is given no session
+	// key, agrees the data key itself with Recipient (ECDH-ES) or
+	// RecipientDH, by KeyAgreementAlgorithm and DigestAlgorithm, and puts
+	// the xenc:AgreementMethod in the EncryptedData's ds:KeyInfo, with no
+	// EncryptedKey (section 5.6). A receiver calls DecryptAgreedDataKey or
+	// DecryptAgreedDataKeyDH.
+	DirectKeyAgreement bool
 }
 
 // keySizes maps each data algorithm to its AES key length.
@@ -215,6 +259,7 @@ type DecryptOptions struct {
 
 	// AllowedMGFAlgorithms restricts the RSA-OAEP mask generation function.
 	// Default: the xmlsec.MGF1SHA256, 384 and 512 constants.
+	// xmlsec.MGF1SHA224 is accepted only when named.
 	AllowedMGFAlgorithms []string
 
 	// AllowedDigestAlgorithms restricts the RSA-OAEP and ConcatKDF digest.
@@ -234,8 +279,9 @@ type DecryptOptions struct {
 
 	// ResolveURI supplies the octets of an xenc:CipherReference to an
 	// absolute URI other than cid:, such as "http://example.com/ct.bin",
-	// for DecryptData. It is called only after the data algorithm and the
-	// CipherReference transforms are accepted. This library never fetches
+	// for DecryptData, and of an EncryptedKey's CipherReference for the
+	// functions unwrapping it. It is called only after the algorithms and
+	// the CipherReference transforms are accepted, before any decryption. This library never fetches
 	// anything itself; see xmlsec.URIResolver. An error it returns is
 	// wrapped with xmlsec.ErrDereference. When nil, such a CipherReference
 	// is refused, and so is a relative one; with ResolveURI set, a relative
@@ -273,6 +319,15 @@ type DecryptOptions struct {
 	// before ResolveURI is called and before any cryptographic work. XSLT
 	// and XPath Filter 2.0 on a CipherReference stay refused.
 	AllowedXPathExpressions []dsig.XPathExpression
+
+	// ImpliedDataAlgorithm, ImpliedKeyWrapAlgorithm and
+	// ImpliedKeyTransportAlgorithm name the algorithm of an EncryptedData,
+	// a wrapped or agreed EncryptedKey and an RSA EncryptedKey that has no
+	// xenc:EncryptionMethod, which sections 3.1 and 3.2 leave to be known
+	// by the recipient. Each is used only when the element has none, and
+	// passes the same allow-list an explicit one would. Empty, a missing
+	// EncryptionMethod is xmlsec.ErrMalformed.
+	ImpliedDataAlgorithm, ImpliedKeyWrapAlgorithm, ImpliedKeyTransportAlgorithm string
 }
 
 // The default allow-lists, used when a caller passes an empty one.
@@ -369,12 +424,29 @@ func newEncryptedData(typ string, opts EncryptOptions) (*xdm.Node, error) {
 
 // parseEncryptionMethod returns the Algorithm of el's xenc:EncryptionMethod,
 // which must be its first element child, and the method element itself.
-func parseEncryptionMethod(el *xdm.Node) (string, *xdm.Node, error) {
+// Without one, it returns implied and a nil method, or, when implied is
+// empty, an error.
+func parseEncryptionMethod(el *xdm.Node, implied string) (string, *xdm.Node, error) {
 	kids := el.ChildElements()
-	if len(kids) == 0 || !kids[0].IsElement(xmlsec.NSXEnc, "EncryptionMethod") {
-		return "", nil, malformed("%s without xenc:EncryptionMethod", el.Name.Local)
+	isMethod := func(k *xdm.Node) bool { return k.IsElement(xmlsec.NSXEnc, "EncryptionMethod") }
+	switch {
+	case len(kids) > 0 && isMethod(kids[0]):
+		return kids[0].AttrValue("Algorithm"), kids[0], nil
+	case implied == "" || slices.ContainsFunc(kids, isMethod):
+		return "", nil, malformed("%s without xenc:EncryptionMethod first", el.Name.Local)
 	}
-	return kids[0].AttrValue("Algorithm"), kids[0], nil
+	return implied, nil, nil
+}
+
+// keyInfo returns el's ds:KeyInfo, which follows its optional
+// xenc:EncryptionMethod, or nil.
+func keyInfo(el *xdm.Node) *xdm.Node {
+	for i, k := range el.ChildElements() {
+		if i < 2 && k.IsElement(xmlsec.NSDSig, "KeyInfo") {
+			return k
+		}
+	}
+	return nil
 }
 
 // methodParams returns the children of an xenc:EncryptionMethod by local
@@ -383,6 +455,10 @@ func parseEncryptionMethod(el *xdm.Node) (string, *xdm.Node, error) {
 // Each child may appear once.
 func methodParams(m *xdm.Node, bits int, permitted ...xdm.QName) (map[string]*xdm.Node, error) {
 	seen := map[string]*xdm.Node{}
+	if m == nil {
+		// An implied algorithm, without parameters.
+		return seen, nil
+	}
 	for _, k := range m.ChildElements() {
 		switch {
 		case k.IsElement(xmlsec.NSXEnc, "KeySize"):
@@ -411,12 +487,8 @@ func cipherData(el *xdm.Node) (*xdm.Node, error) {
 	return nil, malformed("%s without xenc:CipherData", el.Name.Local)
 }
 
-// cipherValue decodes the xenc:CipherData/xenc:CipherValue of el.
-func cipherValue(el *xdm.Node) ([]byte, error) {
-	cd, err := cipherData(el)
-	if err != nil {
-		return nil, err
-	}
+// cipherValue decodes the xenc:CipherValue of cd, an xenc:CipherData.
+func cipherValue(cd *xdm.Node) ([]byte, error) {
 	kids := cd.ChildElements()
 	if len(kids) != 1 || !kids[0].IsElement(xmlsec.NSXEnc, "CipherValue") {
 		return nil, malformed("xenc:CipherData must hold one xenc:CipherValue")

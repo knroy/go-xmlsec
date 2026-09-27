@@ -101,9 +101,9 @@ func keyWrap(ek *xdm.Node, key []byte, opts EncryptOptions) ([]byte, error) {
 	case keys > 1:
 		return nil, errors.New("xenc: more than one of Recipient, RecipientDH, KeyEncryptionKey and Password")
 	case opts.Recipient != nil:
-		kek, err = agree(ek, size, opts)
+		kek, err = agree(ek, opts.KeyTransportAlgorithm, size, opts)
 	case opts.RecipientDH != nil:
-		kek, err = agreeDH(ek, size, opts)
+		kek, err = agreeDH(ek, opts.KeyTransportAlgorithm, size, opts)
 	case len(opts.Password) > 0:
 		kek, err = passwordKEK(ek, size, opts)
 	}
@@ -119,16 +119,17 @@ func keyWrap(ek *xdm.Node, key []byte, opts EncryptOptions) ([]byte, error) {
 
 // wrapMethod validates el as an xenc:EncryptedKey under an allowed,
 // implemented key wrap algorithm, whose EncryptionMethod may hold only a
-// consistent KeySize, and returns the algorithm.
-func wrapMethod(el *xdm.Node, allowedKeyWrap []string) (string, error) {
+// consistent KeySize, and returns the algorithm, or
+// opts.ImpliedKeyWrapAlgorithm when it has no EncryptionMethod.
+func wrapMethod(el *xdm.Node, opts DecryptOptions) (string, error) {
 	if el == nil || !el.IsElement(xmlsec.NSXEnc, "EncryptedKey") {
 		return "", malformed("not an xenc:EncryptedKey")
 	}
-	alg, m, err := parseEncryptionMethod(el)
+	alg, m, err := parseEncryptionMethod(el, opts.ImpliedKeyWrapAlgorithm)
 	if err != nil {
 		return "", err
 	}
-	if err := allowed("key wrap", alg, allowedKeyWrap, defaultKeyWrap); err != nil {
+	if err := allowed("key wrap", alg, opts.AllowedKeyWrapAlgorithms, defaultKeyWrap); err != nil {
 		return "", err
 	}
 	size, ok := wrapSize(alg)
@@ -141,8 +142,8 @@ func wrapMethod(el *xdm.Node, allowedKeyWrap []string) (string, error) {
 	return alg, nil
 }
 
-// unwrap opens the CipherValue of el, an EncryptedKey under alg, with kek.
-func unwrap(el *xdm.Node, alg string, kek []byte) ([]byte, error) {
+// unwrap opens the ciphertext of el, an EncryptedKey under alg, with kek.
+func unwrap(el *xdm.Node, alg string, kek []byte, opts DecryptOptions) ([]byte, error) {
 	var b cipher.Block
 	var err error
 	if alg == xmlsec.KeyWrapTripleDES {
@@ -153,7 +154,7 @@ func unwrap(el *xdm.Node, alg string, kek []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	ct, err := cipherValue(el)
+	ct, err := keyCiphertext(el, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -176,10 +177,21 @@ func unwrap(el *xdm.Node, alg string, kek []byte) ([]byte, error) {
 // kek, is unwrapped only when named there; its integrity check is a truncated
 // SHA-1 of the key. kek must be the algorithm's size. A failed integrity
 // check is reported without detail.
+//
+// The wrapped key may be inline in xenc:CipherValue or named by an
+// xenc:CipherReference, resolved as DecryptData resolves one, through
+// opts.ResolveURI for an external URI, after the algorithm is accepted.
 func UnwrapEncryptedKey(el *xdm.Node, kek []byte, opts DecryptOptions) ([]byte, error) {
-	alg, err := wrapMethod(el, opts.AllowedKeyWrapAlgorithms)
+	alg, err := wrapMethod(el, opts)
 	if err != nil {
 		return nil, err
 	}
-	return unwrap(el, alg, kek)
+	return unwrap(el, alg, kek, opts)
+}
+
+// keyCiphertext returns the ciphertext of an EncryptedKey: its CipherValue,
+// or what its CipherReference names, found as for an EncryptedData
+// (section 3.3.1). Every caller has checked the algorithms first.
+func keyCiphertext(el *xdm.Node, opts DecryptOptions) ([]byte, error) {
+	return dataCiphertext(el, opts)
 }

@@ -455,6 +455,8 @@ listed headers.
 
 The MGF is emitted explicitly. Omitting it means SHA-1 by specification
 default, so `DecryptEncryptedKey` refuses an `EncryptedKey` without one.
+`xmlsec.MGF1SHA224` is produced when you name it, and accepted only when
+`AllowedMGFAlgorithms` names it.
 
 What to encrypt:
 
@@ -611,6 +613,81 @@ accepted only when `AllowedPRFAlgorithms` names `xmlsec.SigHMACSHA1`.
 Naming `xmlsec.KeyDerivationPBKDF2` also lets `DecryptAgreedKey` and
 `DecryptAgreedKeyDH` accept PBKDF2 as a key agreement's KDF, with the shared
 secret as the password.
+
+### Key chains, derived keys and direct key agreement
+
+The other `ds:KeyInfo` forms of sections 3.5 and 5.6, each found the same
+ways: a child of the `KeyInfo`, a same-document `ds:RetrievalMethod` (or
+several naming one element; naming two is `xmlsec.ErrAmbiguousID`), a
+`ds:KeyName`, or, with no `KeyInfo`, the one key whose `xenc:ReferenceList`
+names the element by `DataReference` (for an `EncryptedData`) or
+`KeyReference` (for an `EncryptedKey`).
+
+An `EncryptedKey` whose KEK another `EncryptedKey` carries: `FindEncryptedKey`
+takes either element and returns the next key, one hop per call. Bound the
+walk yourself; a key naming itself is refused.
+
+```go
+ek1, err := xenc.FindEncryptedKey(ed)  // the data key's EncryptedKey
+ek2, err := xenc.FindEncryptedKey(ek1) // the one carrying its KEK
+kek, err := xenc.DecryptEncryptedKey(ek2, decrypter, allow)
+key, err := xenc.UnwrapEncryptedKey(ek1, kek, allow)
+
+// Sending: KeyReference is the KEK's ReferenceList entry for ek1's Id.
+err = kekEK.AddKeyReference("EK-1")
+```
+
+A data key derived from a master key you share (`xenc11:DerivedKey`,
+ConcatKDF with a fresh 16-octet `PartyUInfo`, so each key is new), or from
+a password (PBKDF2), with no `EncryptedKey`. Pass no session key:
+
+```go
+out, err := xenc.EncryptElement(doc, payload, nil, xenc.EncryptOptions{
+    DataAlgorithm:   xmlsec.EncAES256GCM,
+    DigestAlgorithm: xmlsec.DigestSHA256, // the ConcatKDF digest
+    MasterKey:       master,              // at least the data key's length
+    MasterKeyName:   "Our other secret",  // optional, as is DerivedKeyName
+})
+
+dk, err := xenc.FindDerivedKey(ed)
+key, err := xenc.DeriveKey(dk, ed, master, xenc.DecryptOptions{})
+pt, err := xenc.DecryptData(ed, key, xenc.DecryptOptions{})
+```
+
+`DeriveKey` takes the size from the target's algorithm after its allow-list,
+and its target may be an `EncryptedKey`, whose KEK it derives. With
+`Password` instead of `MasterKey` the `DerivedKey` names PBKDF2, which
+`DeriveKey` accepts only when `AllowedKeyDerivationAlgorithms` names it.
+
+The data key agreed directly, with the `AgreementMethod` in the
+`EncryptedData` (ECDH-ES, or `dh-es` and `dh` with `RecipientDH`):
+
+```go
+opts := xenc.EncryptOptions{
+    DataAlgorithm:         xmlsec.EncAES128GCM,
+    KeyAgreementAlgorithm: xmlsec.KeyAgreementECDHES,
+    DigestAlgorithm:       xmlsec.DigestSHA256,
+    Recipient:             ecCert,
+    DirectKeyAgreement:    true,
+}
+out, err := xenc.EncryptElement(doc, payload, nil, opts)
+
+key, err := xenc.DecryptAgreedDataKey(ed, priv.ECDH(), xenc.DecryptOptions{})
+// finite-field: xenc.DecryptAgreedDataKeyDH(ed, dhPriv, opts)
+```
+
+A `KA-Nonce` beside ECDH-ES or `dh-es` is accepted and ignored: ConcatKDF
+has no use for it.
+
+An `EncryptedKey` may carry its ciphertext by `xenc:CipherReference`, like an
+`EncryptedData`; every unwrap function resolves it the same way, through
+`DecryptOptions.ResolveURI` for an external URI, after the algorithms pass
+their allow-lists and before any decryption.
+
+Without an `EncryptionMethod`, the algorithm "must be known to the
+recipient" (section 3.1): name it in `DecryptOptions.ImpliedDataAlgorithm`,
+`ImpliedKeyWrapAlgorithm` or `ImpliedKeyTransportAlgorithm`. It is used only
+for an element with none, and passes the allow-list like an explicit one.
 
 ### Receiving from a legacy peer
 

@@ -68,6 +68,9 @@ func EncryptAttachment(att *xmlsec.Attachment, sessionKey []byte, transform stri
 	if err != nil {
 		return nil, nil, err
 	}
+	if sessionKey, err = dataKey(ed, sessionKey, opts); err != nil {
+		return nil, nil, err
+	}
 	ct, err := seal(opts.DataAlgorithm, sessionKey, plaintext)
 	if err != nil {
 		return nil, nil, err
@@ -138,7 +141,7 @@ func contentType(att *xmlsec.Attachment) string {
 //     part's headers of the same names. A decrypted header the profile does
 //     not list, or one present twice, is refused.
 func DecryptAttachment(el *xdm.Node, ciphertext []byte, sessionKey []byte, opts DecryptOptions) (*xmlsec.Attachment, error) {
-	alg, err := dataAlgorithm(el, opts.AllowedDataAlgorithms)
+	alg, err := dataAlgorithm(el, opts)
 	if err != nil {
 		return nil, err
 	}

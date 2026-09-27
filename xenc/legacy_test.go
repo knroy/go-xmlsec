@@ -469,3 +469,26 @@ func TestLegacyTripleDESKeyWrap(t *testing.T) {
 		t.Fatalf("KeySize: %v", err)
 	}
 }
+
+// RSA v1.5 with its ciphertext by CipherReference: the ciphertext is
+// obtained before any RSA operation, so a failure to obtain it is an error,
+// not an implicit rejection, and says nothing about the padding.
+func TestLegacyRSA15CipherReference(t *testing.T) {
+	v15 := xenc.DecryptOptions{AllowedKeyTransportAlgorithms: []string{xmlsec.KeyTransportRSA15}}
+	key := bytes.Repeat([]byte{8}, 16)
+	ed := covParse(t, covED(``, covEM(xmlsec.EncAES128GCM)+cvOf(sealGCM(key, "x"))))
+	//lint:ignore SA1019 the test sender of the decryption-only rsa-1_5
+	ct, err := rsa.EncryptPKCS1v15(rand.Reader, &recipientKey.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ek := covParse(t, covEK(xmlsec.KeyTransportRSA15, ``, `<xenc:CipherData><xenc:CipherReference URI="http://example.com/k"/></xenc:CipherData>`))
+	v15.ResolveURI = func(string) ([]byte, error) { return ct, nil }
+	if got, err := xenc.DecryptEncryptedKeyPKCS1v15(ek, ed, recipientKey, v15); err != nil || !bytes.Equal(got, key) {
+		t.Fatalf("%x, %v", got, err)
+	}
+	v15.ResolveURI = func(string) ([]byte, error) { return nil, errors.New("offline") }
+	if got, err := xenc.DecryptEncryptedKeyPKCS1v15(ek, ed, recipientKey, v15); !errors.Is(err, xmlsec.ErrDereference) || got != nil {
+		t.Fatalf("%x, %v", got, err)
+	}
+}

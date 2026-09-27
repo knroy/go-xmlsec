@@ -203,3 +203,72 @@ func TestCarriedKeyNameAndRecipient(t *testing.T) {
 		}
 	}
 }
+
+// Sections 3.3 and 3.3.1: an EncryptedKey's CipherData may hold a
+// CipherReference, resolved as an EncryptedData's is, after the algorithm
+// is accepted: same-document with the base64 transform, or external
+// through ResolveURI.
+func TestEncryptedKeyCipherReference(t *testing.T) {
+	kek := bytes.Repeat([]byte{3}, 16)
+	ek, err := xenc.GenerateEncryptedKey(xenc.EncryptOptions{DataAlgorithm: xmlsec.EncAES128GCM,
+		KeyTransportAlgorithm: xmlsec.KeyWrapAES128, KeyEncryptionKey: kek})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapped := cipherValueOf(t, ek.Element)
+	b64 := base64.StdEncoding.EncodeToString(wrapped)
+	const tr = `<xenc:Transforms><ds:Transform xmlns:ds="` + xmlsec.NSDSig + `" Algorithm="` + xmlsec.TransformBase64 + `"/></xenc:Transforms>`
+	ref := func(uri, transforms string) string {
+		return `<xenc:CipherData><xenc:CipherReference URI="` + uri + `">` + transforms + `</xenc:CipherReference></xenc:CipherData>`
+	}
+	inDoc := func(ekXML string) *xdm.Node {
+		return firstNamed(covParse(t, `<r>`+ekXML+`<ct Id="ct">`+b64+`</ct></r>`), "EncryptedKey")
+	}
+	called := 0
+	resolve := func(uri string) ([]byte, error) {
+		called++
+		if uri != "http://example.com/k" {
+			return nil, errors.New("not found")
+		}
+		return wrapped, nil
+	}
+	for _, c := range []struct {
+		name string
+		el   *xdm.Node
+		opts xenc.DecryptOptions
+	}{
+		{"same document", inDoc(kwEK(xmlsec.KeyWrapAES128, ``, ref("#ct", tr))), xenc.DecryptOptions{}},
+		{"external", covParse(t, kwEK(xmlsec.KeyWrapAES128, ``, ref("http://example.com/k", ``))), xenc.DecryptOptions{ResolveURI: resolve}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			key, err := xenc.UnwrapEncryptedKey(c.el, kek, c.opts)
+			if err != nil || !bytes.Equal(key, ek.SessionKey) {
+				t.Fatalf("%x, %v", key, err)
+			}
+		})
+	}
+	called = 0
+	for _, c := range []struct {
+		name string
+		el   *xdm.Node
+		opts xenc.DecryptOptions
+		want error
+	}{
+		{"external without resolver", covParse(t, kwEK(xmlsec.KeyWrapAES128, ``, ref("http://example.com/k", ``))), xenc.DecryptOptions{}, xmlsec.ErrMalformed},
+		{"resolver fails", covParse(t, kwEK(xmlsec.KeyWrapAES128, ``, ref("http://example.com/x", ``))), xenc.DecryptOptions{ResolveURI: resolve}, xmlsec.ErrDereference},
+		{"same document without base64", inDoc(kwEK(xmlsec.KeyWrapAES128, ``, ref("#ct", ``))), xenc.DecryptOptions{}, xmlsec.ErrUnsupportedAlgorithm},
+		{"missing target", covParse(t, kwEK(xmlsec.KeyWrapAES128, ``, ref("#ct", tr))), xenc.DecryptOptions{}, xmlsec.ErrIDNotFound},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if key, err := xenc.UnwrapEncryptedKey(c.el, kek, c.opts); !errors.Is(err, c.want) || key != nil {
+				t.Fatalf("got %v, want %v", err, c.want)
+			}
+		})
+	}
+	// The resolver is not called for an algorithm the allow-list refuses.
+	calls := called
+	if _, err := xenc.UnwrapEncryptedKey(covParse(t, kwEK(xmlsec.KeyWrapAES128, ``, ref("http://example.com/k", ``))), kek,
+		xenc.DecryptOptions{ResolveURI: resolve, AllowedKeyWrapAlgorithms: []string{xmlsec.KeyWrapAES256}}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) || called != calls {
+		t.Fatalf("resolver called before the allow-list: %v", err)
+	}
+}

@@ -131,6 +131,11 @@ const (
 	MGF1SHA256 = "http://www.w3.org/2009/xmlenc11#mgf1sha256"
 	MGF1SHA384 = "http://www.w3.org/2009/xmlenc11#mgf1sha384"
 	MGF1SHA512 = "http://www.w3.org/2009/xmlenc11#mgf1sha512"
+
+	// MGF1SHA224 is MGF1 with SHA-224 (section 5.5.2). It is produced when
+	// named but is in no default allow-list: a receiver accepts it only
+	// when it names it.
+	MGF1SHA224 = "http://www.w3.org/2009/xmlenc11#mgf1sha224"
 )
 
 // BinarySecurityToken ValueType URIs.

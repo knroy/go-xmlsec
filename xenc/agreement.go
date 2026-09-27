@@ -64,10 +64,11 @@ func otherInfo(p *xdm.Node) ([]byte, error) {
 	return out, nil
 }
 
-// agree derives a KEK of size octets for opts.Recipient's EC key by ECDH-ES
-// with a fresh ephemeral key and ConcatKDF, and adds the ds:KeyInfo holding
-// the xenc:AgreementMethod to ek.
-func agree(ek *xdm.Node, size int, opts EncryptOptions) ([]byte, error) {
+// agree derives a key of size octets for alg, a key wrap or data
+// algorithm, and opts.Recipient's EC key by ECDH-ES with a fresh ephemeral
+// key and ConcatKDF, and adds the ds:KeyInfo holding the
+// xenc:AgreementMethod to ek, an EncryptedKey or EncryptedData.
+func agree(ek *xdm.Node, alg string, size int, opts EncryptOptions) ([]byte, error) {
 	if opts.KeyAgreementAlgorithm != xmlsec.KeyAgreementECDHES {
 		return nil, unsupported("key agreement %q", opts.KeyAgreementAlgorithm)
 	}
@@ -87,10 +88,10 @@ func agree(ek *xdm.Node, size int, opts EncryptOptions) ([]byte, error) {
 	// the same NIST curve.
 	eph, _ := rpub.Curve().GenerateKey(rand.Reader)
 	z, _ := eph.ECDH(rpub)
-	kek := concatKDF(h, z, []byte(opts.KeyTransportAlgorithm), size)
+	kek := concatKDF(h, z, []byte(alg), size)
 
 	am := newAgreementMethod(ek, xmlsec.KeyAgreementECDHES)
-	concatKDFMethod(am, opts)
+	concatKDFMethod(am, alg, nil, opts.DigestAlgorithm)
 	kv := xmltree.Element(element(am, "OriginatorKeyInfo"), "ds", xmlsec.NSDSig, "KeyValue")
 	ec := nsElement(kv, "dsig11", xmlsec.NSDSig11, "ECKeyValue")
 	xmltree.SetAttr(xmltree.Element(ec, "dsig11", xmlsec.NSDSig11, "NamedCurve"), "", "", "URI", curveURIs[rpub.Curve()])
@@ -108,19 +109,23 @@ func newAgreementMethod(ek *xdm.Node, alg string) *xdm.Node {
 	return am
 }
 
-// concatKDFMethod adds to am the xenc11:KeyDerivationMethod of a ConcatKDF
-// with opts.DigestAlgorithm. AlgorithmID names the wrap algorithm the KEK
-// is for; PartyUInfo and PartyVInfo are present and empty. Santuario
+// concatKDFMethod adds to parent the xenc11:KeyDerivationMethod of a
+// ConcatKDF with digest. AlgorithmID names alg, the algorithm the key is
+// for; PartyUInfo is partyU, and PartyVInfo is present and empty. Santuario
 // refuses a lone "00" octet, which the specification allows, so
-// AlgorithmID is not empty.
-func concatKDFMethod(am *xdm.Node, opts EncryptOptions) {
-	kdm := nsElement(am, "xenc11", xmlsec.NSXEnc11, "KeyDerivationMethod")
+// AlgorithmID is not empty, and an empty PartyUInfo is written empty.
+func concatKDFMethod(parent *xdm.Node, alg string, partyU []byte, digest string) {
+	kdm := nsElement(parent, "xenc11", xmlsec.NSXEnc11, "KeyDerivationMethod")
 	xmltree.SetAttr(kdm, "", "", "Algorithm", xmlsec.KeyDerivationConcatKDF)
 	params := xmltree.Element(kdm, "xenc11", xmlsec.NSXEnc11, "ConcatKDFParams")
-	xmltree.SetAttr(params, "", "", "AlgorithmID", "00"+hex.EncodeToString([]byte(opts.KeyTransportAlgorithm)))
-	xmltree.SetAttr(params, "", "", "PartyUInfo", "")
+	xmltree.SetAttr(params, "", "", "AlgorithmID", "00"+hex.EncodeToString([]byte(alg)))
+	u := ""
+	if partyU != nil {
+		u = "00" + hex.EncodeToString(partyU)
+	}
+	xmltree.SetAttr(params, "", "", "PartyUInfo", u)
 	xmltree.SetAttr(params, "", "", "PartyVInfo", "")
-	xmltree.SetAttr(xmltree.Element(params, "ds", xmlsec.NSDSig, "DigestMethod"), "", "", "Algorithm", opts.DigestAlgorithm)
+	xmltree.SetAttr(xmltree.Element(params, "ds", xmlsec.NSDSig, "DigestMethod"), "", "", "Algorithm", digest)
 }
 
 // only returns the single element child of n, which must be named uri,
@@ -186,39 +191,49 @@ func originatorKey(oki *xdm.Node) (*ecdh.PublicKey, error) {
 	return nil, fmt.Errorf("%w: curve %q", xmlsec.ErrUnsupportedKeyInfo, uri)
 }
 
-// agreed is an xenc:EncryptedKey whose KEK is agreed, as the Decrypt
-// functions receive it: its key wrap algorithm and that algorithm's KEK
-// size, the allowed agreement algorithm, and the children of its
-// xenc:AgreementMethod, each present at most once.
+// agreed is an xenc:EncryptedKey whose KEK is agreed, or an
+// xenc:EncryptedData whose key is, as the Decrypt functions receive it: its
+// key wrap or data algorithm and that algorithm's key size, the allowed
+// agreement algorithm, and the children of its xenc:AgreementMethod, each
+// present at most once.
 type agreed struct {
-	wrap, agreement            string
+	alg, agreement             string
 	size                       int
 	nonce, digest, kdm, origin *xdm.Node
 }
 
-// parseAgreed reads el, an xenc:EncryptedKey whose ds:KeyInfo holds
-// exactly one xenc:AgreementMethod with an OriginatorKeyInfo, and checks
-// its wrap and agreement algorithms against opts. RecipientKeyInfo is
-// ignored: the private key is the caller's choice. noKey reports a nil
-// private key, refused once the wrap algorithm is checked.
-func parseAgreed(el *xdm.Node, noKey bool, opts DecryptOptions) (*agreed, error) {
-	alg, err := wrapMethod(el, opts.AllowedKeyWrapAlgorithms)
+// parseAgreed reads el, an xenc:EncryptedKey, or with data an
+// xenc:EncryptedData, whose ds:KeyInfo holds exactly one
+// xenc:AgreementMethod with an OriginatorKeyInfo, and checks its wrap or
+// data algorithm and its agreement algorithm against opts.
+// RecipientKeyInfo is ignored: the private key is the caller's choice.
+// noKey reports a nil private key, refused once the wrap or data algorithm
+// is checked.
+func parseAgreed(el *xdm.Node, data, noKey bool, opts DecryptOptions) (*agreed, error) {
+	a := &agreed{}
+	var err error
+	if data {
+		a.alg, err = dataAlgorithm(el, opts)
+		a.size, _ = dataKeySize(a.alg)
+	} else {
+		a.alg, err = wrapMethod(el, opts)
+		a.size, _ = wrapSize(a.alg)
+	}
 	if err != nil {
 		return nil, err
 	}
 	if noKey {
 		return nil, errors.New("xenc: no private key")
 	}
-	kids := el.ChildElements()
-	if len(kids) < 2 || !kids[1].IsElement(xmlsec.NSDSig, "KeyInfo") {
+	ki := keyInfo(el)
+	if ki == nil {
 		return nil, fmt.Errorf("%w: no ds:KeyInfo holding an xenc:AgreementMethod", xmlsec.ErrUnsupportedKeyInfo)
 	}
-	am, err := only(kids[1], xmlsec.NSXEnc, "AgreementMethod")
+	am, err := only(ki, xmlsec.NSXEnc, "AgreementMethod")
 	if err != nil {
 		return nil, err
 	}
-	a := &agreed{wrap: alg, agreement: am.AttrValue("Algorithm")}
-	a.size, _ = wrapSize(alg)
+	a.agreement = am.AttrValue("Algorithm")
 	if err := allowed("key agreement", a.agreement, opts.AllowedKeyAgreementAlgorithms, defaultAgreement); err != nil {
 		return nil, err
 	}
@@ -244,11 +259,12 @@ func parseAgreed(el *xdm.Node, noKey bool, opts DecryptOptions) (*agreed, error)
 }
 
 // explicitKDF returns the key derivation of an agreement with an explicit
-// xenc11:KeyDerivationMethod (ECDH-ES and dh-es), which takes neither a
-// KA-Nonce nor the Legacy KDF's ds:DigestMethod.
+// xenc11:KeyDerivationMethod (ECDH-ES and dh-es), which takes no Legacy
+// KDF ds:DigestMethod. A KA-Nonce, which the schema allows, is ignored:
+// neither ConcatKDF nor PBKDF2 defines a use for it (section 5.6).
 func (a *agreed) explicitKDF(opts DecryptOptions) (func([]byte) []byte, error) {
-	if a.nonce != nil || a.digest != nil || a.kdm == nil {
-		return nil, malformed("xenc:AgreementMethod of %s needs an xenc11:KeyDerivationMethod, and takes no KA-Nonce or ds:DigestMethod", a.agreement)
+	if a.digest != nil || a.kdm == nil {
+		return nil, malformed("xenc:AgreementMethod of %s needs an xenc11:KeyDerivationMethod, and takes no ds:DigestMethod", a.agreement)
 	}
 	return keyDerivation(a.kdm, a.size, opts)
 }
@@ -299,33 +315,56 @@ func concatKDFParams(kdm *xdm.Node, size int, opts DecryptOptions) (func([]byte)
 // ds:KeyInfo must hold exactly one xenc:AgreementMethod, with an
 // xenc11:KeyDerivationMethod and an OriginatorKeyInfo holding a
 // ds:KeyValue/dsig11:ECKeyValue on priv's curve. RecipientKeyInfo is
-// ignored: priv is the caller's choice. A KA-Nonce is refused.
+// ignored: priv is the caller's choice. A KA-Nonce is ignored: ConcatKDF
+// defines no use for it.
 //
 // opts' key wrap, key agreement and digest lists restrict the key wrap,
 // key agreement and ConcatKDF digest algorithms. Its key derivation list
 // restricts the KDF: PBKDF2 (section 5.4.2), with the shared secret as its
 // password, is accepted only when named there, and its PRF only from
 // AllowedPRFAlgorithms. Callers with an *ecdsa.PrivateKey pass its ECDH().
-// For finite-field Diffie-Hellman use DecryptAgreedKeyDH.
+// For finite-field Diffie-Hellman use DecryptAgreedKeyDH, and for an
+// AgreementMethod directly under an EncryptedData DecryptAgreedDataKey.
 func DecryptAgreedKey(el *xdm.Node, priv *ecdh.PrivateKey, opts DecryptOptions) ([]byte, error) {
-	a, err := parseAgreed(el, priv == nil, opts)
+	a, kek, err := agreedECDH(el, false, priv, opts)
 	if err != nil {
 		return nil, err
 	}
+	return unwrap(el, a.alg, kek, opts)
+}
+
+// DecryptAgreedDataKey returns the key of ed, an xenc:EncryptedData whose
+// ds:KeyInfo holds an xenc:AgreementMethod directly, with no EncryptedKey
+// (section 5.6): the key ECDH-ES between priv and the originator's key
+// agrees, derived to the size of ed's data algorithm, which is checked
+// against opts.AllowedDataAlgorithms first. Everything else is as for
+// DecryptAgreedKey. Decrypt ed with the result by DecryptData.
+func DecryptAgreedDataKey(ed *xdm.Node, priv *ecdh.PrivateKey, opts DecryptOptions) ([]byte, error) {
+	_, key, err := agreedECDH(ed, true, priv, opts)
+	return key, err
+}
+
+// agreedECDH parses el, an EncryptedKey or with data an EncryptedData,
+// and returns the key ECDH-ES agrees for it with priv.
+func agreedECDH(el *xdm.Node, data bool, priv *ecdh.PrivateKey, opts DecryptOptions) (*agreed, []byte, error) {
+	a, err := parseAgreed(el, data, priv == nil, opts)
+	if err != nil {
+		return nil, nil, err
+	}
 	if a.agreement != xmlsec.KeyAgreementECDHES {
-		return nil, unsupported("key agreement %q", a.agreement)
+		return nil, nil, unsupported("key agreement %q", a.agreement)
 	}
 	kdf, err := a.explicitKDF(opts)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	pub, err := originatorKey(a.origin)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	z, err := priv.ECDH(pub)
 	if err != nil {
-		return nil, fmt.Errorf("%w: originator key: %v", xmlsec.ErrUnsupportedKeyInfo, err)
+		return nil, nil, fmt.Errorf("%w: originator key: %v", xmlsec.ErrUnsupportedKeyInfo, err)
 	}
-	return unwrap(el, a.wrap, kdf(z))
+	return a, kdf(z), nil
 }

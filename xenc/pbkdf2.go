@@ -153,8 +153,10 @@ func passwordKEK(ek *xdm.Node, size int, opts EncryptOptions) ([]byte, error) {
 // PBKDF2 (section 5.4.2): its ds:KeyInfo must hold exactly one
 // xenc11:DerivedKey whose xenc11:KeyDerivationMethod is
 // xmlsec.KeyDerivationPBKDF2, with the salt Specified and a KeyLength equal
-// to the key wrap algorithm's. An xenc11:MasterKeyName or DerivedKeyName
-// is ignored: password is the caller's choice.
+// to the key wrap algorithm's. An xenc11:MasterKeyName, DerivedKeyName or
+// ReferenceList is ignored: password is the caller's choice. For a
+// DerivedKey elsewhere, or one directly under an EncryptedData, use
+// FindDerivedKey and DeriveKey.
 //
 // PBKDF2 is accepted only when opts.AllowedKeyDerivationAlgorithms names
 // it, and its PRF only from opts.AllowedPRFAlgorithms (default HMAC-SHA256,
@@ -164,33 +166,24 @@ func passwordKEK(ek *xdm.Node, size int, opts EncryptOptions) ([]byte, error) {
 // all before any derivation. opts.AllowedKeyWrapAlgorithms restricts the
 // key wrap as for UnwrapEncryptedKey.
 func UnwrapEncryptedKeyPassword(el *xdm.Node, password []byte, opts DecryptOptions) ([]byte, error) {
-	alg, err := wrapMethod(el, opts.AllowedKeyWrapAlgorithms)
+	alg, err := wrapMethod(el, opts)
 	if err != nil {
 		return nil, err
 	}
 	if len(password) == 0 {
 		return nil, errors.New("xenc: no password")
 	}
-	kids := el.ChildElements()
-	if len(kids) < 2 || !kids[1].IsElement(xmlsec.NSDSig, "KeyInfo") {
+	ki := keyInfo(el)
+	if ki == nil {
 		return nil, fmt.Errorf("%w: no ds:KeyInfo holding an xenc11:DerivedKey", xmlsec.ErrUnsupportedKeyInfo)
 	}
-	dk, err := only(kids[1], xmlsec.NSXEnc11, "DerivedKey")
+	dk, err := only(ki, xmlsec.NSXEnc11, "DerivedKey")
 	if err != nil {
 		return nil, err
 	}
-	var kdm *xdm.Node
-	for _, k := range dk.ChildElements() {
-		switch {
-		case k.IsElement(xmlsec.NSXEnc11, "KeyDerivationMethod") && kdm == nil:
-			kdm = k
-		case k.IsElement(xmlsec.NSXEnc11, "MasterKeyName"), k.IsElement(xmlsec.NSXEnc11, "DerivedKeyName"):
-		default:
-			return nil, malformed("unexpected %s in xenc11:DerivedKey", k.Name.Local)
-		}
-	}
-	if kdm == nil {
-		return nil, malformed("xenc11:DerivedKey without xenc11:KeyDerivationMethod")
+	kdm, err := derivedKeyMethod(dk)
+	if err != nil {
+		return nil, err
 	}
 	kdf := kdm.AttrValue("Algorithm")
 	if err := allowed("key derivation", kdf, opts.AllowedKeyDerivationAlgorithms, defaultDerivation); err != nil {
@@ -204,5 +197,5 @@ func UnwrapEncryptedKeyPassword(el *xdm.Node, password []byte, opts DecryptOptio
 	if err != nil {
 		return nil, err
 	}
-	return unwrap(el, alg, derive(password))
+	return unwrap(el, alg, derive(password), opts)
 }

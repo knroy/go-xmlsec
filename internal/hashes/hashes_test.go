@@ -26,6 +26,7 @@ func TestHashLookups(t *testing.T) {
 		{"digest sha1", Digest, xmlsec.DigestSHA1, 0, false},
 		{"digest empty", Digest, "", 0, false},
 		{"mgf", MGF, xmlsec.MGF1SHA256, crypto.SHA256, true},
+		{"mgf sha224", MGF, xmlsec.MGF1SHA224, crypto.SHA224, true},
 		{"mgf sha1", MGF, "http://www.w3.org/2009/xmlenc11#mgf1sha1", 0, false},
 	}
 	for _, c := range cases {

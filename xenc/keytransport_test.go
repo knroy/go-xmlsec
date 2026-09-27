@@ -317,3 +317,38 @@ func TestDecryptEncryptedKeyMethod(t *testing.T) {
 		})
 	}
 }
+
+// Section 5.5.2: MGF1 with SHA-224 is produced when named, and accepted
+// only when named.
+func TestMGF1SHA224(t *testing.T) {
+	opts := as4Opts(t)
+	opts.MGFAlgorithm = xmlsec.MGF1SHA224
+	ek, err := xenc.GenerateEncryptedKey(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	el := reparse(t, ek.Element)
+	if _, err := xenc.DecryptEncryptedKey(el, recipientKey, xenc.DecryptOptions{}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
+		t.Fatalf("default set: %v", err)
+	}
+	key, err := xenc.DecryptEncryptedKey(el, recipientKey, xenc.DecryptOptions{AllowedMGFAlgorithms: []string{xmlsec.MGF1SHA224}})
+	if err != nil || !bytes.Equal(key, ek.SessionKey) {
+		t.Fatalf("named: %v", err)
+	}
+}
+
+// An RSA-OAEP EncryptedKey's ciphertext by external CipherReference.
+func TestDecryptEncryptedKeyCipherReference(t *testing.T) {
+	ek, err := xenc.GenerateEncryptedKey(as4Opts(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, _ := c14n.Bytes(ek.Element, c14n.Options{Algorithm: c14n.Exclusive10})
+	cv := firstNamed(ek.Element, "CipherValue").StringValue()
+	doc := strings.Replace(string(s), `<xenc:CipherValue>`+cv+`</xenc:CipherValue>`, `<xenc:CipherReference URI="http://example.com/k"></xenc:CipherReference>`, 1)
+	wrapped, _ := base64.StdEncoding.DecodeString(cv)
+	key, err := xenc.DecryptEncryptedKey(covParse(t, doc), recipientKey, xenc.DecryptOptions{ResolveURI: func(string) ([]byte, error) { return wrapped, nil }})
+	if err != nil || !bytes.Equal(key, ek.SessionKey) {
+		t.Fatalf("%v", err)
+	}
+}

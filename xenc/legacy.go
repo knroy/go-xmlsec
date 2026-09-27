@@ -171,7 +171,10 @@ func mgfHash(uri string) (crypto.Hash, bool) {
 // and signing never see.
 //
 // A KeySize under the EncryptionMethod must equal the bit length of dec's
-// RSA modulus; the method may hold nothing else.
+// RSA modulus; the method may hold nothing else. The ciphertext may be
+// named by an xenc:CipherReference, as for UnwrapEncryptedKey: it is
+// obtained, and a failure to obtain it reported, before any RSA operation,
+// so the countermeasure above is unchanged.
 func DecryptEncryptedKeyPKCS1v15(el, ed *xdm.Node, dec crypto.Decrypter, opts DecryptOptions) ([]byte, error) {
 	if el == nil || !el.IsElement(xmlsec.NSXEnc, "EncryptedKey") {
 		return nil, malformed("not an xenc:EncryptedKey")
@@ -179,7 +182,7 @@ func DecryptEncryptedKeyPKCS1v15(el, ed *xdm.Node, dec crypto.Decrypter, opts De
 	if dec == nil {
 		return nil, errors.New("xenc: no Decrypter")
 	}
-	kt, m, err := parseEncryptionMethod(el)
+	kt, m, err := parseEncryptionMethod(el, opts.ImpliedKeyTransportAlgorithm)
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +192,7 @@ func DecryptEncryptedKeyPKCS1v15(el, ed *xdm.Node, dec crypto.Decrypter, opts De
 	if kt != xmlsec.KeyTransportRSA15 {
 		return nil, unsupported("key transport %q: DecryptEncryptedKeyPKCS1v15 is for %s only", kt, xmlsec.KeyTransportRSA15)
 	}
-	alg, err := dataAlgorithm(ed, opts.AllowedDataAlgorithms)
+	alg, err := dataAlgorithm(ed, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +203,7 @@ func DecryptEncryptedKeyPKCS1v15(el, ed *xdm.Node, dec crypto.Decrypter, opts De
 	if _, err := methodParams(m, pub.N.BitLen()); err != nil {
 		return nil, err
 	}
-	ct, err := cipherValue(el)
+	ct, err := keyCiphertext(el, opts)
 	if err != nil {
 		return nil, err
 	}

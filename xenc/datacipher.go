@@ -126,6 +126,9 @@ func encryptedData(typ string, plaintext, sessionKey []byte, opts EncryptOptions
 	if err != nil {
 		return nil, err
 	}
+	if sessionKey, err = dataKey(ed, sessionKey, opts); err != nil {
+		return nil, err
+	}
 	ct, err := seal(opts.DataAlgorithm, sessionKey, plaintext)
 	if err != nil {
 		return nil, err
@@ -280,7 +283,7 @@ func EncryptContent(doc *xdm.Node, target *xdm.Node, sessionKey []byte, opts Enc
 // from anything that differs afterwards, such as whether the plaintext
 // parses. Only authentication bound to the key closes it: AES-GCM.
 func DecryptData(el *xdm.Node, sessionKey []byte, opts DecryptOptions) ([]byte, error) {
-	alg, err := dataAlgorithm(el, opts.AllowedDataAlgorithms)
+	alg, err := dataAlgorithm(el, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +304,7 @@ func dataCiphertext(el *xdm.Node, opts DecryptOptions) ([]byte, error) {
 	}
 	kids := cd.ChildElements()
 	if len(kids) != 1 || !kids[0].IsElement(xmlsec.NSXEnc, "CipherReference") {
-		return cipherValue(el)
+		return cipherValue(cd)
 	}
 	cr := kids[0]
 	uri := cr.AttrValue("URI")
@@ -371,16 +374,16 @@ func decode64(s string) ([]byte, error) {
 
 // dataAlgorithm validates el as xenc:EncryptedData and returns its allowed,
 // implemented data algorithm, whose xenc:EncryptionMethod may hold only a
-// consistent KeySize.
-func dataAlgorithm(el *xdm.Node, allowedData []string) (string, error) {
+// consistent KeySize, or opts.ImpliedDataAlgorithm when it has none.
+func dataAlgorithm(el *xdm.Node, opts DecryptOptions) (string, error) {
 	if el == nil || !el.IsElement(xmlsec.NSXEnc, "EncryptedData") {
 		return "", malformed("not an xenc:EncryptedData")
 	}
-	alg, m, err := parseEncryptionMethod(el)
+	alg, m, err := parseEncryptionMethod(el, opts.ImpliedDataAlgorithm)
 	if err != nil {
 		return "", err
 	}
-	if err := allowed("data", alg, allowedData, defaultData); err != nil {
+	if err := allowed("data", alg, opts.AllowedDataAlgorithms, defaultData); err != nil {
 		return "", err
 	}
 	size, ok := dataKeySize(alg)

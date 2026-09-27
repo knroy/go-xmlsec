@@ -321,7 +321,6 @@ func TestDecryptAgreedKeyDHErrors(t *testing.T) {
 		{"dh-es not named", es, k, xenc.DecryptOptions{}, xmlsec.ErrAlgorithmNotAllowed},
 		{"dh not named", legacy, k, dhAllow(xmlsec.KeyAgreementDHES), xmlsec.ErrAlgorithmNotAllowed},
 		{"ECDH-ES document", edit(es, `Algorithm="`+xmlsec.KeyAgreementDHES+`"`, `Algorithm="`+xmlsec.KeyAgreementECDHES+`"`), k, withAgreement(both, xmlsec.KeyAgreementECDHES), xmlsec.ErrUnsupportedAlgorithm},
-		{"dh-es with KA-Nonce", edit(es, `<xenc11:KeyDerivationMethod`, `<xenc:KA-Nonce>Zm9v</xenc:KA-Nonce><xenc11:KeyDerivationMethod`), k, both, xmlsec.ErrMalformed},
 		{"dh-es PBKDF2 not named", edit(es, `Algorithm="`+xmlsec.KeyDerivationConcatKDF+`"`, `Algorithm="`+xmlsec.KeyDerivationPBKDF2+`"`), k, both, xmlsec.ErrAlgorithmNotAllowed},
 		{"unexpected child", edit(es, `<xenc11:KeyDerivationMethod`, `<ds:KeyName>k</ds:KeyName><xenc11:KeyDerivationMethod`), k, both, xmlsec.ErrMalformed},
 		{"two KeyDerivationMethods", edit(es, `<xenc:OriginatorKeyInfo>`, `<xenc11:KeyDerivationMethod xmlns:xenc11="`+xmlsec.NSXEnc11+`"></xenc11:KeyDerivationMethod><xenc:OriginatorKeyInfo>`), k, both, xmlsec.ErrMalformed},
@@ -388,11 +387,36 @@ func TestDHKeyValueForms(t *testing.T) {
 		"Public only":          s[:i] + s[j:],
 		"seed and pgenCounter": strings.Replace(s, `</xenc:Public></xenc:DHKeyValue></ds:KeyValue></xenc:OriginatorKeyInfo>`, `</xenc:Public><xenc:seed>AQ==</xenc:seed><xenc:pgenCounter>AQ==</xenc:pgenCounter></xenc:DHKeyValue></ds:KeyValue></xenc:OriginatorKeyInfo>`, 1),
 		"KeyName beside":       strings.Replace(s, `<xenc:OriginatorKeyInfo>`, `<xenc:OriginatorKeyInfo><ds:KeyName>o</ds:KeyName>`, 1),
+		"KA-Nonce ignored":     strings.Replace(s, `<xenc11:KeyDerivationMethod`, `<xenc:KA-Nonce>Zm9v</xenc:KA-Nonce><xenc11:KeyDerivationMethod`, 1),
 	} {
 		t.Run(name, func(t *testing.T) {
 			key, err := xenc.DecryptAgreedKeyDH(covParse(t, doc), k, dhAllow(xmlsec.KeyAgreementDHES))
 			if err != nil || !bytes.Equal(key, ek.SessionKey) {
 				t.Fatalf("%v\n%s", err, doc)
+			}
+		})
+	}
+}
+
+// Section 5.6: finite-field Diffie-Hellman directly in the EncryptedData's
+// KeyInfo, with ConcatKDF and with the Legacy KDF, which names the data
+// algorithm.
+func TestDirectKeyAgreementDH(t *testing.T) {
+	k := dhKey(t, ffdhe2048)
+	for _, agreement := range []string{xmlsec.KeyAgreementDHES, xmlsec.KeyAgreementDH} {
+		t.Run(agreement, func(t *testing.T) {
+			opts := dhOpts(k, agreement, "", xmlsec.DigestSHA256)
+			opts.DirectKeyAgreement = true
+			ed := dkEncrypt(t, opts)
+			if _, err := xenc.DecryptAgreedDataKeyDH(ed, k, xenc.DecryptOptions{}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
+				t.Fatalf("not named: %v", err)
+			}
+			key, err := xenc.DecryptAgreedDataKeyDH(ed, k, dhAllow(agreement))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := xenc.DecryptData(ed, key, xenc.DecryptOptions{}); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}

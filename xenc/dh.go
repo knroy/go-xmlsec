@@ -134,13 +134,14 @@ func legacyKDF(h crypto.Hash, zz []byte, alg string, nonce []byte, size int) []b
 	return out[:size]
 }
 
-// agreeDH derives a KEK of size octets for opts.RecipientDH by dh-es with
+// agreeDH derives a key of size octets for keyAlg, a key wrap or data
+// algorithm, and opts.RecipientDH by dh-es with
 // ConcatKDF or dh with the Legacy KDF, from a fresh ephemeral key in the
 // recipient's group, and adds the ds:KeyInfo holding the
 // xenc:AgreementMethod to ek. The ephemeral public key, with the group, is
 // the OriginatorKeyInfo; the RecipientKeyInfo is opts.RecipientKeyName as
 // a ds:KeyName, or else the recipient's public value.
-func agreeDH(ek *xdm.Node, size int, opts EncryptOptions) ([]byte, error) {
+func agreeDH(ek *xdm.Node, keyAlg string, size int, opts EncryptOptions) ([]byte, error) {
 	alg := opts.KeyAgreementAlgorithm
 	if alg != xmlsec.KeyAgreementDHES && alg != xmlsec.KeyAgreementDH {
 		return nil, unsupported("key agreement %q with a Diffie-Hellman key", alg)
@@ -162,10 +163,10 @@ func agreeDH(ek *xdm.Node, size int, opts EncryptOptions) ([]byte, error) {
 	am := newAgreementMethod(ek, alg)
 	var kek []byte
 	if alg == xmlsec.KeyAgreementDHES {
-		kek = concatKDF(h, zz, []byte(opts.KeyTransportAlgorithm), size)
-		concatKDFMethod(am, opts)
+		kek = concatKDF(h, zz, []byte(keyAlg), size)
+		concatKDFMethod(am, keyAlg, nil, opts.DigestAlgorithm)
 	} else {
-		kek = legacyKDF(h, zz, opts.KeyTransportAlgorithm, nil, size)
+		kek = legacyKDF(h, zz, keyAlg, nil, size)
 		xmltree.SetAttr(nsElement(am, "ds", xmlsec.NSDSig, "DigestMethod"), "", "", "Algorithm", opts.DigestAlgorithm)
 	}
 	dhKeyValue(element(am, "OriginatorKeyInfo"), &eph.DHPublicKey, true)
@@ -248,7 +249,7 @@ func dhOriginatorKey(oki *xdm.Node, priv *DHPrivateKey) (*big.Int, error) {
 //
 //   - xmlsec.KeyAgreementDHES: an explicit xenc11:KeyDerivationMethod,
 //     ConcatKDF or, when named in opts.AllowedKeyDerivationAlgorithms,
-//     PBKDF2 (section 5.6.2.1). A KA-Nonce is refused.
+//     PBKDF2 (section 5.6.2.1). A KA-Nonce is ignored.
 //   - xmlsec.KeyAgreementDH: the Legacy KDF of section 5.6.2.2, with the
 //     AgreementMethod's ds:DigestMethod and optional KA-Nonce.
 //
@@ -265,9 +266,31 @@ func dhOriginatorKey(oki *xdm.Node, priv *DHPrivateKey) (*big.Int, error) {
 // refused before any arithmetic in it, so an oversized one costs nothing;
 // an invalid Public is xmlsec.ErrMalformed.
 func DecryptAgreedKeyDH(el *xdm.Node, priv *DHPrivateKey, opts DecryptOptions) ([]byte, error) {
-	a, err := parseAgreed(el, priv == nil, opts)
+	a, kek, err := agreedDH(el, false, priv, opts)
 	if err != nil {
 		return nil, err
+	}
+	return unwrap(el, a.alg, kek, opts)
+}
+
+// DecryptAgreedDataKeyDH returns the key of ed, an xenc:EncryptedData
+// whose ds:KeyInfo holds an xenc:AgreementMethod of finite-field
+// Diffie-Hellman directly, with no EncryptedKey (section 5.6), derived to
+// the size of ed's data algorithm, which is checked against
+// opts.AllowedDataAlgorithms first. Everything else is as for
+// DecryptAgreedKeyDH; the Legacy KDF of dh names the data algorithm.
+// Decrypt ed with the result by DecryptData.
+func DecryptAgreedDataKeyDH(ed *xdm.Node, priv *DHPrivateKey, opts DecryptOptions) ([]byte, error) {
+	_, key, err := agreedDH(ed, true, priv, opts)
+	return key, err
+}
+
+// agreedDH parses el, an EncryptedKey or with data an EncryptedData, and
+// returns the key finite-field Diffie-Hellman agrees for it with priv.
+func agreedDH(el *xdm.Node, data bool, priv *DHPrivateKey, opts DecryptOptions) (*agreed, []byte, error) {
+	a, err := parseAgreed(el, data, priv == nil, opts)
+	if err != nil {
+		return nil, nil, err
 	}
 	var kdf func([]byte) []byte
 	switch a.agreement {
@@ -276,22 +299,22 @@ func DecryptAgreedKeyDH(el *xdm.Node, priv *DHPrivateKey, opts DecryptOptions) (
 	case xmlsec.KeyAgreementDH:
 		kdf, err = a.legacyKDF(opts)
 	default:
-		return nil, unsupported("key agreement %q with a Diffie-Hellman key", a.agreement)
+		return nil, nil, unsupported("key agreement %q with a Diffie-Hellman key", a.agreement)
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := priv.checkGroup(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if priv.X == nil || priv.X.Sign() <= 0 || priv.X.Cmp(priv.Q) >= 0 {
-		return nil, dhRefused("a private X outside 1 to Q-1")
+		return nil, nil, dhRefused("a private X outside 1 to Q-1")
 	}
 	y, err := dhOriginatorKey(a.origin, priv)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return unwrap(el, a.wrap, kdf(sharedSecret(y, priv.X, priv.P)))
+	return a, kdf(sharedSecret(y, priv.X, priv.P)), nil
 }
 
 // legacyKDF returns the Legacy KDF of a dh agreement: its ds:DigestMethod,
@@ -311,5 +334,5 @@ func (a *agreed) legacyKDF(opts DecryptOptions) (func([]byte) []byte, error) {
 			return nil, malformed("xenc:KA-Nonce: %v", err)
 		}
 	}
-	return func(zz []byte) []byte { return legacyKDF(h, zz, a.wrap, nonce, a.size) }, nil
+	return func(zz []byte) []byte { return legacyKDF(h, zz, a.alg, nonce, a.size) }, nil
 }

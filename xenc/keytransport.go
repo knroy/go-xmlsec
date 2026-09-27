@@ -151,7 +151,8 @@ func rsaOAEPWrap(m *xdm.Node, key []byte, opts EncryptOptions) ([]byte, error) {
 // needs xmlsec.MGF1SHA1 in AllowedMGFAlgorithms, and must not carry an
 // xenc11:MGF. A KeySize under the
 // EncryptionMethod must equal the bit length of dec's RSA modulus, the key
-// size of RSA-OAEP key transport (section 3.2).
+// size of RSA-OAEP key transport (section 3.2). The wrapped key may be
+// named by an xenc:CipherReference, as for UnwrapEncryptedKey.
 func DecryptEncryptedKey(el *xdm.Node, dec crypto.Decrypter, opts DecryptOptions) ([]byte, error) {
 	if el == nil || !el.IsElement(xmlsec.NSXEnc, "EncryptedKey") {
 		return nil, malformed("not an xenc:EncryptedKey")
@@ -159,7 +160,7 @@ func DecryptEncryptedKey(el *xdm.Node, dec crypto.Decrypter, opts DecryptOptions
 	if dec == nil {
 		return nil, errors.New("xenc: no Decrypter")
 	}
-	kt, m, err := parseEncryptionMethod(el)
+	kt, m, err := parseEncryptionMethod(el, opts.ImpliedKeyTransportAlgorithm)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +211,7 @@ func DecryptEncryptedKey(el *xdm.Node, dec crypto.Decrypter, opts DecryptOptions
 			return nil, malformed("xenc:OAEPparams: %v", err)
 		}
 	}
-	ct, err := cipherValue(el)
+	ct, err := keyCiphertext(el, opts)
 	if err != nil {
 		return nil, err
 	}

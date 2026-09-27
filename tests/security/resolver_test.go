@@ -2,12 +2,15 @@ package security
 
 import (
 	"crypto"
+	"crypto/ecdh"
+	"crypto/rand"
 	"crypto/x509"
 	"errors"
 	"strings"
 	"testing"
 
 	"github.com/knroy/go-xml/c14n"
+	"github.com/knroy/go-xml/xdm"
 	"github.com/knroy/go-xmlsec"
 	"github.com/knroy/go-xmlsec/dsig"
 	"github.com/knroy/go-xmlsec/internal/xmltree"
@@ -105,5 +108,81 @@ func TestCipherReferenceResolverAfterAllowList(t *testing.T) {
 	})
 	if !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) || called {
 		t.Fatalf("got %v, resolver called %v", err, called)
+	}
+}
+
+// An EncryptedKey's CipherReference reaches the resolver only once every
+// algorithm the key needs has passed its allow-list, whichever function
+// unwraps it.
+func TestEncryptedKeyCipherReferenceResolverAfterAllowList(t *testing.T) {
+	ref := `<xenc:CipherData><xenc:CipherReference URI="http://example.invalid/ek"/></xenc:CipherData>`
+	ek := func(alg, method, keyInfo string) *xdm.Node {
+		return legacyParse(t, `<xenc:EncryptedKey xmlns:xenc="`+xmlsec.NSXEnc+`" xmlns:ds="`+xmlsec.NSDSig+`" xmlns:xenc11="`+xmlsec.NSXEnc11+`">`+
+			`<xenc:EncryptionMethod Algorithm="`+alg+`">`+method+`</xenc:EncryptionMethod>`+keyInfo+ref+`</xenc:EncryptedKey>`)
+	}
+	concatKDF := func(digest string) string {
+		return `<xenc11:KeyDerivationMethod Algorithm="` + xmlsec.KeyDerivationConcatKDF + `"><xenc11:ConcatKDFParams AlgorithmID="00" PartyUInfo="" PartyVInfo="">` +
+			`<ds:DigestMethod Algorithm="` + digest + `"/></xenc11:ConcatKDFParams></xenc11:KeyDerivationMethod>`
+	}
+	agreement := func(alg, digest string) string {
+		return `<ds:KeyInfo><xenc:AgreementMethod Algorithm="` + alg + `">` + concatKDF(digest) +
+			`<xenc:OriginatorKeyInfo><ds:KeyValue/></xenc:OriginatorKeyInfo></xenc:AgreementMethod></ds:KeyInfo>`
+	}
+	pbkdf2 := `<ds:KeyInfo><xenc11:DerivedKey><xenc11:KeyDerivationMethod Algorithm="` + xmlsec.KeyDerivationPBKDF2 + `"/></xenc11:DerivedKey></ds:KeyInfo>`
+	gcmED := legacyED(t, xmlsec.EncAES128GCM, make([]byte, 32))
+	cbcED := legacyED(t, xmlsec.EncAES128CBC, make([]byte, 32))
+	ec, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rsaPriv := rsaKey(t)
+	oaep := `<ds:DigestMethod Algorithm="` + xmlsec.DigestSHA256 + `"/><xenc11:MGF Algorithm="`
+	for _, c := range []struct {
+		name  string
+		call  func(xenc.DecryptOptions) error
+		allow func(*xenc.DecryptOptions)
+	}{
+		{"key wrap", func(o xenc.DecryptOptions) error {
+			_, err := xenc.UnwrapEncryptedKey(ek(xmlsec.KeyWrapTripleDES, ``, ``), make([]byte, 24), o)
+			return err
+		}, func(o *xenc.DecryptOptions) { o.AllowedKeyWrapAlgorithms = []string{xmlsec.KeyWrapTripleDES} }},
+		{"RSA-OAEP MGF", func(o xenc.DecryptOptions) error {
+			_, err := xenc.DecryptEncryptedKey(ek(xmlsec.KeyTransportRSAOAEP, oaep+xmlsec.MGF1SHA224+`"/>`, ``), rsaPriv, o)
+			return err
+		}, func(o *xenc.DecryptOptions) { o.AllowedMGFAlgorithms = []string{xmlsec.MGF1SHA224} }},
+		{"RSA v1.5", func(o xenc.DecryptOptions) error {
+			_, err := xenc.DecryptEncryptedKeyPKCS1v15(ek(xmlsec.KeyTransportRSA15, ``, ``), gcmED, rsaPriv, o)
+			return err
+		}, func(o *xenc.DecryptOptions) { o.AllowedKeyTransportAlgorithms = []string{xmlsec.KeyTransportRSA15} }},
+		{"RSA v1.5 data algorithm", func(o xenc.DecryptOptions) error {
+			o.AllowedKeyTransportAlgorithms = []string{xmlsec.KeyTransportRSA15}
+			_, err := xenc.DecryptEncryptedKeyPKCS1v15(ek(xmlsec.KeyTransportRSA15, ``, ``), cbcED, rsaPriv, o)
+			return err
+		}, func(o *xenc.DecryptOptions) { o.AllowedDataAlgorithms = []string{xmlsec.EncAES128CBC} }},
+		{"key agreement", func(o xenc.DecryptOptions) error {
+			_, err := xenc.DecryptAgreedKey(ek(xmlsec.KeyWrapAES128, ``, agreement("urn:x", xmlsec.DigestSHA256)), ec, o)
+			return err
+		}, func(o *xenc.DecryptOptions) { o.AllowedKeyAgreementAlgorithms = []string{"urn:x"} }},
+		{"ConcatKDF digest", func(o xenc.DecryptOptions) error {
+			_, err := xenc.DecryptAgreedKey(ek(xmlsec.KeyWrapAES128, ``, agreement(xmlsec.KeyAgreementECDHES, xmlsec.DigestSHA1)), ec, o)
+			return err
+		}, func(o *xenc.DecryptOptions) { o.AllowedDigestAlgorithms = []string{xmlsec.DigestSHA1} }},
+		{"PBKDF2", func(o xenc.DecryptOptions) error {
+			_, err := xenc.UnwrapEncryptedKeyPassword(ek(xmlsec.KeyWrapAES128, ``, pbkdf2), []byte("pw"), o)
+			return err
+		}, func(o *xenc.DecryptOptions) { o.AllowedKeyDerivationAlgorithms = []string{xmlsec.KeyDerivationPBKDF2} }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			called := false
+			opts := xenc.DecryptOptions{ResolveURI: func(string) ([]byte, error) { called = true; return nil, errors.New("offline") }}
+			if err := c.call(opts); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) || called {
+				t.Fatalf("got %v, resolver called %v", err, called)
+			}
+			// Named, the same message passes that allow-list.
+			c.allow(&opts)
+			if err := c.call(opts); errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
+				t.Fatalf("still refused: %v", err)
+			}
+		})
 	}
 }
