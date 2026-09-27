@@ -136,6 +136,9 @@ func parseTransform(t *xdm.Node) (TransformSpec, error) {
 		// caller's allow-lists.
 		return spec, nil
 	}
+	if spec.Algorithm == xmlsec.TransformSTR {
+		return parseSTRTransform(spec)
+	}
 	for _, k := range t.ChildElements() {
 		if !k.IsElement(xmlsec.NSExcC14N, "InclusiveNamespaces") || !c14n.Algorithm(spec.Algorithm).Exclusive() ||
 			spec.InclusiveNamespacePrefixes != nil {

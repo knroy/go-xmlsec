@@ -164,6 +164,29 @@ type VerifyOptions struct {
 	// Profile conformance of what they receive.
 	StrictSecurityTokenReference bool
 
+	// StrictBSP refuses, before any cryptographic work, a signature the WS-I
+	// Basic Security Profile 1.1 forbids: see the rules in dsig/bsp.go's
+	// checkBSP, listed in docs/security.md. It implies
+	// StrictSecurityTokenReference and, with a certificate pinned, that a key
+	// identifier or issuer-serial reference in ds:KeyInfo names that
+	// certificate. For receivers that require BSP conformance.
+	StrictBSP bool
+
+	// ResolveSecurityToken supplies the certificate a key identifier or
+	// issuer-serial wsse:SecurityTokenReference names (X.509 Token Profile
+	// 1.1.1 section 3.2): one the caller already holds and trusts, looked up
+	// by wss.MatchSecurityTokenReference or its own index, never fetched. It
+	// is called for such a reference in ds:KeyInfo, when no key is pinned,
+	// before any cryptographic work and before TrustKey sees the
+	// certificate; and for such a reference through the STR Dereference
+	// Transform (xmlsec.TransformSTR), after the signature value has
+	// verified, to build the X509v3 wsse:BinarySecurityToken that section
+	// 8.3 digests. When nil, the first is refused with
+	// xmlsec.ErrUnsupportedKeyInfo and the second with
+	// xmlsec.ErrSecurityTokenUnavailable; an error it returns, or a nil
+	// certificate, is xmlsec.ErrSecurityTokenUnavailable.
+	ResolveSecurityToken func(str *xdm.Node) (*x509.Certificate, error)
+
 	// ResolveOmittedURI supplies the data object of a ds:Reference without
 	// a URI attribute, which XML-DSig 4.4.3.1 allows on at most one
 	// Reference: "the receiving application is expected to know the
@@ -258,6 +281,15 @@ type Coverage struct {
 	// SignedAttachmentIDs are the attachment IDs covered by cid:
 	// references, in reference order.
 	SignedAttachmentIDs []string
+
+	// SignedTokens are the security tokens covered through the STR
+	// Dereference Transform (xmlsec.TransformSTR), in reference order: the
+	// token element in the message, or for a key identifier or
+	// issuer-serial reference the X509v3 wsse:BinarySecurityToken built
+	// from the certificate VerifyOptions.ResolveSecurityToken returned,
+	// which is not in the document. The wsse:SecurityTokenReference itself
+	// is not covered by such a reference, and is not reported.
+	SignedTokens []*xdm.Node
 
 	// OmittedURISigned is true if a reference without a URI covered the
 	// octets VerifyOptions.ResolveOmittedURI returned.
@@ -394,6 +426,11 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 	if err := checkOmitted(p.refs, opts); err != nil {
 		return nil, err
 	}
+	if opts.StrictBSP {
+		if err := checkBSP(doc, sig, p, opts.IDAttributes); err != nil {
+			return nil, err
+		}
+	}
 
 	// Every algorithm is checked before any cryptographic work.
 	if err := allowed("signature", p.sigAlg, opts.AllowedSignatureAlgorithms, defaultSignature); err != nil {
@@ -439,13 +476,17 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 
 	// An HMAC key is pinned by definition: VerifyOptions.HMACKey.
 	pinned := opts.Certificate != nil || opts.PublicKey != nil || mac
+	strict := opts.StrictSecurityTokenReference || opts.StrictBSP
+	if err := checkPinnedSTR(p.keyInfo, opts.Certificate, strict); err != nil {
+		return nil, err
+	}
 	kc := keyContext{doc: doc, opts: opts}
 	if _, ok := dsaKeySizes[p.sigAlg]; ok {
 		kc.dsaAlg = p.sigAlg
 	}
 	if pinned {
 		// Nothing is looked up or fetched for a key that will not be used.
-		kc.opts.ResolveKeyName, kc.opts.ResolveX509, kc.opts.ResolveKeyInfoURI = nil, nil, nil
+		kc.opts.ResolveKeyName, kc.opts.ResolveX509, kc.opts.ResolveKeyInfoURI, kc.opts.ResolveSecurityToken = nil, nil, nil, nil
 	}
 	key, err := kc.resolve(p.keyInfo, false)
 	cert, pub, form := key.cert, key.pub, key.form
@@ -543,6 +584,11 @@ func admitReferences(refs []parsedReference, opts VerifyOptions) error {
 					return err
 				}
 			}
+			if t.Algorithm == xmlsec.TransformSTR {
+				if err := allowed("STR Dereference Transform canonicalization", string(c14n.Exclusive10), opts.AllowedCanonicalizationAlgorithms, defaultC14N); err != nil {
+					return err
+				}
+			}
 		}
 		// The SwA signature transforms canonicalize an XML attachment with
 		// Exclusive C14N (SwA profile 5.4.2), so they need it allowed.
@@ -579,6 +625,7 @@ func admitReferences(refs []parsedReference, opts VerifyOptions) error {
 // in cov. sig is what the enveloped-signature transform removes, and whose
 // own Ids "#id" resolves against; raw holds each reference's canonical form.
 func digestReferences(cov *Coverage, doc, sig *xdm.Node, refs []parsedReference, raw [][]byte, opts VerifyOptions) error {
+	deref := strDeref(doc, opts.IDAttributes, opts.ResolveSecurityToken)
 	for i, r := range refs {
 		dh, _ := digestHash(r.digestAlg)
 		h := dh.New()
@@ -589,7 +636,7 @@ func digestReferences(cov *Coverage, doc, sig *xdm.Node, refs []parsedReference,
 			if r.omitted {
 				covered, err = digestOmitted(w, r.transforms, opts.ResolveOmittedURI)
 			} else {
-				got, err = digestReference(w, doc, sig, absoluteURI(opts.BaseURI, r.uri), r.transforms, opts.Attachments, true, opts.IDAttributes, opts.ResolveURI)
+				got, err = digestReference(w, doc, sig, absoluteURI(opts.BaseURI, r.uri), r.transforms, opts.Attachments, true, opts.IDAttributes, opts.ResolveURI, deref)
 			}
 			return err
 		})
@@ -602,6 +649,8 @@ func digestReferences(cov *Coverage, doc, sig *xdm.Node, refs []parsedReference,
 		switch {
 		case r.omitted:
 			cov.OmittedURISigned = covered
+		case got.token != nil:
+			cov.SignedTokens = append(cov.SignedTokens, got.token)
 		case got.whole:
 			cov.WholeDocumentSigned = true
 		case got.element != nil:

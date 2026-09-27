@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"math/big"
+	"strings"
 	"testing"
 	"time"
 
@@ -401,5 +402,82 @@ func TestResolveSecurityTokenReferenceErrors(t *testing.T) {
 				t.Fatalf("got %v, want %v", err, c.want)
 			}
 		})
+	}
+}
+
+// ReferencedToken returns the token element of a direct reference, of any
+// kind, or the one token of a wsse:Embedded, and refuses what the Basic
+// Security Profile forbids a reference to name (R3057, R3064, R3211) or an
+// Embedded to hold (R3060, R3056).
+func TestReferencedToken(t *testing.T) {
+	cert := testCert(t, "c")
+	bst := `<wsse:BinarySecurityToken wsu:Id="tok" EncodingType="` + xmlsec.BSTEncodingBase64 + `" ValueType="` +
+		xmlsec.BSTValueTypeX509v3 + `">` + base64.StdEncoding.EncodeToString(cert.Raw) + `</wsse:BinarySecurityToken>`
+	doc := func(str string) string {
+		return `<soap:Envelope xmlns:soap="` + xmlsec.NSSOAP11 + `" xmlns:wsse="` + xmlsec.NSWSSE + `" xmlns:wsu="` + xmlsec.NSWSU +
+			`" xmlns:ds="` + xmlsec.NSDSig + `" xmlns:xenc="` + xmlsec.NSXEnc + `"><soap:Header><wsse:Security>` + bst +
+			`<xenc:EncryptedKey Id="ek"/><wsse:SecurityTokenReference wsu:Id="str"><wsse:Reference URI="#tok"/></wsse:SecurityTokenReference>` +
+			`<wsse:SecurityTokenReference><wsse:Embedded wsu:Id="emb">` + strings.Replace(bst, `wsu:Id="tok" `, "", 1) + `</wsse:Embedded></wsse:SecurityTokenReference>` +
+			`<ds:KeyInfo wsu:Id="ki"/>` + str + `</wsse:Security></soap:Header><soap:Body/></soap:Envelope>`
+	}
+	resolve := func(t *testing.T, str string, extra ...xdm.QName) (*xdm.Node, error) {
+		d := parseDoc(t, doc(str))
+		sec := xmltree.DocumentElement(d).ChildElements()[0].ChildElements()[0]
+		kids := sec.ChildElements()
+		return ReferencedToken(d, kids[len(kids)-1], extra...)
+	}
+
+	for name, c := range map[string]struct {
+		str, want string
+		extra     []xdm.QName
+	}{
+		"binary security token": {`<wsse:SecurityTokenReference><wsse:Reference URI="#tok"/></wsse:SecurityTokenReference>`, "BinarySecurityToken", nil},
+		"EncryptedKey by Id":    {`<wsse:SecurityTokenReference><wsse:Reference URI="#ek"/></wsse:SecurityTokenReference>`, "EncryptedKey", []xdm.QName{{Local: "Id"}}},
+		"embedded":              {`<wsse:SecurityTokenReference><wsse:Embedded>` + strings.Replace(bst, `wsu:Id="tok" `, "", 1) + `</wsse:Embedded></wsse:SecurityTokenReference>`, "BinarySecurityToken", nil},
+	} {
+		tok, err := resolve(t, c.str, c.extra...)
+		if err != nil || tok.Name.Local != c.want {
+			t.Errorf("%s: %v, %v", name, tok, err)
+		}
+	}
+
+	for name, c := range map[string]struct {
+		str  string
+		want error
+	}{
+		"R3057 reference to a reference":  {`<wsse:SecurityTokenReference><wsse:Reference URI="#str"/></wsse:SecurityTokenReference>`, xmlsec.ErrMalformed},
+		"R3064 reference to an Embedded":  {`<wsse:SecurityTokenReference><wsse:Reference URI="#emb"/></wsse:SecurityTokenReference>`, xmlsec.ErrMalformed},
+		"R3211 reference to a ds:KeyInfo": {`<wsse:SecurityTokenReference><wsse:Reference URI="#ki"/></wsse:SecurityTokenReference>`, xmlsec.ErrMalformed},
+		"R3060 empty Embedded":            {`<wsse:SecurityTokenReference><wsse:Embedded/></wsse:SecurityTokenReference>`, xmlsec.ErrMalformed},
+		"R3060 two tokens":                {`<wsse:SecurityTokenReference><wsse:Embedded><a/><b/></wsse:Embedded></wsse:SecurityTokenReference>`, xmlsec.ErrMalformed},
+		"R3056 Embedded reference": {`<wsse:SecurityTokenReference><wsse:Embedded><wsse:SecurityTokenReference><wsse:Reference URI="#tok"/>` +
+			`</wsse:SecurityTokenReference></wsse:Embedded></wsse:SecurityTokenReference>`, xmlsec.ErrMalformed},
+		"missing token": {`<wsse:SecurityTokenReference><wsse:Reference URI="#nope"/></wsse:SecurityTokenReference>`, xmlsec.ErrSecurityTokenUnavailable},
+	} {
+		if _, err := resolve(t, c.str); !errors.Is(err, c.want) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+
+	// A missing token is still ErrIDNotFound, as it always was.
+	if _, err := resolve(t, `<wsse:SecurityTokenReference><wsse:Reference URI="#nope"/></wsse:SecurityTokenReference>`); !errors.Is(err, xmlsec.ErrIDNotFound) {
+		t.Errorf("missing token: %v", err)
+	}
+
+	// ResolveSecurityTokenReference and its strict form read an embedded
+	// token too; the strict form checks only its TokenType.
+	d := parseDoc(t, doc(""))
+	sec := xmltree.DocumentElement(d).ChildElements()[0].ChildElements()[0]
+	emb := sec.ChildElements()[3]
+	for name, f := range map[string]func(*xdm.Node, *xdm.Node) (*x509.Certificate, error){
+		"lenient": ResolveSecurityTokenReference, "strict": ResolveSecurityTokenReferenceStrict,
+	} {
+		if got, err := f(d, emb); err != nil || !got.Equal(cert) {
+			t.Errorf("%s embedded: %v", name, err)
+		}
+	}
+	xmltree.SetAttr(emb, "wsse11", xmlsec.NSWSSE11, "TokenType", xmlsec.BSTValueTypePKCS7)
+	if _, err := ResolveSecurityTokenReferenceStrict(d, emb); !errors.Is(err, xmlsec.ErrMalformed) {
+		t.Errorf("strict embedded, wrong TokenType: %v", err)
 	}
 }

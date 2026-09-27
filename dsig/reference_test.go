@@ -15,10 +15,10 @@ import (
 	"github.com/knroy/go-xmlsec/internal/xmltree"
 )
 
-// Transform chains that end in octets: base64 over an attachment's SwA
-// canonical form; a canonicalization of canonical octets, which parses them
-// again (XML-DSig 4.4.3.2); and #WithComments canonicalization, which
-// renders as its plain form.
+// Transform chains that end in octets: an attachment's SwA canonical form;
+// a canonicalization of canonical octets, which parses them again (XML-DSig
+// 4.4.3.2); and #WithComments canonicalization, which renders as its plain
+// form. Base64 over an attachment is refused by Sign (SwA profile 5.4.4).
 func TestTransformChains(t *testing.T) {
 	key := newKey(t, rsaKey)
 	atts := attachments(t, "aGVs\r\nbG8=")
@@ -27,7 +27,7 @@ func TestTransformChains(t *testing.T) {
 			{URI: "#" + id, DigestAlgorithm: xmlsec.DigestSHA384,
 				Transforms: []dsig.TransformSpec{{Algorithm: string(c14n.Exclusive10WithComments)}}},
 			{URI: "cid:att-1@example.com", DigestAlgorithm: xmlsec.DigestSHA512,
-				Transforms: []dsig.TransformSpec{{Algorithm: xmlsec.TransformAttachmentContentSignature}, {Algorithm: xmlsec.TransformBase64}}},
+				Transforms: []dsig.TransformSpec{{Algorithm: xmlsec.TransformAttachmentContentSignature}}},
 			{URI: "#" + id, DigestAlgorithm: xmlsec.DigestSHA256,
 				Transforms: []dsig.TransformSpec{{Algorithm: string(c14n.Exclusive10)}, {Algorithm: string(c14n.Inclusive10)}}},
 		}
@@ -41,11 +41,6 @@ func TestTransformChains(t *testing.T) {
 		t.Fatalf("coverage %+v", cov)
 	}
 
-	// The base64 transform digests the decoded octets, so a change in
-	// whitespace alone does not alter it; a change in content does.
-	if _, err := dsig.Verify(doc, findSignature(doc), dsig.VerifyOptions{Attachments: attachments(t, "aGVsbG8=")}); err != nil {
-		t.Fatalf("whitespace change: %v", err)
-	}
 	if _, err := dsig.Verify(doc, findSignature(doc), dsig.VerifyOptions{Attachments: attachments(t, "aGVsbG9v")}); !errors.Is(err, xmlsec.ErrDigestMismatch) {
 		t.Fatalf("content change: %v", err)
 	}

@@ -69,9 +69,12 @@ func NewSecurityTokenReference(doc *xdm.Node, tokenID, valueType string) (*xdm.N
 // SHA-1 here is an identifier the profile mandates, not a signature or
 // digest algorithm: it names a certificate the receiver already holds, and
 // the key is always the caller's (see MatchSecurityTokenReference).
-func thumbprintSHA1(cert *x509.Certificate) []byte {
+func thumbprintSHA1(cert *x509.Certificate) []byte { return sha1Sum(cert.Raw) }
+
+// sha1Sum is SHA-1, for the identifiers the profiles define with it.
+func sha1Sum(b []byte) []byte {
 	h := crypto.SHA1.New() // linked in by crypto/x509
-	h.Write(cert.Raw)
+	h.Write(b)
 	return h.Sum(nil)
 }
 
@@ -123,16 +126,19 @@ func NewIssuerSerialReference(cert *x509.Certificate) (*xdm.Node, error) {
 	return str, nil
 }
 
-// ResolveSecurityTokenReference follows a direct-reference
-// wsse:SecurityTokenReference to its wsse:BinarySecurityToken in doc and
-// returns the certificate it carries. Other reference forms are refused
-// with xmlsec.ErrUnsupportedKeyInfo.
+// ResolveSecurityTokenReference follows a wsse:SecurityTokenReference to the
+// wsse:BinarySecurityToken it names in doc, by a direct wsse:Reference or
+// inside a wsse:Embedded (SOAP Message Security 1.1.1 section 7.4), and
+// returns the certificate it carries. Other reference forms are refused with
+// xmlsec.ErrUnsupportedKeyInfo, as is a reference to a token that is not a
+// binary security token; ReferencedToken returns any kind of token. A
+// reference to an ID nothing carries is xmlsec.ErrSecurityTokenUnavailable.
 //
 // It is lenient about how the reference is written, as most receivers are;
 // ResolveSecurityTokenReferenceStrict adds the Basic Security Profile's
 // checks.
 func ResolveSecurityTokenReference(doc, str *xdm.Node) (*x509.Certificate, error) {
-	tok, err := referencedToken(doc, str)
+	tok, err := ReferencedToken(doc, str)
 	if err != nil {
 		return nil, err
 	}
@@ -150,48 +156,91 @@ func ResolveSecurityTokenReference(doc, str *xdm.Node) (*x509.Certificate, error
 //   - is not inside a wsse:Security header whose child is the token
 //     (R3066), or precedes the token (R5205).
 //
+// A wsse:Embedded token is checked for its TokenType only: the
+// wsse:Embedded carries no ValueType, and the token is where it is
+// referenced.
+//
 // The rules are about how the message is written, not about which key it
 // names: a reference that breaks them still names one token. Use it where a
 // profile demands BSP conformance, before dsig.Verify or decryption.
 func ResolveSecurityTokenReferenceStrict(doc, str *xdm.Node) (*x509.Certificate, error) {
-	tok, err := referencedToken(doc, str)
+	tok, err := ReferencedToken(doc, str)
 	if err != nil {
 		return nil, err
 	}
 	vt := tok.AttrValue("ValueType")
-	if got := str.ChildElements()[0].AttrValue("ValueType"); got == "" || got != vt {
-		return nil, fmt.Errorf("%w: wsse:Reference ValueType %q, token %q (BSP R3059, R3058)", xmlsec.ErrMalformed, got, vt)
-	}
 	tt := xmltree.AttrValue(str, xmlsec.NSWSSE11, "TokenType")
 	if tt != "" && tt != vt || tt == "" && (vt == xmlsec.BSTValueTypeX509PKIPath || vt == xmlsec.BSTValueTypePKCS7) {
 		return nil, fmt.Errorf("%w: wsse11:TokenType %q for a %q token (BSP R5215, R5212)", xmlsec.ErrMalformed, tt, vt)
 	}
-	// The child of the token's header that holds the reference.
-	step := str
-	for step.Parent != nil && step.Parent != tok.Parent {
-		step = step.Parent
-	}
-	if !tok.Parent.IsElement(xmlsec.NSWSSE, "Security") || step.Parent == nil ||
-		slices.Index(step.Parent.Children, step) <= slices.Index(step.Parent.Children, tok) {
-		return nil, fmt.Errorf("%w: the token must precede the reference in the same wsse:Security (BSP R5205, R3066)", xmlsec.ErrMalformed)
+	if ref := str.ChildElements()[0]; ref.IsElement(xmlsec.NSWSSE, "Reference") {
+		if got := ref.AttrValue("ValueType"); got == "" || got != vt {
+			return nil, fmt.Errorf("%w: wsse:Reference ValueType %q, token %q (BSP R3059, R3058)", xmlsec.ErrMalformed, got, vt)
+		}
+		// The child of the token's header that holds the reference.
+		step := str
+		for step.Parent != nil && step.Parent != tok.Parent {
+			step = step.Parent
+		}
+		if !tok.Parent.IsElement(xmlsec.NSWSSE, "Security") || step.Parent == nil ||
+			slices.Index(step.Parent.Children, step) <= slices.Index(step.Parent.Children, tok) {
+			return nil, fmt.Errorf("%w: the token must precede the reference in the same wsse:Security (BSP R5205, R3066)", xmlsec.ErrMalformed)
+		}
 	}
 	return ParseBinarySecurityToken(tok)
 }
 
-// referencedToken returns the element a single direct wsse:Reference names.
-func referencedToken(doc, str *xdm.Node) (*xdm.Node, error) {
+// ReferencedToken returns the token element a wsse:SecurityTokenReference
+// names in the message: the element whose ID the "#id" URI of a direct
+// wsse:Reference names, found by FindByID with extra, or the one token a
+// wsse:Embedded holds (SOAP Message Security 1.1.1 sections 7.2 and 7.4). The
+// token may be of any kind: a wsse:BinarySecurityToken, an xenc:EncryptedKey
+// (section 7.7; see NewEncryptedKeyReference), a SAML assertion.
+//
+// A reference to an ID no element carries is refused with
+// xmlsec.ErrSecurityTokenUnavailable as well as xmlsec.ErrIDNotFound. Refused
+// with xmlsec.ErrMalformed, as the Basic Security Profile requires: a
+// reference to another wsse:SecurityTokenReference (R3057), to a
+// wsse:Embedded (R3064) or to a ds:KeyInfo (R3211), and a wsse:Embedded
+// holding anything but one element, or holding a reference (R3060, R3056).
+// A key identifier or issuer-serial reference names a token by a property
+// rather than by where it is, and is refused with
+// xmlsec.ErrUnsupportedKeyInfo: match it against the tokens you hold with
+// MatchSecurityTokenReference or MatchEncryptedKeySHA1.
+func ReferencedToken(doc, str *xdm.Node, extra ...xdm.QName) (*xdm.Node, error) {
 	if doc == nil || str == nil || !str.IsElement(xmlsec.NSWSSE, "SecurityTokenReference") {
 		return nil, fmt.Errorf("%w: not a wsse:SecurityTokenReference", xmlsec.ErrUnsupportedKeyInfo)
 	}
 	kids := str.ChildElements()
+	if len(kids) == 1 && kids[0].IsElement(xmlsec.NSWSSE, "Embedded") {
+		return embeddedToken(kids[0])
+	}
 	if len(kids) != 1 || !kids[0].IsElement(xmlsec.NSWSSE, "Reference") {
-		return nil, fmt.Errorf("%w: only a single direct wsse:Reference is accepted", xmlsec.ErrUnsupportedKeyInfo)
+		return nil, fmt.Errorf("%w: only a single direct wsse:Reference or wsse:Embedded is accepted", xmlsec.ErrUnsupportedKeyInfo)
 	}
 	id, ok := strings.CutPrefix(kids[0].AttrValue("URI"), "#")
 	if !ok || id == "" {
 		return nil, fmt.Errorf("%w: wsse:Reference URI must be a local #id", xmlsec.ErrUnsupportedKeyInfo)
 	}
-	return FindByID(doc, id)
+	tok, err := FindByID(doc, id, extra...)
+	switch {
+	case errors.Is(err, xmlsec.ErrIDNotFound):
+		return nil, fmt.Errorf("%w: %w", xmlsec.ErrSecurityTokenUnavailable, err)
+	case err != nil:
+		return nil, err
+	case tok.IsElement(xmlsec.NSWSSE, "SecurityTokenReference"), tok.IsElement(xmlsec.NSWSSE, "Embedded"), tok.IsElement(xmlsec.NSDSig, "KeyInfo"):
+		return nil, fmt.Errorf("%w: a wsse:SecurityTokenReference names %s, not a token (BSP R3057, R3064, R3211)", xmlsec.ErrMalformed, tok.Name.Local)
+	}
+	return tok, nil
+}
+
+// embeddedToken returns the one token a wsse:Embedded holds.
+func embeddedToken(e *xdm.Node) (*xdm.Node, error) {
+	kids := e.ChildElements()
+	if len(kids) != 1 || kids[0].IsElement(xmlsec.NSWSSE, "SecurityTokenReference") {
+		return nil, fmt.Errorf("%w: wsse:Embedded must hold exactly one security token (BSP R3060, R3056)", xmlsec.ErrMalformed)
+	}
+	return kids[0], nil
 }
 
 // MatchSecurityTokenReference reports whether a wsse:SecurityTokenReference

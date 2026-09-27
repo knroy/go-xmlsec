@@ -120,3 +120,15 @@ func TestNilInputs(t *testing.T) {
 		}
 	}
 }
+
+// SOAP Message Security 1.1.1 section 4: an element MUST NOT carry both a
+// wsu:Id and an xml:id, so AssignID returns an existing xml:id and adds
+// nothing.
+func TestAssignIDKeepsXMLID(t *testing.T) {
+	doc := parseDoc(t, env11)
+	b := xmltree.DocumentElement(doc).ChildElements()[0].ChildElements()[1]
+	id, err := AssignID(doc, b)
+	if err != nil || id != "y" || b.Attr(xmlsec.NSWSU, "Id") != nil {
+		t.Fatalf("AssignID: %q, %v, attributes %v", id, err, b.Attrs)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"crypto/x509"
 	"encoding/asn1"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -78,7 +79,20 @@ func (h *Header) AddBinarySecurityToken(cert *x509.Certificate, chain []*x509.Ce
 // content, carrying from 1 to 16 X.509 certificates; its CRLs and signer
 // infos are ignored. A token with no single such leaf, or with more
 // certificates, is refused with xmlsec.ErrUnsupportedKeyInfo.
+//
+// A token that is not what its ValueType names, such as base64 that decodes
+// to no certificate, is also xmlsec.ErrInvalidSecurityToken, the
+// wsse:InvalidSecurityToken fault; an unsupported ValueType or EncodingType
+// is only xmlsec.ErrUnsupportedKeyInfo, wsse:UnsupportedSecurityToken.
 func ParseBinarySecurityToken(bst *xdm.Node) (*x509.Certificate, error) {
+	cert, err := parseBinarySecurityToken(bst)
+	if err != nil && !errors.Is(err, xmlsec.ErrUnsupportedKeyInfo) {
+		return nil, fmt.Errorf("%w: %w", xmlsec.ErrInvalidSecurityToken, err)
+	}
+	return cert, err
+}
+
+func parseBinarySecurityToken(bst *xdm.Node) (*x509.Certificate, error) {
 	if bst == nil || !bst.IsElement(xmlsec.NSWSSE, "BinarySecurityToken") {
 		return nil, fmt.Errorf("%w: not a wsse:BinarySecurityToken", xmlsec.ErrUnsupportedKeyInfo)
 	}

@@ -148,7 +148,8 @@ type SignOptions struct {
 	// ds:SignedInfo, so the signature is computed where it will stand. Any
 	// canonicalization algorithm may then be used. Without it Sign returns a
 	// detached signature, which only exclusive canonicalization keeps valid
-	// wherever the caller places it.
+	// wherever the caller places it. An inclusive canonicalization, here or
+	// on a reference, is not Basic Security Profile output (R5404, R5423).
 	Parent *xdm.Node
 
 	// IDAttributes names attributes that "#id" references resolve against
@@ -166,6 +167,27 @@ type SignOptions struct {
 	// never fetches anything itself; see xmlsec.URIResolver. When nil, such
 	// a reference is refused, and so is a relative URI without BaseURI.
 	ResolveURI xmlsec.URIResolver
+
+	// KeyInfoElement, with KeyInfo set to KeyInfoSecurityTokenReference, is
+	// the wsse:SecurityTokenReference Sign places in ds:KeyInfo instead of a
+	// direct reference to SecurityTokenID, which is then ignored: a key
+	// identifier or issuer-serial reference from
+	// wss.NewKeyIdentifierReference or wss.NewIssuerSerialReference, for a
+	// certificate the message does not carry (X.509 Token Profile 1.1.1
+	// section 3.2, Basic Security Profile R5417, R5209), or a reference to
+	// an xenc:EncryptedKey (wss.NewEncryptedKeyReference). It must be
+	// detached, and Sign takes it: build a new one for each signature. A
+	// key identifier or issuer-serial reference must name the signing
+	// certificate; any other reference is placed as given.
+	KeyInfoElement *xdm.Node
+
+	// ResolveSecurityToken supplies the certificate that a key identifier
+	// or issuer-serial wsse:SecurityTokenReference names, for a reference
+	// through the STR Dereference Transform (xmlsec.TransformSTR), which
+	// digests the token rather than the reference to it; see
+	// VerifyOptions.ResolveSecurityToken. A direct reference or a
+	// wsse:Embedded needs no resolver.
+	ResolveSecurityToken func(str *xdm.Node) (*x509.Certificate, error)
 }
 
 // Sign creates a ds:Signature over the references in opts.
@@ -467,7 +489,8 @@ func addReferences(parent, doc, sig *xdm.Node, refs []Reference, opts SignOption
 				d := data{octets: opts.OmittedURIData}
 				return d.digest(w, nil, "(omitted)", transforms, false)
 			}
-			_, err := digestReference(w, doc, sig, absoluteURI(opts.BaseURI, r.URI), transforms, opts.Attachments, false, opts.IDAttributes, opts.ResolveURI)
+			_, err := digestReference(w, doc, sig, absoluteURI(opts.BaseURI, r.URI), transforms, opts.Attachments, false, opts.IDAttributes, opts.ResolveURI,
+				strDeref(doc, opts.IDAttributes, opts.ResolveSecurityToken))
 			return err
 		}); err != nil {
 			return err
@@ -518,6 +541,12 @@ func checkReference(r Reference) error {
 		// through one of the SwA signature transforms, never as raw octets.
 		return fmt.Errorf("%w: a cid: reference must begin with %s or %s", xmlsec.ErrMalformed,
 			xmlsec.TransformAttachmentContentSignature, xmlsec.TransformAttachmentCompleteSignature)
+	case strings.HasPrefix(r.URI, "cid:") && hasTransform(r, xmlsec.TransformBase64):
+		// SwA profile 5.4.4: transfer encoding is the MIME layer's, and no
+		// peer expects a base64 transform on an attachment.
+		return fmt.Errorf("%w: a cid: reference must not carry the base64 transform (SwA profile 5.4.4)", xmlsec.ErrMalformed)
+	case hasTransform(r, xmlsec.TransformSTR) && (len(r.Transforms) != 1 || !strings.HasPrefix(r.URI, "#") || r.URI == "#xpointer(/)"):
+		return fmt.Errorf("%w: the STR Dereference Transform must be the only transform of a reference to a wsse:SecurityTokenReference by ID", xmlsec.ErrMalformed)
 	}
 	return nil
 }
@@ -538,6 +567,8 @@ func transformParams(tr *xdm.Node, t TransformSpec) error {
 	case xmlsec.TransformXSLT:
 		copyStylesheet(tr, t.Stylesheet)
 		return nil
+	case xmlsec.TransformSTR:
+		return strTransformParams(tr, t)
 	}
 	if !c14n.Algorithm(t.Algorithm).Exclusive() || len(t.InclusiveNamespacePrefixes) == 0 {
 		return nil
@@ -592,6 +623,13 @@ func addKeyInfo(sig, doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions) er
 		xmltree.SetAttr(e, "", "", "URI", opts.KeyInfoReferenceURI)
 		return nil
 	case KeyInfoSecurityTokenReference:
+		if opts.KeyInfoElement != nil {
+			if err := checkKeyInfoElement(key.Certificate, opts.KeyInfoElement); err != nil {
+				return err
+			}
+			keyInfo().AppendChild(opts.KeyInfoElement)
+			return nil
+		}
 		tok, err := wss.FindByID(doc, opts.SecurityTokenID)
 		if err != nil {
 			return fmt.Errorf("dsig: SecurityTokenID: %w", err)

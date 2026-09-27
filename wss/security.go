@@ -55,21 +55,10 @@ func NewHeader(doc *xdm.Node, soapNS string, actor string, mustUnderstand bool) 
 		env.Children[0] = hdr
 	}
 
-	actorAttr := "actor"
-	if soapNS == xmlsec.NSSOAP12 {
-		actorAttr = "role"
+	if len(securityHeaders(hdr, soapNS, actor)) > 0 {
+		return nil, fmt.Errorf("wss: a wsse:Security header for actor %q already exists", actor)
 	}
-	recipient := func(a string) string {
-		if soapNS == xmlsec.NSSOAP12 && a == roleUltimateReceiver {
-			return ""
-		}
-		return a
-	}
-	for _, e := range hdr.ChildElements() {
-		if e.IsElement(xmlsec.NSWSSE, "Security") && recipient(xmltree.AttrValue(e, soapNS, actorAttr)) == recipient(actor) {
-			return nil, fmt.Errorf("wss: a wsse:Security header for actor %q already exists", actor)
-		}
-	}
+	actorAttr := actorAttribute(soapNS)
 
 	// Built detached and attached last, so its own namespace declarations
 	// cannot conflict with an ancestor's.
@@ -198,4 +187,31 @@ func hasAnyID(n *xdm.Node, ids map[string]bool) bool {
 		}
 	}
 	return false
+}
+
+// actorAttribute is the name of the SOAP attribute that targets a header.
+func actorAttribute(soapNS string) string {
+	if soapNS == xmlsec.NSSOAP12 {
+		return "role"
+	}
+	return "actor"
+}
+
+// securityHeaders returns the wsse:Security children of the SOAP Header hdr
+// that target actor. For SOAP 1.2, the ultimateReceiver role is the same
+// recipient as no role (SOAP 1.2 Part 1 section 5.2.2).
+func securityHeaders(hdr *xdm.Node, soapNS, actor string) []*xdm.Node {
+	recipient := func(a string) string {
+		if soapNS == xmlsec.NSSOAP12 && a == roleUltimateReceiver {
+			return ""
+		}
+		return a
+	}
+	var out []*xdm.Node
+	for _, e := range hdr.ChildElements() {
+		if e.IsElement(xmlsec.NSWSSE, "Security") && recipient(xmltree.AttrValue(e, soapNS, actorAttribute(soapNS))) == recipient(actor) {
+			out = append(out, e)
+		}
+	}
+	return out
 }

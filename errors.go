@@ -57,6 +57,22 @@ var (
 	// allows. It is the WS-Security wsse:MessageExpired fault.
 	ErrMessageExpired = errors.New("xmlsec: message expired")
 
+	// ErrInvalidSecurityToken is returned, alongside ErrMalformed where the
+	// token's structure is at fault, for a security token that cannot be
+	// read: a wsse:BinarySecurityToken whose content is not the certificate
+	// or path its ValueType names. It is the WS-Security
+	// wsse:InvalidSecurityToken fault (SOAP Message Security 1.1.1 section
+	// 12).
+	ErrInvalidSecurityToken = errors.New("xmlsec: invalid security token")
+
+	// ErrSecurityTokenUnavailable is returned when a
+	// wsse:SecurityTokenReference names a token that cannot be found: no
+	// element carries the referenced ID, or the caller's resolver has no
+	// certificate for a key identifier or issuer-serial reference. It wraps
+	// alongside ErrIDNotFound or the resolver's error. It is the WS-Security
+	// wsse:SecurityTokenUnavailable fault.
+	ErrSecurityTokenUnavailable = errors.New("xmlsec: security token unavailable")
+
 	// ErrAttachmentNotFound is returned when a cid: URI matches no attachment.
 	ErrAttachmentNotFound = errors.New("xmlsec: attachment not found")
 

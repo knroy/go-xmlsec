@@ -77,6 +77,9 @@ func FindByID(doc *xdm.Node, id string, extra ...xdm.QName) (*xdm.Node, error) {
 // VerifyOptions.IDAttributes, and on the receiving side in whatever
 // registers IDs.
 //
+// An element that already carries an xml:id keeps it, and that is returned:
+// SOAP Message Security 1.1.1 section 4 forbids a wsu:Id beside it.
+//
 // Generated IDs are "id-" plus 32 hex characters from crypto/rand, unique
 // within the document. The prefix keeps the value an NCName.
 func AssignID(doc *xdm.Node, el *xdm.Node) (string, error) {
@@ -89,6 +92,11 @@ func AssignID(doc *xdm.Node, el *xdm.Node) (string, error) {
 		unqualified = true
 	}
 	a := el.Attr(xmlsec.NSWSU, "Id")
+	if a == nil {
+		// SOAP Message Security 1.1.1 section 4: an element MUST NOT carry
+		// both a wsu:Id and an xml:id, so an xml:id is the element's ID.
+		a = el.Attr(xdm.NSXML, "id")
+	}
 	if unqualified {
 		a = el.Attr("", "Id")
 	}

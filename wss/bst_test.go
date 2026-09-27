@@ -117,6 +117,11 @@ func TestParseBinarySecurityTokenErrors(t *testing.T) {
 			if err == nil || c.want != nil && !errors.Is(err, c.want) {
 				t.Fatalf("got %v, want %v", err, c.want)
 			}
+			// A token that is not what it says is wsse:InvalidSecurityToken;
+			// one this library does not read is only unsupported.
+			if unsupported := errors.Is(err, xmlsec.ErrUnsupportedKeyInfo); unsupported == errors.Is(err, xmlsec.ErrInvalidSecurityToken) {
+				t.Fatalf("%v: unsupported %v, invalid %v", err, unsupported, !unsupported)
+			}
 		})
 	}
 }

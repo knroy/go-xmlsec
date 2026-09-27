@@ -93,6 +93,15 @@ const (
 	// TransformAttachmentCiphertext is the xenc:CipherReference transform
 	// the SwA profile requires on every encrypted attachment, section 5.5.2.
 	TransformAttachmentCiphertext = "http://docs.oasis-open.org/wss/oasis-wss-SwAProfile-1.1#Attachment-Ciphertext-Transform"
+
+	// TransformSTR is the STR Dereference Transform of SOAP Message Security
+	// 1.1.1 section 8.3: applied to a wsse:SecurityTokenReference, it digests
+	// the token the reference names instead of the reference, serialized
+	// with the Exclusive C14N its wsse:TransformationParameters carry. The
+	// URI is the one WSS4J, the Basic Security Profile (R5423) and the
+	// specification's own examples use; the specification's URI table
+	// spells it #STRTransform.
+	TransformSTR = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-soap-message-security-1.0#STR-Transform"
 )
 
 // Transform URIs that carry a program: an XPath expression (XML Signature

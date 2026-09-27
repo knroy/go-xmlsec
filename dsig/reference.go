@@ -23,7 +23,7 @@ func impliesC14N(sameDocument bool, transforms []TransformSpec) bool {
 	nodeSet := sameDocument
 	for _, t := range transforms {
 		switch a := t.Algorithm; {
-		case isC14N(a) || a == xmlsec.TransformBase64 || a == xmlsec.TransformXSLT:
+		case isC14N(a) || a == xmlsec.TransformBase64 || a == xmlsec.TransformXSLT || a == xmlsec.TransformSTR:
 			nodeSet = false
 		case a == xmlsec.TransformXPath || a == xmlsec.TransformXPathFilter2:
 			nodeSet = true
@@ -68,6 +68,7 @@ type dereferenced struct {
 	attachment *xmlsec.Attachment // cid: target
 	whole      bool               // "" or #xpointer(/) target
 	external   string             // absolute URI the resolver supplied
+	token      *xdm.Node          // token the STR Dereference Transform digested
 }
 
 // isExternal reports whether uri is absolute, the only kind a URIResolver
@@ -116,13 +117,14 @@ func absoluteURI(base, uri string) string {
 //
 // idAttrs are the ID attributes "#id" resolves against beyond wsu:Id and
 // xml:id. resolve supplies the octets of an absolute URI other than cid:;
-// when nil, such a reference is refused.
+// when nil, such a reference is refused. deref finds the token of a
+// reference through the STR Dereference Transform.
 func digestReference(h hash.Hash, doc, sig *xdm.Node, uri string, transforms []TransformSpec,
-	atts xmlsec.AttachmentSet, implicit bool, idAttrs []xdm.QName, resolve xmlsec.URIResolver) (dereferenced, error) {
+	atts xmlsec.AttachmentSet, implicit bool, idAttrs []xdm.QName, resolve xmlsec.URIResolver, deref tokenDeref) (dereferenced, error) {
 
 	var (
 		out dereferenced
-		in  data
+		in  = data{strDeref: deref}
 	)
 	switch {
 	case isSameDocument(uri):
@@ -175,6 +177,10 @@ func digestReference(h hash.Hash, doc, sig *xdm.Node, uri string, transforms []T
 		// A filter dropped part of the target: it is not covered.
 		out = dereferenced{}
 	}
+	if in.token != nil {
+		// What was digested is the token, not the reference to it.
+		out = dereferenced{token: in.token}
+	}
 	return out, nil
 }
 
@@ -201,6 +207,11 @@ type data struct {
 	cut      []*xdm.Node
 	reparsed bool
 	opaque   bool
+
+	// strDeref finds the token of the STR Dereference Transform, and token
+	// is the token it digested.
+	strDeref tokenDeref
+	token    *xdm.Node
 }
 
 // covers reports whether the transforms kept all of el's subtree, or with
@@ -316,6 +327,9 @@ func (d *data) digest(h hash.Hash, sig *xdm.Node, uri string, transforms []Trans
 			if err := d.transformXSLT(t); err != nil {
 				return err
 			}
+
+		case alg == xmlsec.TransformSTR:
+			return d.digestSTR(h, t, len(transforms) == 1)
 
 		default:
 			return fmt.Errorf("%w: transform %s", xmlsec.ErrUnsupportedAlgorithm, alg)

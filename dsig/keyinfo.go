@@ -106,11 +106,7 @@ func (c *keyContext) resolveForms(forms []*xdm.Node, keyName string, hopped bool
 	if len(forms) == 1 {
 		switch k := forms[0]; {
 		case k.IsElement(xmlsec.NSWSSE, "SecurityTokenReference"):
-			resolve := wss.ResolveSecurityTokenReference
-			if c.opts.StrictSecurityTokenReference {
-				resolve = wss.ResolveSecurityTokenReferenceStrict
-			}
-			cert, err := resolve(c.doc, k)
+			cert, err := resolveSTR(c.doc, k, c.opts.StrictSecurityTokenReference || c.opts.StrictBSP, c.opts.ResolveSecurityToken)
 			return withKey(cert, KeyInfoSecurityTokenReference, err)
 		case k.IsElement(xmlsec.NSDSig, "KeyValue"):
 			pub, err := parseKeyValue(k, c.dsaAlg != "")
