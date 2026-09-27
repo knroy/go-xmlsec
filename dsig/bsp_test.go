@@ -42,7 +42,7 @@ func TestStrictBSP(t *testing.T) {
 	}{
 		"R5404 inclusive SignedInfo": {func(s string) string {
 			return strings.Replace(s, `<ds:CanonicalizationMethod Algorithm="`+string(c14n.Exclusive10), `<ds:CanonicalizationMethod Algorithm="`+string(c14n.Inclusive10), 1)
-		}, xmlsec.ErrAlgorithmNotAllowed},
+		}, xmlsec.ErrMalformed},
 		"R5401 HMACOutputLength": {func(s string) string {
 			return strings.Replace(s, `"></ds:SignatureMethod>`, `"><ds:HMACOutputLength>256</ds:HMACOutputLength></ds:SignatureMethod>`, 1)
 		}, xmlsec.ErrMalformed},
@@ -71,10 +71,10 @@ func TestStrictBSP(t *testing.T) {
 		}, xmlsec.ErrMalformed},
 		"R5423 inclusive transform": {func(s string) string {
 			return strings.Replace(s, exc, `<ds:Transform Algorithm="`+string(c14n.Inclusive10)+`"></ds:Transform>`, 1)
-		}, xmlsec.ErrAlgorithmNotAllowed},
+		}, xmlsec.ErrMalformed},
 		"R5412 ends with enveloped-signature": {func(s string) string {
 			return strings.Replace(s, exc, exc+`<ds:Transform Algorithm="`+xmlsec.TransformEnvelopedSignature+`"></ds:Transform>`, 1)
-		}, xmlsec.ErrAlgorithmNotAllowed},
+		}, xmlsec.ErrMalformed},
 		"R6101 attachment without an SwA transform": {func(s string) string {
 			return strings.Replace(s, xmlsec.TransformAttachmentContentSignature, string(c14n.Exclusive10), 1)
 		}, xmlsec.ErrMalformed},
@@ -82,6 +82,12 @@ func TestStrictBSP(t *testing.T) {
 			s = strings.Replace(s, `</ds:KeyInfo>`, `</ds:KeyInfo><ds:Object><o xmlns:wsu="`+xmlsec.NSWSU+`" wsu:Id="obj"></o></ds:Object>`, 1)
 			return strings.Replace(s, `URI="#`+msgID+`"`, `URI="#obj"`, 1)
 		}, xmlsec.ErrMalformed},
+		// Signing the ds:KeyInfo reference, as WSS4J does, is not
+		// enveloping: the profile's rules pass.
+		"reference into ds:KeyInfo": {func(s string) string {
+			s = strings.Replace(s, `<wsse:SecurityTokenReference>`, `<wsse:SecurityTokenReference xmlns:wsu="`+xmlsec.NSWSU+`" wsu:Id="kistr">`, 1)
+			return strings.Replace(s, `URI="#`+msgID+`"`, `URI="#kistr"`, 1)
+		}, xmlsec.ErrSignatureInvalid},
 		"reference to nothing": {func(s string) string {
 			return strings.Replace(s, `URI="#`+msgID+`"`, `URI="#nothing"`, 1)
 		}, xmlsec.ErrIDNotFound},

@@ -69,6 +69,17 @@ type Reference struct {
 	// (Verify also accepts a received reference that ends in a node set,
 	// completing it with Canonical XML 1.0 as XML-DSig 4.4.3.2 requires;
 	// Sign never produces one.)
+	//
+	// xmlsec.TransformSTR, the STR Dereference Transform of SOAP Message
+	// Security 1.1.1 section 8.3, is the only transform of a "#id"
+	// reference to a wsse:SecurityTokenReference, and digests the token it
+	// names; its InclusiveNamespacePrefixes become the PrefixList of the
+	// Exclusive C14N in its wsse:TransformationParameters.
+	//
+	// The Basic Security Profile requires transforms on every reference
+	// (R5416), ending with Exclusive C14N, the STR Dereference Transform or
+	// an SwA signature transform (R5412); a reference to an external URI
+	// without transforms is not profile output.
 	Transforms []TransformSpec
 
 	// DigestAlgorithm is a Digest* constant. Required. The legacy
@@ -131,12 +142,18 @@ const (
 	// KeyInfoX509Data emits ds:X509Data/ds:X509Certificate with the
 	// base64 DER of the signing certificate, followed by SignOptions.Chain
 	// and preceded by any SignOptions.X509Descriptors. Verify also reports it
-	// for a ds:RetrievalMethod to ds:X509Data or to a raw certificate.
+	// for a ds:RetrievalMethod to ds:X509Data or to a raw certificate. In
+	// WS-Security it is not Basic Security Profile output, which requires a
+	// wsse:SecurityTokenReference (R5417); nor is any form but
+	// KeyInfoSecurityTokenReference.
 	KeyInfoX509Data
 
 	// KeyInfoSecurityTokenReference emits a wsse:SecurityTokenReference
 	// pointing at a wsse:BinarySecurityToken that the caller has placed in
-	// the wsse:Security header.
+	// the wsse:Security header, or SignOptions.KeyInfoElement: a key
+	// identifier or issuer-serial reference for a certificate the message
+	// does not carry. It is the form the Basic Security Profile requires
+	// (R5417).
 	KeyInfoSecurityTokenReference
 
 	// KeyInfoKeyValue emits the raw public key as ds:KeyValue: a

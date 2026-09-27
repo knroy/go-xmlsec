@@ -54,14 +54,14 @@ var (
 //     an SwA signature transform;
 //   - R6101 and SwA profile 5.4.4: a cid: reference begins with an SwA
 //     signature transform;
-//   - R3102: no reference names an element inside the signature, which
-//     would make it enveloping.
+//   - R3102: no reference names content of the signature's own ds:Object,
+//     which would make it enveloping.
 //
-// An algorithm outside the profile is xmlsec.ErrAlgorithmNotAllowed; any
-// other breach is xmlsec.ErrMalformed.
+// Every breach is xmlsec.ErrMalformed, as under
+// xenc.DecryptOptions.StrictBSP.
 func checkBSP(doc, sig *xdm.Node, p *parsedSignature, idAttrs []xdm.QName) error {
 	if p.c14n.Algorithm != c14n.Exclusive10 {
-		return fmt.Errorf("%w: ds:SignedInfo canonicalization %q (BSP R5404)", xmlsec.ErrAlgorithmNotAllowed, p.c14n.Algorithm)
+		return malformed("ds:SignedInfo canonicalization %q (BSP R5404)", p.c14n.Algorithm)
 	}
 	if len(p.sigMethod.ChildElements()) > 0 {
 		return malformed("ds:SignatureMethod has children (BSP R5401)")
@@ -103,11 +103,11 @@ func checkBSPReference(doc, sig *xdm.Node, r parsedReference, idAttrs []xdm.QNam
 	}
 	for _, t := range r.transforms {
 		if !slices.Contains(bspTransforms, t.Algorithm) {
-			return fmt.Errorf("%w: transform %q (BSP R5423)", xmlsec.ErrAlgorithmNotAllowed, t.Algorithm)
+			return malformed("transform %q (BSP R5423)", t.Algorithm)
 		}
 	}
 	if !slices.Contains(bspLastTransforms, r.transforms[n-1].Algorithm) {
-		return fmt.Errorf("%w: ds:Reference %q ends with transform %q (BSP R5412)", xmlsec.ErrAlgorithmNotAllowed, r.uri, r.transforms[n-1].Algorithm)
+		return malformed("ds:Reference %q ends with transform %q (BSP R5412)", r.uri, r.transforms[n-1].Algorithm)
 	}
 	first := r.transforms[0].Algorithm
 	if strings.HasPrefix(r.uri, "cid:") && first != xmlsec.TransformAttachmentContentSignature && first != xmlsec.TransformAttachmentCompleteSignature {
@@ -124,8 +124,13 @@ func checkBSPReference(doc, sig *xdm.Node, r parsedReference, idAttrs []xdm.QNam
 	if err != nil {
 		return err
 	}
-	if within(target, sig) {
-		return malformed("ds:Reference %q names an element inside the signature, an enveloping signature (BSP R3102)", r.uri)
+	// Enveloping is signing a ds:Object of the signature itself. Its
+	// ds:KeyInfo is not one: WSS4J signs the reference there through the STR
+	// Dereference Transform.
+	for e := target; e.Parent != nil; e = e.Parent {
+		if e.Parent == sig && e.IsElement(xmlsec.NSDSig, "Object") {
+			return malformed("ds:Reference %q names content of the signature's own ds:Object, an enveloping signature (BSP R3102)", r.uri)
+		}
 	}
 	return nil
 }

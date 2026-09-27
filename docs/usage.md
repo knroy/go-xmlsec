@@ -262,8 +262,9 @@ first and a receiver processes it top to bottom.
   timestamp, and every token the element references (Basic Security Profile
   R5205). It refuses an `EncryptedKey` that would land after an
   `EncryptedData` it lists (R3208).
-- `AddBinarySecurityToken` and `AddTimestamp` place their elements
-  themselves; the timestamp always goes first, at most once.
+- `AddBinarySecurityToken`, `AddTimestamp` and `AddSignatureConfirmation`
+  place their elements themselves; the timestamp always goes first, at most
+  once.
 - `hdr.Append(el)` places an element last, for callers who order the header
   themselves.
 
@@ -273,6 +274,7 @@ Sign, then encrypt:
 2. `wss.AssignID` on every element to sign. On an XML Signature or XML
    Encryption element it sets the schema's own unqualified `Id` rather than
    `wsu:Id`; sign such references with `IDAttributes: []xdm.QName{dsig.IDAttrDSig}`.
+   An element that already has an `xml:id` keeps it (§4 forbids both).
 3. `hdr.AddBinarySecurityToken(signerCert, nil, xmlsec.BSTValueTypeX509v3)`, then
    `dsig.Sign` with `KeyInfo: dsig.KeyInfoSecurityTokenReference` and
    `SecurityTokenID` set to the token's ID, then `hdr.Prepend(sig)`.
@@ -331,32 +333,168 @@ or too-old timestamp. A timestamp protects nothing unless the signature's
 ### Token references
 
 `wss.ResolveSecurityTokenReference` follows a direct reference to a token in
-the message. `wss.ResolveSecurityTokenReferenceStrict` also enforces the
+the message, or reads the token a `wsse:Embedded` holds (§7.4), and returns
+its certificate. `wss.ResolveSecurityTokenReferenceStrict` also enforces the
 Basic Security Profile rules on how the reference is written: a `ValueType`
 matching the token, a consistent `TokenType`, the token in the same header
 before the reference. `VerifyOptions.StrictSecurityTokenReference` applies
-the strict form inside `dsig.Verify`.
+the strict form inside `dsig.Verify`. `wss.ReferencedToken` returns the
+token element of either form, of any kind: a binary security token, an
+`xenc:EncryptedKey`, a SAML assertion. All three refuse a reference to
+another reference, to a `wsse:Embedded` or to a `ds:KeyInfo` (R3057, R3064,
+R3211), and an `Embedded` holding anything but one token (R3060, R3056). A
+reference to an ID nothing carries is `ErrSecurityTokenUnavailable`, as well
+as `ErrIDNotFound`. `wss.CheckSecurityTokenReference` applies the profile's
+syntax rules to any reference: one reference (R3061), no `KeyName` (R3027),
+a `URI` on a direct reference (R3062), a key identifier with a `ValueType`
+its profile defines and the Base64Binary `EncodingType` (R3054, R3063,
+R3070, R3071), and a `TokenType` consistent with it (§7.1, R3069).
 
 `wss.MatchSecurityTokenReference(str, cert)` checks a key identifier or
 issuer-serial reference against a certificate you supply. It never selects a
 key from the message.
 
+To name, in a signature's `ds:KeyInfo`, a certificate that does not travel
+with the message (X.509 Token Profile §3.2, BSP R5417, R5209), pass the reference as
+`SignOptions.KeyInfoElement` with `KeyInfo: dsig.KeyInfoSecurityTokenReference`:
+
+```go
+str, err := wss.NewKeyIdentifierReference(signerCert) // or NewIssuerSerialReference
+sig, err := dsig.Sign(doc, key, dsig.SignOptions{
+	// ...
+	KeyInfo:        dsig.KeyInfoSecurityTokenReference,
+	KeyInfoElement: str, // Sign takes it: build one per signature
+})
+```
+
+The receiver pins the certificate, or supplies it through
+`VerifyOptions.ResolveSecurityToken`, a lookup in its own store that never
+fetches:
+
+```go
+opts.ResolveSecurityToken = func(str *xdm.Node) (*x509.Certificate, error) {
+	for _, c := range trusted {
+		if wss.MatchSecurityTokenReference(str, c) {
+			return c, nil
+		}
+	}
+	return nil, errors.New("unknown certificate")
+}
+```
+
+With a certificate pinned and `StrictSecurityTokenReference` or `StrictBSP`
+set, a key identifier or issuer serial that names another certificate is
+`ErrUnsupportedKeyInfo`. Lenient verification ignores it, as it ignores any
+`ds:KeyInfo` under a pinned key.
+
+An `xenc:EncryptedKey` is a token too (§7.7):
+`wss.NewEncryptedKeyReference(ekID)` references one in the same message
+(the element `NewSecurityTokenReference` builds for the `EncryptedKey`
+ValueType, as the symmetric binding below uses), and
+`wss.NewEncryptedKeySHA1Reference(ek)` names one from an earlier message by
+the SHA-1 of its `CipherValue` octets; `wss.MatchEncryptedKeySHA1(str, ek)`
+finds which key a reply names. Both carry the `TokenType` BSP requires.
+
+### STR Dereference Transform
+
+The STR Dereference Transform (`xmlsec.TransformSTR`, §8.3) signs the token
+a `wsse:SecurityTokenReference` names rather than the reference: put the
+reference in the header with an ID and make the transform the reference's
+only transform.
+
+```go
+str, err := wss.NewSecurityTokenReference(doc, tokenID, "")
+hdr.Append(str)
+strID, err := wss.AssignID(doc, str)
+refs = append(refs, dsig.Reference{URI: "#" + strID, DigestAlgorithm: xmlsec.DigestSHA256,
+	Transforms: []dsig.TransformSpec{{Algorithm: xmlsec.TransformSTR}}})
+```
+
+The token is serialized with Exclusive C14N (the only one accepted, in
+`wsse:TransformationParameters`), with `TransformSpec.InclusiveNamespacePrefixes`
+as its PrefixList, and `xmlns=""` on the token when no default namespace is
+in scope, as §8.3 requires and WSS4J does. A key identifier or issuer-serial
+reference names a certificate outside the message: the transform digests the
+X509v3 `wsse:BinarySecurityToken` §8.3 builds from the certificate
+`SignOptions.ResolveSecurityToken` or `VerifyOptions.ResolveSecurityToken`
+returns, and fails with `ErrSecurityTokenUnavailable` without one.
+`Coverage.SignedTokens` reports each token covered this way; the reference
+itself is not covered and not reported. To protect both, sign the reference
+twice, with and without the transform.
+
+### Receiving
+
+```go
+sec, err := wss.FindHeader(doc, xmlsec.NSSOAP12, "") // nil if there is none
+err = wss.CheckUniqueIDs(doc)                        // before resolving anything
+tsEl, err := wss.FindTimestamp(sec)                  // nil if there is none
+```
+
+`FindHeader` refuses two headers for the same actor or role (R3206, R3210),
+`FindTimestamp` two timestamps (R3227), and `CheckUniqueIDs` any ID value
+carried twice across `wsu:Id`, `xml:id` and the attributes you name (R3204),
+each with `ErrMalformed` or `ErrAmbiguousID`.
+
+`VerifyOptions.StrictBSP` refuses, before any cryptographic work, a
+signature the Basic Security Profile forbids: `ds:SignedInfo` not under
+Exclusive C14N (R5404), `HMACOutputLength` (R5401), a `ds:KeyInfo` other
+than one valid `wsse:SecurityTokenReference` (R5402, R5417), a `ds:Manifest`
+or `xenc:EncryptedData` in the signature (R5403, R5440), a reference without
+transforms (R5416, R5411), with a transform outside Exclusive C14N, XPath
+Filter 2.0, the STR Dereference Transform, enveloped-signature and the SwA
+signature transforms (R5423) or ending in another (R5412), a `cid:`
+reference not beginning with an SwA transform (R6101), and a reference into
+the signature's own `ds:Object` (R3102). It implies
+`StrictSecurityTokenReference`.
+
+### Signature confirmation
+
+A responder confirms every signature of the request (§8.5); the initiator
+keeps its own signature values and checks the response:
+
+```go
+// Responder: one confirmation per request signature, or one with no value.
+values, err := wss.SignatureValues(requestSecurityHeader)
+for _, v := range values {
+	id, err := hdr.AddSignatureConfirmation(v) // sign it by id
+}
+if len(values) == 0 {
+	id, err := hdr.AddSignatureConfirmation(nil)
+}
+
+// Initiator, after dsig.Verify on the response, with every confirmation
+// in its Coverage:
+err = wss.CheckSignatureConfirmations(responseSecurityHeader, sentValues)
+```
+
+`CheckSignatureConfirmations` compares in constant time and refuses a
+missing confirmation, a value that confirms no request signature, a request
+signature left unconfirmed, and a `Value` present or absent against whether
+the request was signed, with `ErrSignatureInvalid`.
+
 ### Faults
 
-SOAP Message Security §12 names the faults a receiver returns. The library's
-errors map onto them as follows; for SOAP 1.2 the Code is `env:Sender` with
-the QName as Subcode.
+SOAP Message Security §12 names the faults a receiver returns.
+`wss.FaultCode(err)` maps an error to one, as a `wsse`-prefixed QName; for
+SOAP 1.2 the Code is `env:Sender` with the QName as Subcode.
 
 | Error | Fault |
 |---|---|
+| `ErrMessageExpired` | `wsse:MessageExpired` |
+| `ErrSecurityTokenUnavailable` (a reference to a token not there, a resolver without the certificate) | `wsse:SecurityTokenUnavailable` |
+| `ErrInvalidSecurityToken` (a token whose content is not what its `ValueType` says) | `wsse:InvalidSecurityToken` |
 | `ErrUnsupportedAlgorithm`, `ErrAlgorithmNotAllowed`, `ErrTransformRefused` | `wsse:UnsupportedAlgorithm` |
 | `ErrUnsupportedKeyInfo` | `wsse:UnsupportedSecurityToken` |
-| `ErrIDNotFound` while resolving a token reference | `wsse:SecurityTokenUnavailable` |
-| `ErrMalformed` from a token or token reference | `wsse:InvalidSecurityToken` |
-| other `ErrMalformed`, `ErrAmbiguousID`, `ErrIDNotFound`, `ErrUnverifiable`, `ErrLimitExceeded`, `ErrAttachmentNotFound` | `wsse:InvalidSecurity` |
-| `ErrDigestMismatch`, `ErrSignatureInvalid`, `ErrDecryptionFailed` (every key-unwrap and decryption failure, one message whatever the cause) | `wsse:FailedCheck` |
 | `ErrUntrusted` | `wsse:FailedAuthentication` |
-| `ErrMessageExpired` | `wsse:MessageExpired` |
+| `ErrDigestMismatch`, `ErrSignatureInvalid`, `ErrDecryptionFailed` (every key-unwrap and decryption failure, one message whatever the cause) | `wsse:FailedCheck` |
+| anything else: `ErrMalformed`, `ErrAmbiguousID`, `ErrIDNotFound`, `ErrUnverifiable`, `ErrLimitExceeded`, `ErrAttachmentNotFound` | `wsse:InvalidSecurity` |
+
+The first row that matches wins; the new sentinels wrap alongside the old
+ones, so `errors.Is(err, xmlsec.ErrMalformed)` still holds for a malformed
+token. The mapping names a class of check, never a step of it, so it is no
+oracle; still, §12 lets a receiver return no fault or one generic fault, the
+safer choice facing an unauthenticated sender. Never put the error's text in
+the fault string.
 
 ## SAML, XAdES and other ID attributes
 

@@ -69,6 +69,13 @@ func oaepOptions(mgf, digest string, label []byte) (*rsa.OAEPOptions, error) {
 // adds one identifying the recipient's key in whatever form its profile
 // requires. opts.CarriedKeyName and opts.RecipientHint are emitted when set.
 //
+// For WS-Security output that conforms to the WS-I Basic Security Profile,
+// use RSA-OAEP and give the EncryptedKey, with SetKeyInfo, a ds:KeyInfo
+// holding one wsse:SecurityTokenReference (R5424, R5426), and no
+// RecipientHint (R5602). The ds:KeyInfo that key agreement or a password
+// produces, an xenc:AgreementMethod or xenc11:DerivedKey, is outside the
+// profile.
+//
 // A legacy algorithm (see the package documentation) in any of opts'
 // algorithm fields is refused with xmlsec.ErrUnsupportedAlgorithm: those are
 // implemented for decryption only.

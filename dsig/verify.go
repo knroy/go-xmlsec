@@ -160,16 +160,44 @@ type VerifyOptions struct {
 	// ds:KeyInfo with wss.ResolveSecurityTokenReferenceStrict: the reference
 	// must carry the token's ValueType (and TokenType where the profile
 	// requires one), and the token must be in the same wsse:Security header,
-	// before the reference. For profiles that demand WS-I Basic Security
-	// Profile conformance of what they receive.
+	// before the reference. A key identifier or issuer-serial reference
+	// resolved by ResolveSecurityToken must pass
+	// wss.CheckSecurityTokenReference. With Certificate set, such a
+	// reference must name that certificate, or verification fails with
+	// xmlsec.ErrUnsupportedKeyInfo: a message that says it was signed by
+	// someone else is what a substituted key looks like. (Lenient
+	// verification ignores the reference under a pinned key, as it does
+	// any ds:KeyInfo: WSS4J, for one, computes a SubjectKeyIdentifier for a
+	// certificate without the extension that a comparison would reject.)
+	// For profiles that demand WS-I Basic Security Profile conformance of
+	// what they receive.
 	StrictSecurityTokenReference bool
 
-	// StrictBSP refuses, before any cryptographic work, a signature the WS-I
-	// Basic Security Profile 1.1 forbids: see the rules in dsig/bsp.go's
-	// checkBSP, listed in docs/security.md. It implies
-	// StrictSecurityTokenReference and, with a certificate pinned, that a key
-	// identifier or issuer-serial reference in ds:KeyInfo names that
-	// certificate. For receivers that require BSP conformance.
+	// StrictBSP enforces the WS-I Basic Security Profile 1.1 rules on the
+	// shape of the signature, before any cryptographic work, as
+	// xenc.DecryptOptions.StrictBSP does on what is decrypted, refusing
+	// with xmlsec.ErrMalformed:
+	//
+	//   - a ds:SignedInfo not canonicalized with Exclusive C14N (R5404), or
+	//     a ds:SignatureMethod with children, such as HMACOutputLength
+	//     (R5401);
+	//   - a ds:KeyInfo holding anything but one wsse:SecurityTokenReference
+	//     (R5402, R5417), or one wss.CheckSecurityTokenReference refuses;
+	//   - a ds:Manifest or xenc:EncryptedData in the signature (R5403,
+	//     R5440);
+	//   - a reference without transforms (R5416, R5411), with a transform
+	//     other than Exclusive C14N, XPath Filter 2.0, the STR Dereference
+	//     Transform, enveloped-signature or an SwA signature transform
+	//     (R5423), or ending in another than Exclusive C14N, the STR
+	//     Dereference Transform or an SwA signature transform (R5412);
+	//   - a cid: reference not beginning with an SwA signature transform
+	//     (R6101), or a reference into the signature's own ds:Object, an
+	//     enveloping signature (R3102).
+	//
+	// It implies StrictSecurityTokenReference. The profile's signature and
+	// digest algorithm lists (R5420, R5421), which name SHA-1, RSA-SHA1 and
+	// HMAC-SHA1, are not enforced: the allow-lists decide algorithms. For
+	// receivers that require BSP conformance.
 	StrictBSP bool
 
 	// ResolveSecurityToken supplies the certificate a key identifier or

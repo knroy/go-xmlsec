@@ -21,8 +21,11 @@ because a signature is only as correct as the canonical octets it covers.
 - **Signature coverage**: verification reports exactly which elements and
   attachments a signature covers, the defence against XML Signature Wrapping.
 - **WS-Security**: the `wsse:Security` header in processing order, binary
-  security tokens (X509v3, PKIPath and PKCS7), direct, key-identifier and issuer-serial token references,
-  `wsu:Id`, timestamps checked on receipt, and the symmetric binding: a
+  security tokens (X509v3, PKIPath and PKCS7), direct, embedded, key-identifier, issuer-serial and
+  `EncryptedKey` token references, `wsu:Id`, timestamps checked on receipt,
+  the STR Dereference Transform, signature confirmation, the SOAP Message
+  Security fault codes (`wss.FaultCode`), opt-in strict Basic Security
+  Profile checks on what is verified, and the symmetric binding: a
   header `ReferenceList`, each `EncryptedData` naming its `EncryptedKey` by
   a token reference; opt-in Basic Security Profile checks on what is
   decrypted, and one generic `ErrDecryptionFailed` for the `FailedCheck`

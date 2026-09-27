@@ -357,3 +357,39 @@ func TestSTRTransformSignFailures(t *testing.T) {
 		t.Errorf("wsse bound elsewhere: %v", err)
 	}
 }
+
+// ds:KeyInfo is built before any reference is digested, so the signature
+// can sign its own ds:KeyInfo reference through the STR Dereference
+// Transform, as WSS4J does, and the result passes StrictBSP: a reference
+// into ds:KeyInfo is not an enveloping one.
+func TestSTRTransformOverKeyInfo(t *testing.T) {
+	key := newKey(t, rsaKey)
+	doc, tokID, bodyID := covTokenDoc(t, key)
+	str, err := wss.NewSecurityTokenReference(doc, tokID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	strID, err := wss.AssignID(doc, str)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sig, err := dsig.Sign(doc, key, dsig.SignOptions{
+		SignatureAlgorithm:        xmlsec.SigRSASHA256,
+		CanonicalizationAlgorithm: string(c14n.Exclusive10),
+		References: []dsig.Reference{
+			{URI: "#" + bodyID, Transforms: excC14N, DigestAlgorithm: xmlsec.DigestSHA256},
+			{URI: "#" + strID, Transforms: strTransform, DigestAlgorithm: xmlsec.DigestSHA256},
+		},
+		KeyInfo:        dsig.KeyInfoSecurityTokenReference,
+		KeyInfoElement: str,
+		Parent:         xmltree.DocumentElement(doc).ChildElements()[0].ChildElements()[1],
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cov, err := dsig.Verify(doc, sig, dsig.VerifyOptions{StrictBSP: true})
+	if err != nil || len(cov.SignedTokens) != 1 || cov.SignedTokens[0].AttrValue("ValueType") != xmlsec.BSTValueTypeX509v3 ||
+		!cov.Certificate.Equal(key.Certificate) {
+		t.Fatalf("%v, %+v", err, cov)
+	}
+}

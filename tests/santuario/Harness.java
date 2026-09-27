@@ -82,6 +82,8 @@ public final class Harness {
                 case "sign-external" -> signExternal(a[1], a[2], a[3], a[4], a[5], a[6], a.length > 7 ? a[7] : "");
                 case "verify-external" -> verifyExternal(a[1], a[2], a[3], a[4]);
                 case "pkcs7" -> pkcs7(a[1], a[2], java.util.Arrays.copyOfRange(a, 3, a.length));
+                case "wss4j-sign-str" -> wss4jSignSTR(a[1], a[2], a[3], a[4], a[5]);
+                case "wss4j-confirm" -> wss4jConfirm(a[1], a[2], a[3]);
                 case "verify-hmac" -> verifyHMAC(a[1], a[2]);
                 case "sign-enveloping" -> signEnveloping(a[1], a[2], a[3]);
                 case "sign-manifest" -> signManifest(a[1], a[2], a[3], a[4]);
@@ -428,6 +430,11 @@ public final class Harness {
                     System.out.println("signed " + ref.getWsuId());
                 }
             }
+            if (action == org.apache.wss4j.dom.WSConstants.SC) {
+                byte[] v = ((org.apache.wss4j.dom.message.token.SignatureConfirmation)
+                    r.get(org.apache.wss4j.dom.engine.WSSecurityEngineResult.TAG_SIGNATURE_CONFIRMATION)).getSignatureValue();
+                System.out.println("confirmation " + (v == null ? "-" : Base64.getEncoder().encodeToString(v)));
+            }
         }
     }
 
@@ -642,6 +649,49 @@ public final class Harness {
             }
         }
         throw new IllegalArgumentException("not an RSA, EC or DSA PKCS#8 key: " + path);
+    }
+
+    /**
+     * wss4j-sign-str soap.xml key.pem cert.pem bst|ski|issuer-serial out.xml:
+     * WSS4J signs the SOAP Body and, through the STR Dereference Transform,
+     * the wsse:SecurityTokenReference of the signature's own ds:KeyInfo
+     * ("STRTransform"), with RSA-SHA256 and SHA-256 digests. The reference is
+     * a direct reference to a binary security token, a SubjectKeyIdentifier
+     * or an issuer serial.
+     */
+    static void wss4jSignSTR(String soapPath, String keyPath, String certPath, String keyRef, String out) throws Exception {
+        org.apache.wss4j.dom.engine.WSSConfig.init();
+        Document doc = parse(soapPath);
+        org.apache.wss4j.dom.message.WSSecHeader hdr = new org.apache.wss4j.dom.message.WSSecHeader(doc);
+        hdr.insertSecurityHeader();
+        org.apache.wss4j.dom.message.WSSecSignature b = new org.apache.wss4j.dom.message.WSSecSignature(hdr);
+        b.setUserInfo("key", new String(PASS));
+        b.setKeyIdentifierType(switch (keyRef) {
+            case "bst" -> org.apache.wss4j.dom.WSConstants.BST_DIRECT_REFERENCE;
+            case "ski" -> org.apache.wss4j.dom.WSConstants.SKI_KEY_IDENTIFIER;
+            case "issuer-serial" -> org.apache.wss4j.dom.WSConstants.ISSUER_SERIAL;
+            default -> throw new IllegalArgumentException("key reference " + keyRef);
+        });
+        b.setSignatureAlgorithm(XMLSignature.ALGO_ID_SIGNATURE_RSA_SHA256);
+        b.setDigestAlgo(SHA256);
+        b.getParts().add(new org.apache.wss4j.common.WSEncryptionPart("Body", doc.getDocumentElement().getNamespaceURI(), ""));
+        b.getParts().add(new org.apache.wss4j.common.WSEncryptionPart("STRTransform", "", "Element"));
+        b.build(keyStore(keyPath, certPath));
+        write(doc, out);
+    }
+
+    /**
+     * wss4j-confirm soap.xml value out.xml: WSS4J adds a
+     * wsse11:SignatureConfirmation to a new wsse:Security header, confirming
+     * the base64 signature value, or with no Value for "-".
+     */
+    static void wss4jConfirm(String soapPath, String value, String out) throws Exception {
+        org.apache.wss4j.dom.engine.WSSConfig.init();
+        Document doc = parse(soapPath);
+        org.apache.wss4j.dom.message.WSSecHeader hdr = new org.apache.wss4j.dom.message.WSSecHeader(doc);
+        hdr.insertSecurityHeader();
+        new org.apache.wss4j.dom.message.WSSecSignatureConfirmation(hdr).build(value.equals("-") ? null : Base64.getDecoder().decode(value));
+        write(doc, out);
     }
 
     static final char[] PASS = "changeit".toCharArray();

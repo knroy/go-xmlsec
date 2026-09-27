@@ -139,6 +139,8 @@ type EncryptOptions struct {
 
 	// RecipientHint, if set, becomes the EncryptedKey's Recipient
 	// attribute: an application-defined hint naming whom the key is for.
+	// The WS-I Basic Security Profile forbids it in WS-Security (R5602): a
+	// SOAP header's actor or role names the recipient there.
 	RecipientHint string
 
 	// SessionKey, if non-nil, is the key GenerateEncryptedKey wraps instead
