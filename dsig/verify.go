@@ -51,7 +51,8 @@ type VerifyOptions struct {
 	PublicKey crypto.PublicKey
 
 	// AllowedSignatureAlgorithms restricts the accepted ds:SignatureMethod
-	// values. Empty means the default set, today every Sig* constant. A
+	// values. Empty means the default set, today RSA and ECDSA with SHA-256,
+	// SHA-384 and SHA-512. A
 	// caller enforcing a profile passes exactly the values it permits;
 	// accepting more is a downgrade surface.
 	//
@@ -69,8 +70,8 @@ type VerifyOptions struct {
 	AllowedSignatureAlgorithms []string
 
 	// AllowedDigestAlgorithms restricts ds:DigestMethod values. Empty means
-	// the default set, today every Digest* constant but xmlsec.DigestSHA1
-	// and DigestSHA224, each accepted only when named. It also bounds the
+	// the default set, today xmlsec.DigestSHA256, DigestSHA384 and
+	// DigestSHA512; DigestSHA1 and DigestSHA224 are accepted only when named. It also bounds the
 	// algorithm of a dsig11:X509Digest in ds:KeyInfo.
 	AllowedDigestAlgorithms []string
 
@@ -251,6 +252,7 @@ type VerifyOptions struct {
 	// are not in Unicode Normalization Form C (XML-DSig 8.1.3), as Sign
 	// never produces. Off by default: other signers need not normalize.
 	RequireNFC bool
+
 	// ResolveKeyName maps a ds:KeyName that ds:KeyInfo holds alone
 	// (XML-DSig 4.5.1) to the signer's key: a certificate, or a raw key with
 	// a nil certificate, never both. Beside any other key form a ds:KeyName

@@ -2,9 +2,11 @@ package xmlsec
 
 // URIResolver returns the octets an absolute URI names, for a ds:Reference
 // or xenc:CipherReference that is neither same-document nor cid:. It is
-// called with the URI exactly as it appears in the document, such as
-// "http://example.com/data.xml"; a relative URI is never passed, since this
-// library has no base URI to resolve it against.
+// called with an absolute URI, such as "http://example.com/data.xml": the
+// URI as it appears in the document, or a relative one resolved against the
+// caller's BaseURI (dsig.SignOptions, dsig.VerifyOptions,
+// xenc.DecryptOptions), never against xml:base. Without a BaseURI a
+// relative URI is refused and never passed.
 //
 // This library never performs network or file I/O: an external reference
 // is dereferenced only through a URIResolver the caller supplies, and is

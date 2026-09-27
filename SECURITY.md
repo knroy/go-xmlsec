@@ -22,8 +22,8 @@ version, not backported.
 * **A signature accepted that should not be.** A tampered document, an
   attachment, a relocated element or a duplicated ID that `dsig.Verify`
   passes with a `Coverage` that does not reveal it.
-* **An algorithm accepted outside the caller's allow-list**, or SHA-1 accepted
-  in any role.
+* **An algorithm accepted outside the caller's allow-list**, or SHA-1 or
+  another weak algorithm accepted, in any role, without the caller naming it.
 * **Plaintext or key material recoverable** from `xenc` output, or a
   decryption error detailed enough to act as an oracle.
 * **Resource exhaustion** disproportionate to the input, past the limits in
@@ -37,8 +37,9 @@ version, not backported.
 * **Ignoring `Coverage`.** A valid signature over the wrong elements is
   reported as exactly that. A caller that does not check `Coverage` has the
   vulnerability, not this library.
-* **The refusals.** SHA-1 is refused on purpose, and the XPath, XPath
-  Filter 2.0 and XSLT transforms by default. What an allowed expression or
+* **The refusals.** SHA-1 and the other weak algorithms are refused on
+  purpose unless the caller names them, and the XPath, XPath Filter 2.0 and
+  XSLT transforms unless the caller allows the exact program. What an allowed expression or
   stylesheet does is the caller's choice; a way to run one that is not
   allowed, or to make an allowed stylesheet read a resource, is in scope.
 * **Canonicalization defects** belong to

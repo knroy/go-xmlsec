@@ -305,8 +305,8 @@ type DecryptOptions struct {
 	// absolute URI other than cid:, such as "http://example.com/ct.bin",
 	// for DecryptData, and of an EncryptedKey's CipherReference for the
 	// functions unwrapping it. It is called only after the algorithms and
-	// the CipherReference transforms are accepted, before any decryption. This library never fetches
-	// anything itself; see xmlsec.URIResolver. An error it returns is
+	// the CipherReference transforms are accepted, before any decryption.
+	// This library never fetches anything itself; see xmlsec.URIResolver. An error it returns is
 	// wrapped with xmlsec.ErrDereference. When nil, such a CipherReference
 	// is refused, and so is a relative one; with ResolveURI set, a relative
 	// URI is resolved against BaseURI, and refused without one.

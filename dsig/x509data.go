@@ -91,8 +91,8 @@ type x509Data struct {
 // descriptor beside them is ignored, as it selects nothing, unless
 // VerifyOptions.StrictX509Data requires each to describe one of the
 // certificates (xmlsec1 describes each certificate it carries). Without a
-// certificate the descriptors, each kind
-// at most once, go to VerifyOptions.ResolveX509, and must all describe what
+// certificate the descriptors, each kind at most once, go to
+// VerifyOptions.ResolveX509, and must all describe what
 // it returns. ds:X509CRL is reported, not checked, and children in other
 // namespaces are ignored.
 func (c *keyContext) x509Key(els []*xdm.Node) (resolvedKey, error) {

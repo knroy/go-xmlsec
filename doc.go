@@ -42,7 +42,7 @@
 //
 // # Deliberate refusals
 //
-//   - Producing any weak algorithm: SHA-1, DSA, HMAC, rsa-oaep-mgf1p,
+//   - Producing any weak algorithm: SHA-1, DSA, HMAC-SHA1, rsa-oaep-mgf1p,
 //     rsa-1_5, AES-CBC, 3DES. The specifications require them, so they are
 //     verified or decrypted, but only when a caller names each one; they are
 //     never in a default allow-list.

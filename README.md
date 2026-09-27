@@ -7,10 +7,10 @@ Parsing and canonicalization come from [go-xml](https://github.com/knroy/go-xml)
 this library never serializes XML for a digest any other way. That matters,
 because a signature is only as correct as the canonical octets it covers.
 
-> **Status: v1.** The API is stable: no breaking change within v1. Output is verified in both directions
-> against two independent implementations, `xmlsec1` and Apache Santuario, on
-> every commit, and signatures are byte-identical to Santuario's. See
-> [what is tested](#how-it-is-tested).
+> **Status: v1.** The API is stable: no breaking change within v1. Output is
+> verified in both directions against two independent implementations,
+> `xmlsec1` and Apache Santuario, on every commit, and signatures are
+> byte-identical to Santuario's. See [what is tested](#how-it-is-tested).
 
 ## Features
 
@@ -21,26 +21,26 @@ because a signature is only as correct as the canonical octets it covers.
 - **Signature coverage**: verification reports exactly which elements and
   attachments a signature covers, the defence against XML Signature Wrapping.
 - **WS-Security**: the `wsse:Security` header in processing order, binary
-  security tokens (X509v3, PKIPath and PKCS7), direct, embedded, key-identifier, issuer-serial and
-  `EncryptedKey` token references, `wsu:Id`, timestamps checked on receipt,
-  the STR Dereference Transform, signature confirmation, the SOAP Message
-  Security fault codes (`wss.FaultCode`), opt-in strict Basic Security
-  Profile checks on what is verified, and the symmetric binding: a
-  header `ReferenceList`, each `EncryptedData` naming its `EncryptedKey` by
-  a token reference; opt-in Basic Security Profile checks on what is
-  decrypted, and one generic `ErrDecryptionFailed` for the `FailedCheck`
-  fault.
+  security tokens (X509v3, PKIPath and PKCS7), direct, embedded,
+  key-identifier, issuer-serial and `EncryptedKey` token references,
+  `wsu:Id`, timestamps checked on receipt, the STR Dereference Transform,
+  signature confirmation, the symmetric binding (a header `ReferenceList`,
+  each `EncryptedData` naming its `EncryptedKey` by a token reference), the
+  SOAP Message Security fault codes (`wss.FaultCode`, with one generic
+  `ErrDecryptionFailed` for `FailedCheck`), and opt-in Basic Security
+  Profile checks on what is verified and on what is decrypted.
 - **XML Encryption**: RSA-OAEP key transport with an explicit MGF, AES key
   wrap, ECDH-ES key agreement, and AES-GCM for elements, element content,
-  SOAP header blocks (`wsse11:EncryptedHeader`, both ways), attachments and arbitrary
-  octets; decryption in place; every `KeyInfo` form of section 3.5:
+  SOAP header blocks (`wsse11:EncryptedHeader`, both ways), attachments and
+  arbitrary octets; decryption in place; every `KeyInfo` form of section 3.5:
   `EncryptedKey` chains, `xenc11:DerivedKey` from a master key, and key
   agreement directly on the data; as opt-ins, finite-field Diffie-Hellman
   (`dh-es`, `dh`), PBKDF2, and an allow-listed XPath on a `CipherReference`.
-- **Hardened by default**: no DOCTYPE, no network or file access, no SHA-1,
-  algorithm allow-lists checked before any cryptography. The XPath, XPath
-  Filter 2.0 and XSLT transforms verify only for the exact expressions or
-  stylesheets a caller allows.
+- **Hardened by default**: no DOCTYPE, no network or file access, no SHA-1
+  or other weak algorithm unless the caller names it, algorithm allow-lists
+  checked before any cryptography. The XPath, XPath Filter 2.0 and XSLT
+  transforms verify only for the exact expressions or stylesheets a caller
+  allows.
 
 ## Install
 
@@ -131,7 +131,7 @@ default produces a signature that looks valid and that no peer accepts.
 | Digest | SHA-256, SHA-384, SHA-512; opt-in: SHA-224 |
 | Key information | X.509 certificates and chains with issuer-serial, SKI, subject name and `X509Digest`; raw RSA and EC keys; `KeyName`; same-document `RetrievalMethod` and `KeyInfoReference`; WS-Security token references. Names, identifiers and external references are resolved only by caller-supplied resolvers |
 | Canonicalization | Canonical XML 1.0 and 1.1, Exclusive Canonical XML 1.0, with or without comments, from `go-xml/c14n` |
-| Transforms | enveloped signature, base64, SwA `Attachment-Content-Signature` and `Attachment-Complete-Signature`; XPath, XPath Filter 2.0 and XSLT, verified only for allowed expressions and stylesheets |
+| Transforms | enveloped signature, base64, SwA `Attachment-Content-Signature` and `Attachment-Complete-Signature`, the WS-Security STR Dereference Transform; XPath, XPath Filter 2.0 and XSLT, verified only for allowed expressions and stylesheets |
 | Key transport | RSA-OAEP (XML Encryption 1.1), MGF1 with SHA-256, SHA-384, SHA-512; opt-in: MGF1 with SHA-224 |
 | Key wrap | AES-128, AES-192, AES-256 (RFC 3394) |
 | Key agreement | ECDH-ES on P-256, P-384, P-521, with ConcatKDF; opt-in: finite-field `dh-es` and `dh` in 2048- to 8192-bit groups |
@@ -139,15 +139,17 @@ default produces a signature that looks valid and that no peer accepts.
 | Data encryption | AES-128-GCM, AES-192-GCM, AES-256-GCM; attachments as SwA `Attachment-Content-Only` or `Attachment-Complete` |
 
 Never produced, and accepted only when a caller names each one: SHA-1,
-DSA with SHA-1 or SHA-256, ECDSA with SHA-1, HMAC-SHA1, `rsa-oaep-mgf1p`, `rsa-1_5`, AES-CBC, 3DES and `kw-tripledes`, which
-the specifications require but which are weak. The XPath, XPath Filter 2.0
-and XSLT transforms are produced on request and verified only for
-expressions and stylesheets the caller allows by exact text. Refused
+DSA with SHA-1 or SHA-256, ECDSA with SHA-1, HMAC-SHA1, `rsa-oaep-mgf1p`,
+`rsa-1_5`, AES-CBC, 3DES and `kw-tripledes`, which the specifications
+require or allow but which are weak. The XPath, XPath Filter 2.0 and XSLT
+transforms are produced on request and verified only for expressions and
+stylesheets the caller allows by exact text. Refused
 outright: DOCTYPE. The library never fetches anything: a URI outside the
 document and its attachments is dereferenced only through a resolver the
 caller supplies (`ResolveURI`), and refused without one; a relative URI
-also needs the caller's `BaseURI`, never the document's `xml:base`. The reasons, and how this measures against each specification
-requirement by requirement, are in [docs/security.md](docs/security.md#conformance).
+also needs the caller's `BaseURI`, never the document's `xml:base`. The
+reasons, and how this measures against each specification requirement by
+requirement, are in [docs/security.md](docs/security.md#conformance).
 
 ## How it is tested
 

@@ -61,7 +61,10 @@ const (
 	SigECDSASHA1 = "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha1"
 
 	// The HMAC MACs (section 6.3.1): SHA-1 and SHA-256 REQUIRED, SHA-384 and
-	// SHA-512 RECOMMENDED. The key is only ever dsig.VerifyOptions.HMACKey,
+	// SHA-512 RECOMMENDED. Only SigHMACSHA1 is legacy: dsig.Sign produces
+	// the SHA-2 ones with dsig.SignOptions.HMACKey. None is in a default
+	// set, since the key is a shared secret only the caller holds: it is
+	// only ever dsig.SignOptions.HMACKey or dsig.VerifyOptions.HMACKey,
 	// never ds:KeyInfo.
 	SigHMACSHA1   = "http://www.w3.org/2000/09/xmldsig#hmac-sha1"
 	SigHMACSHA256 = "http://www.w3.org/2001/04/xmldsig-more#hmac-sha256"
@@ -108,7 +111,9 @@ const (
 // 6.6.3, XPath Filter 2.0) or an XSLT stylesheet (6.6.5). Verification
 // refuses them with ErrTransformRefused unless the caller allows the exact
 // program; see dsig.VerifyOptions.AllowedXPathExpressions and
-// AllowedXSLTStylesheets. Encryption refuses them on a CipherReference.
+// AllowedXSLTStylesheets. On a CipherReference, XSLT and XPath Filter 2.0
+// are refused, and XPath is accepted only as
+// xenc.DecryptOptions.AllowedXPathExpressions allows.
 const (
 	TransformXSLT         = "http://www.w3.org/TR/1999/REC-xslt-19991116"
 	TransformXPath        = "http://www.w3.org/TR/1999/REC-xpath-19991116"

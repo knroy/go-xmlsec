@@ -1,6 +1,8 @@
 // Package wss implements the WS-Security header model: the wsse:Security
 // element, binary security tokens, security token references, wsu:Id
-// assignment and timestamps.
+// assignment, timestamps, signature confirmation and reference lists, the
+// Basic Security Profile checks on a received header, and the SOAP Message
+// Security fault codes.
 //
 // It does not implement any particular WS-Security policy or profile. It
 // provides the elements; the caller composes them.

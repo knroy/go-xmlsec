@@ -7,9 +7,10 @@ Security Profile 1.1.
 
 ## Required and not met
 
-None. Every MUST and every REQUIRED algorithm of these specifications is
-implemented. The weak algorithms among them are verification- and
-decryption-only opt-ins.
+None but the Basic Security Profile's R5620 and R5621 algorithm lists,
+deliberately not met (below). Every other MUST and every REQUIRED algorithm
+of these specifications is implemented. The weak algorithms among them are
+verification- and decryption-only opt-ins.
 
 ## Recommended or optional, not implemented
 
@@ -26,7 +27,7 @@ accepted. See [security.md](security.md#conformance) and the changelog.
 | `PGPData`, `SPKIData` (XML Signature §4.5.5, §4.5.6) | OPTIONAL | No key or trust model for them in the Go standard library. |
 | `MgmtData` (§4.5.7) | NOT RECOMMENDED | The specification says it SHOULD NOT be used. |
 | Explicit `ECParameters` and the RFC 4050 `ECDSAKeyValue` (§4.5.2.3) | OPTIONAL | Attacker-chosen curve parameters; the named curves are supported. |
-| XSLT on an `xenc:CipherReference` | OPTIONAL | It would run the sender's program before anything is authenticated. |
+| XSLT and XPath Filter 2.0 on an `xenc:CipherReference` | OPTIONAL | XSLT would run the sender's program before anything is authenticated. Selecting the ciphertext needs neither: the XPath transform of Example 13 is implemented, as an allow-listed opt-in. |
 | PBKDF2 `OtherSource` salt (XML Encryption §5.4.2) | OPTIONAL | RFC 8018 defines no salt source algorithm: there is nothing to implement. |
 | EXI `EncryptedData` Type | OPTIONAL | Needs an EXI codec; the octets are returned, as §4.2 asks for an unknown Type. |
 | W3C vector AGRMNT.9 (ECDH-ES with PBKDF2) | Test vector | Its producer encoded the shared secret in a way the specification does not define; xmlsec1's own suite omits it. |

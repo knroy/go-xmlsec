@@ -176,8 +176,8 @@ over `SignOptions.OmittedURIData`; the verifier supplies the same octets with
 ### HMAC
 
 With `SignOptions.HMACKey`, `Sign` produces an HMAC (§6.3):
-`SigHMACSHA224`, `SigHMACSHA256`, `SigHMACSHA384` or `SigHMACSHA512`, keyed with your shared
-secret, which must be at least as long as the hash output. The `KeyProvider`
+`SigHMACSHA224`, `SigHMACSHA256`, `SigHMACSHA384` or `SigHMACSHA512`, keyed
+with your shared secret, which must be at least as long as the hash output. The `KeyProvider`
 is not used, and `KeyInfo` must be `KeyInfoNone`: nothing about the secret
 travels. `HMACOutputLength` truncates the MAC to that many bits, a multiple
 of 8 no smaller than half the hash and 80 bits (CVE-2009-0217); zero means
@@ -199,7 +199,7 @@ its own, in the `TransformSpec`:
 | Transform | `TransformSpec` fields |
 |---|---|
 | `TransformXPath` (XML Signature §6.6.3) | `XPath`, the expression; `XPathNamespaces`, the bindings of its prefixes, declared on `ds:XPath` |
-| `TransformXPathFilter2` (XPath Filter 2.0) | `XPathFilters`, each a `Filter` (`"intersect"`, `"subtract"` or `"union"`) and an `Expr`; `XPathNamespaces` as above |
+| `TransformXPathFilter2` (XPath Filter 2.0) | `XPathFilters`, each a `dsig.XPathFilter` with a `Filter` (`"intersect"`, `"subtract"` or `"union"`) and an `Expr`; `XPathNamespaces` as above |
 | `TransformXSLT` (XML Signature §6.6.5) | `Stylesheet`, the `xsl:stylesheet` element, copied into `ds:Transform` |
 
 ```go
@@ -571,9 +571,7 @@ To pin a sender known by a raw key rather than a certificate, set
 error. With a key pinned, a `KeyInfo` form this library does not accept is
 ignored (`KeyInfoForm` is then `KeyInfoNone`); a malformed or ambiguous one is
 still refused. When signing, `KeyInfoKeyValue` and
-`KeyInfoDEREncodedKeyValue` emit the signer's key without a certificate. A
-`dsig11:KeyInfoReference` is followed to a `ds:KeyInfo` in the same document,
-never further.
+`KeyInfoDEREncodedKeyValue` emit the signer's key without a certificate.
 
 ### KeyInfo forms
 
@@ -581,7 +579,7 @@ What `Sign` emits, by `SignOptions.KeyInfo`:
 
 | Form | Emits | Options |
 |---|---|---|
-| `KeyInfoX509Data` | `ds:X509Data` with the signing certificate | `Chain` adds certificates after it, towards a trust anchor; `X509Descriptors` adds `X509IssuerSerial`, `X509SKI`, `X509SubjectName` and `X509Digest` (SHA-256) of the signing certificate before it |
+| `KeyInfoX509Data` | `ds:X509Data` with the signing certificate | `Chain` adds certificates after it, towards a trust anchor; `X509Descriptors`, a list of `dsig.X509Descriptor` (`X509IssuerSerial`, `X509SKI`, `X509SubjectName`, `X509Digest`, SHA-256), adds those elements for the signing certificate before it |
 | `KeyInfoX509Descriptors` | `ds:X509Data` with only the `X509Descriptors` | the verifier must hold the certificate |
 | `KeyInfoKeyValue`, `KeyInfoDEREncodedKeyValue` | the raw public key | |
 | `KeyInfoKeyName` | `ds:KeyName` alone | `KeyName` is required |
@@ -945,16 +943,16 @@ the encryption elements received before any key is used: no `Type`,
 `MimeType`, `Encoding` or `Recipient` on an `EncryptedKey`; every `KeyInfo`
 exactly one `SecurityTokenReference`; no `EncryptedData` directly in the SOAP
 Header; a `KeyInfo` on every `EncryptedData` no `EncryptedKey` names.
-Refusals are `ErrMalformed`, in every Decrypt, Unwrap and Derive function. It refuses key agreement, PBKDF2 and derived keys, whose
-`KeyInfo` the profile does not allow, and leaves algorithms to the
-allow-lists.
+Refusals are `ErrMalformed`, in every Decrypt, Unwrap and Derive function.
+It refuses key agreement, PBKDF2 and derived keys, whose `KeyInfo` the
+profile does not allow, and leaves algorithms to the allow-lists.
 
 ### Finite-field Diffie-Hellman and passwords
 
 XML Encryption 1.1's OPTIONAL key establishment, none of it in a default
 allow-list. Diffie-Hellman keys are `xenc.DHPublicKey` and
 `xenc.DHPrivateKey` (`math/big` P, Q, G, Y and X), in a group of 2048 to
-8192 bits with its subgroup order Q, such as RFC 7919 ffdhe2048, whose Q is
+8192 bits (`xenc.MinDHBits` to `MaxDHBits`) with its subgroup order Q, such as RFC 7919 ffdhe2048, whose Q is
 (P-1)/2:
 
 ```go
@@ -978,7 +976,8 @@ The receiver checks that the originator's public value lies in its own
 group's order-Q subgroup, and refuses any other group.
 
 A password derives the KEK by PBKDF2 with HMAC-SHA256, a fresh 16-octet salt
-and 600,000 iterations unless `PBKDF2Iterations` says otherwise; the
+and 600,000 iterations (`xenc.DefaultPBKDF2Iterations`) unless
+`PBKDF2Iterations` says otherwise; the
 parameters travel in an `xenc11:DerivedKey`:
 
 ```go
@@ -994,7 +993,7 @@ key, err := xenc.UnwrapEncryptedKeyPassword(ek, password, xenc.DecryptOptions{
 ```
 
 A received iteration count over `xenc.MaxPBKDF2Iterations` (10,000,000) is
-refused before any work, and one under 1000 as weak. The HMAC-SHA1 PRF is
+refused before any work, and one under `MinPBKDF2Iterations` (1000) as weak. The HMAC-SHA1 PRF is
 accepted only when `AllowedPRFAlgorithms` names `xmlsec.SigHMACSHA1`.
 Naming `xmlsec.KeyDerivationPBKDF2` also lets `DecryptAgreedKey` and
 `DecryptAgreedKeyDH` accept PBKDF2 as a key agreement's KDF, with the shared
@@ -1003,8 +1002,9 @@ secret as the password.
 ### Key chains, derived keys and direct key agreement
 
 The other `ds:KeyInfo` forms of sections 3.5 and 5.6, each found the same
-ways: a child of the `KeyInfo`, a same-document `ds:RetrievalMethod` (or
-several naming one element; naming two is `xmlsec.ErrAmbiguousID`), a
+ways: a child of the `KeyInfo`, a same-document `ds:RetrievalMethod` of
+`Type` `xenc.TypeEncryptedKey` or `xenc.TypeDerivedKey` (or several naming
+one element; naming two is `xmlsec.ErrAmbiguousID`), a
 `ds:KeyName`, or, with no `KeyInfo`, the one key whose `xenc:ReferenceList`
 names the element by `DataReference` (for an `EncryptedData`) or
 `KeyReference` (for an `EncryptedKey`).

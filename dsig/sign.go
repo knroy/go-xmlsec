@@ -50,9 +50,8 @@ type SignOptions struct {
 	// HMACKey, if set, makes the signature an HMAC keyed with this shared
 	// secret (XML-DSig 6.3): SignatureAlgorithm must then be SigHMACSHA224,
 	// SigHMACSHA256, SigHMACSHA384 or SigHMACSHA512 (SigHMACSHA1 is
-	// verification-only), the
-	// key must be at least as long as the hash output (RFC 2104 section 3),
-	// the KeyProvider is not used and KeyInfo must be KeyInfoNone: the
+	// verification-only), the key must be at least as long as the hash
+	// output (RFC 2104 section 3), the KeyProvider is not used and KeyInfo must be KeyInfoNone: the
 	// verifier already holds the secret, and nothing about it travels.
 	HMACKey []byte
 

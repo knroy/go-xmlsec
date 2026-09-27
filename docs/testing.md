@@ -11,13 +11,13 @@ go test -run '^$' -fuzz '^FuzzVerify$' -fuzztime 60s ./dsig
 
 Unit tests touch no network and no filesystem outside the repository, and
 read no clock. Keys and certificates are generated per run, except the
-golden-file key.
+golden-file key and the PKCS#7 fixtures.
 
 | Layer | Where | Runs |
 |---|---|---|
 | Unit and conformance | `*_test.go` beside each package, named after the source file they test; `internal/swa` holds the SwA MIME header and content canonicalization, and `internal/xpathfilter` the XPath allow-list matching and compilation `dsig` and `xenc` share | every push, Linux, macOS and Windows, under `-race` |
 | Differential against `xmlsec1`, Apache Santuario and WSS4J | `tests/interop`, build tag `interop`, run by `tests/interop.sh` | every push, Linux |
-| Security regressions | `tests/security`: XXE, external fetches, key substitution, algorithm confusion, comment truncation, encryption downgrade, transform programs outside the allow-list and prefix rebinding, Diffie-Hellman small-subgroup and weak-group attacks, PBKDF2 iteration bounds, Basic Security Profile refusals before the private key is used, one generic decryption error | every push, all three systems; a local HTTP listener proves nothing is fetched |
+| Security regressions | `tests/security`: XXE, external fetches, key substitution, algorithm confusion, comment truncation, encryption downgrade, transform programs outside the allow-list and prefix rebinding, Diffie-Hellman small-subgroup and weak-group attacks, PBKDF2 iteration bounds, Basic Security Profile refusals before the private key is used, one generic decryption error, key descriptions and key resolvers, token reference retargeting, signature confirmation replay | every push, all three systems; a local HTTP listener proves nothing is fetched |
 | Fuzzing | `FuzzVerify`, `FuzzDecryptEncryptedKey`, `FuzzDecryptData` | nightly, one hour per target |
 | Static analysis | `staticcheck` v0.8.1, `gosec` v2.29.0, pinned | every push: both clean, no `#nosec` suppressions |
 | W3C interop vectors | `tests/w3c`, a nested module | every push, all three systems |
@@ -71,7 +71,7 @@ Named `TestConformance_<ID>_<description>` for the requirement they prove.
 | `TestSignInPlace`, `TestSignInPlaceRefusals` | in-place signing with any canonicalization, and a failed `Sign` leaving the document unchanged |
 | `TestEnvelopingSignature`, `TestObjectInDetachedSignature`, `TestOwnIDs`, `TestObjectRefusals` (`dsig/object_test.go`) | an enveloping signature (nil document) over its `ds:Object`, a `ds:SignatureProperty` and its `ds:KeyInfo`, each by the `Id` Sign gave it, verifying without `IDAttrDSig` and failing once any changes; a detached signature's own `ds:Object`; a repeated Object `Id` anywhere is `ErrAmbiguousID`; only the signature's own elements, where Sign puts them, count; malformed Objects, properties and Ids refused |
 | `TestManifest`, `TestVerifyManifestRefusals`, `TestBuildManifestRefusals` (`dsig/manifest_test.go`) | a `ds:Manifest` with `#id`, relative (through `BaseURI`), whole-document and omitted-URI references, signed through its own `Id` or its `ds:Object`; `VerifyManifest` reports its coverage, and a changed target fails the Manifest while the signature stays valid; an unsigned or foreign Manifest, and every malformed or disallowed reference, refused |
-| `TestSignHMAC`, `TestSignHMACRefusals` (`dsig/hmac_sign_test.go`) | HMAC-SHA256, 384 and 512 produced with `HMACKey`, full and truncated, verified with the same secret only; HMAC-SHA1, a short key, a `KeyInfo` and every out-of-range `HMACOutputLength` refused |
+| `TestSignHMAC`, `TestSignHMACRefusals` (`dsig/hmac_sign_test.go`) | HMAC-SHA224, 256, 384 and 512 produced with `HMACKey`, full and truncated, verified with the same secret only; HMAC-SHA1, a short key, a `KeyInfo` and every out-of-range `HMACOutputLength` refused |
 | `TestSignRefusesNonNFC`, `TestVerifyRequireNFC` (`dsig/nfc_test.go`) | `Sign` refuses a non-NFC reference or `ds:SignedInfo` with `ErrNotNFC`; `Verify` accepts one by default and refuses it with `RequireNFC` |
 | `TestCanonicalizationPrefixes`, `TestSignOmittedURI` | the SignedInfo `PrefixList` is emitted and applied (rebinding a listed prefix breaks the signature), and refused detached, inclusive or malformed; a Reference without `URI` round-trips through `ResolveOmittedURI` |
 | `TestBaseURI`, `TestEnvelopedOnReparsedOctets` | relative URIs resolved against `BaseURI` and never `xml:base`, reported in absolute form, refused without it or with a relative base; the enveloped-signature transform over a reparsed node set is `ErrMalformed` (XML Signature §6.6.4) |
@@ -237,8 +237,8 @@ Everything the tests run against, and where it comes from.
 **Keys and certificates.** Generated fresh in every run from `crypto/rand`:
 RSA 2048-bit keys, and ECDSA keys on P-256, P-384 and P-521, each with a
 self-signed X.509 certificate. Tests that write PEM files for the reference
-tools write them to a per-test temporary directory. One exception:
-`wss/testdata/golden-key.pem`, a test-only RSA key and self-signed
+tools write them to a per-test temporary directory. Exceptions: the PKCS#7
+fixtures below, and `wss/testdata/golden-key.pem`, a test-only RSA key and self-signed
 certificate committed so that golden signatures are reproducible. It
 protects nothing.
 
@@ -272,7 +272,10 @@ local file through a `ResourceResolver`, `pkcs7` (the JDK's PKCS#7 codec:
 read one token, write another), `verify-hmac` (an HMAC keyed with a raw
 secret file), `sign-enveloping` (a signature as the document element over a
 `ds:Object` and a `ds:SignatureProperty`) and `sign-manifest` (a signature
-over a `ds:Manifest` in a `ds:Object`); `--id-attr NAME` registers extra ID
+over a `ds:Manifest` in a `ds:Object`), and, for the tests above,
+`sign-transform`, `verify-insecure`, `sign-alg`, `sign-keyinfo`,
+`sign-retrieval`, `verify-keyinfo`, `encrypt-legacy`, `decrypt-octets-kw`,
+`wss4j-sign-str` and `wss4j-confirm`; `--id-attr NAME` registers extra ID
 attributes.
 
 **PKCS#7 fixtures.** `wss/testdata/pkcs7/openssl.p7b` and
@@ -303,12 +306,12 @@ HMAC-SHA224 (key "testkey", from the vectors' README), each an enveloping
 signature over a `ds:Object` (identified with `IDAttrDSig`). A vector whose
 algorithms are outside the default sets names them in the manifest
 (`allowed_signature`, `allowed_digest`), and is first checked to be refused
-without them. The other 17 are refused, each for a documented reason: 6
+without them. The other 17 are refused, each for a documented reason: 7
 carry 1024-bit RSA keys, below the 2048-bit minimum (one of them behind a
 `KeyInfoReference`, which is followed); 9 use the legacy RFC 4050
 `ECDSAKeyValue` form; one gives the key only as an `X509Digest`, whose
-certificate the vectors do not publish for `ResolveX509`. None references an external
-URI, so none depends on `ResolveURI`.
+certificate the vectors do not publish for `ResolveX509`. None references an
+external URI, so none depends on `ResolveURI`.
 
 **W3C XML Encryption 1.1 interop vectors.** `tests/w3c/testdata/xmlenc11`, the
 2012 Oracle vectors under the same license, with their keys (the `.p12` files
