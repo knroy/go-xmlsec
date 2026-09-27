@@ -7,18 +7,37 @@ release is cut.
 
 ## Unreleased
 
-Every RECOMMENDED and OPTIONAL feature of the implemented specifications that
-v1.0.0 left out, each an opt-in: nothing a v1.0.0 caller accepts or produces
-changes.
+Every requirement of the implemented specifications that v1.0.0 left out,
+found by a clause-by-clause audit of XML Signature 1.1, XML Encryption 1.1,
+SOAP Message Security 1.1.1, the X.509 Token and SwA profiles and BSP 1.1.
+Every new feature is an opt-in; the few changes to what a v1.0.0 caller sees
+are listed under Changed.
 
 ### Added
 
 | Change | What it does | Commit |
 |---|---|---|
 | XPath, XPath Filter 2.0 and XSLT transforms as opt-ins | `dsig.Sign` produces them from `TransformSpec.XPath`, `XPathNamespaces`, `XPathFilters` and `Stylesheet`. `dsig.Verify` evaluates them only for programs in `VerifyOptions.AllowedXPathExpressions` or `AllowedXSLTStylesheets` (exact text, prefix bindings checked, compiled from the allow-list; stylesheets matched under Exclusive C14N), refusing anything else with `ErrTransformRefused` before any cryptographic work. `here()` supported; XSLT sandboxed with no resolvers and bounded output; `Coverage` drops any target a filter partly removed, and XSLT output covers nothing. Byte-identical transform output with Santuario; `here()` verified by xmlsec1. | [`13a61dc`][13a61dc] |
-| External URI dereferencing through a caller resolver | `xmlsec.URIResolver`, passed as `dsig.SignOptions.ResolveURI`, `dsig.VerifyOptions.ResolveURI` or `xenc.DecryptOptions.ResolveURI`, supplies the octets of an absolute non-`cid:` URI in a `ds:Reference` or `xenc:CipherReference` (XML Signature §4.4.3.1); the library still never fetches. On verification it is called only after the allow-lists, `TrustKey` and the signature value pass; external references are reported in `Coverage.ExternalURIs`; errors wrap the new `xmlsec.ErrDereference`. Relative URIs stay refused. | [`57349cb`][57349cb] |
+| External URI dereferencing through a caller resolver | `xmlsec.URIResolver`, passed as `dsig.SignOptions.ResolveURI`, `dsig.VerifyOptions.ResolveURI` or `xenc.DecryptOptions.ResolveURI`, supplies the octets of an absolute non-`cid:` URI in a `ds:Reference` or `xenc:CipherReference` (XML Signature §4.4.3.1); the library still never fetches. On verification it is called only after the allow-lists, `TrustKey` and the signature value pass; external references are reported in `Coverage.ExternalURIs`; errors wrap the new `xmlsec.ErrDereference`. Relative URIs resolve only against a caller's `BaseURI` (below). | [`57349cb`][57349cb] |
 | PKCS7 binary security tokens | `xmlsec.BSTValueTypePKCS7`: `AddBinarySecurityToken` emits a DER certs-only PKCS#7 SignedData; `ParseBinarySecurityToken`, token references and `dsig.Verify` read one strictly (SignedData v1, data content, X.509 only, at most 16 certificates; CRLs and signer infos ignored) and return the one certificate that issued none of the others, or `ErrUnsupportedKeyInfo`. Byte-identical to OpenSSL `crl2pkcs7` and the JDK's PKCS#7 encoder. | [`bec715d`][bec715d] |
 | Finite-field Diffie-Hellman and PBKDF2 (XML Encryption 1.1 §5.6.2, §5.4.2) | `xenc.DecryptAgreedKeyDH`, `DHPublicKey`, `DHPrivateKey`, `GenerateDHKey` and `EncryptOptions.RecipientDH`/`RecipientKeyName` add `dh-es` and the legacy `dh` in 2048–8192-bit groups with subgroup validation; `UnwrapEncryptedKeyPassword` and `EncryptOptions.Password`/`PBKDF2Iterations` add PBKDF2, also usable as a key agreement's KDF, with received iteration counts bounded to 1000–10,000,000 before any work. New `DecryptOptions.AllowedKeyDerivationAlgorithms` (default ConcatKDF) and `AllowedPRFAlgorithms`; none of the new algorithms is in a default set. Checked against xmlsec1 in both directions. | [`6736ffd`][6736ffd] |
+| XML Signature structures and HMAC generation | `SignOptions.Objects` (enveloping signatures, with a nil document) and `Properties` (`ds:SignatureProperties`); `SignedInfoID`, `SignatureValueID`, `KeyInfoID`, with `KeyInfo` and Objects built before digesting so a reference can sign them; a signature's own Object, KeyInfo, Manifest and SignatureProperty Ids resolve without `IDAttrDSig`; `BuildManifest` and `VerifyManifest` (`xmlsec.TypeManifest`), which refuses a Manifest the signature does not cover; `CanonicalizationPrefixes`; `Reference.OmitURI` with `OmittedURIData`; `BaseURI` on Sign and Verify for relative URIs, never `xml:base`; HMAC-SHA224/256/384/512 produced with `HMACKey` and `HMACOutputLength`; `VerifyOptions.RequireNFC`. Interop with Santuario and xmlsec1. | [`1eb3aaa`][1eb3aaa] |
+| XML Signature `KeyInfo` forms and algorithms | `ds:KeyName` (`Coverage.KeyName`, `ResolveKeyName` when alone); `X509Data` chains of up to 16 with one leaf (`Coverage.Intermediates`), `X509CRL` (`Coverage.CRLs`), `X509IssuerSerial`, `X509SKI`, `X509SubjectName` and `dsig11:X509Digest`, checked against the carried certificates under `StrictX509Data` and resolved through `ResolveX509` when no certificate is carried; same-document `RetrievalMethod`, one hop; `rawX509Certificate` and external `KeyInfoReference` through `ResolveKeyInfoURI`; DER-encoded DSA keys. Sign: `KeyName`, `Chain`, `X509Descriptors`, `KeyInfoReferenceURI`. Algorithms: SHA-224 digest, RSA-SHA224, ECDSA-SHA224 and HMAC-SHA224, outside the default sets; DSA-SHA256 and ECDSA-SHA1, verification only. | [`51d76cc`][51d76cc] |
+| XML Encryption data side | `EncryptOctets` for arbitrary octets with `Type`, `MimeType` and `Encoding`, inline or by `CipherReference`; `DecryptAndReplace`, including an `EncryptedData` that is the document element; `EncryptionProperties`; `DecryptOptions.BaseURI` for relative `CipherReference` URIs; `DecryptOptions.AllowedXPathExpressions` for XPath then base64 on a `CipherReference`, checked before `ResolveURI` and any decryption. `SetKeyInfo` and `AddDataReference` place children in schema order. | [`11aa01d`][11aa01d] |
+| XML Encryption `KeyInfo` forms | an `EncryptedKey` with a `CipherReference`; `FindEncryptedKey` on an `EncryptedKey`, `KeyReference` and `EncryptedKey.AddKeyReference`; `TypeDerivedKey`, `FindDerivedKey`, `DeriveKey` and `EncryptOptions.MasterKey`; `DecryptAgreedDataKey`, `DecryptAgreedDataKeyDH` and `EncryptOptions.DirectKeyAgreement`; `KA-Nonce` beside ECDH-ES and `dh-es` accepted and ignored; `DecryptOptions.Implied*Algorithm` for an absent `EncryptionMethod`; `xmlsec.MGF1SHA224`, opt-in on receipt. | [`bf72db6`][bf72db6] |
+| WS-Security symmetric binding and decryption | `EncryptOptions.DataKeyInfo`, `wss.NewReferenceList`, `xenc.ReferencedData`, `xenc.DecryptHeader`; `FindEncryptedKey` follows a `wsse:SecurityTokenReference` to an `EncryptedKey`; `DecryptOptions.StrictBSP` (R3209, R5622, R5623, R5602, R5424, R5426, R3228, R5629, before any key is used); `xmlsec.ErrDecryptionFailed`, wrapped by every decryption and unwrap failure; `EncryptHeader` generates an Id when `DataID` is empty; an `EncryptedKey` reference carries `wsse11:TokenType`. WSS4J interop both ways. | [`996144a`][996144a] |
+| WS-Security conformance | STR Dereference Transform (`xmlsec.TransformSTR`, `ResolveSecurityToken`, `Coverage.SignedTokens`); key identifier and issuer-serial `KeyInfo` (`SignOptions.KeyInfoElement`); `wsse:Embedded` and `wss.ReferencedToken`; `EncryptedKey` references by Id and `EncryptedKeySHA1`; `SignatureConfirmation` (`AddSignatureConfirmation`, `SignatureValues`, `CheckSignatureConfirmations`); `FindHeader`, `FindTimestamp`, `CheckUniqueIDs`, `CheckSecurityTokenReference`; `wss.FaultCode` with `xmlsec.ErrInvalidSecurityToken` and `ErrSecurityTokenUnavailable`; `VerifyOptions.StrictBSP`. Byte-identical STR transform output with WSS4J. | [`caaf44e`][caaf44e] |
+
+### Changed
+
+| Change | Why | Commit |
+|---|---|---|
+| `Sign` refuses content not in Unicode Normalization Form C with `ErrNotNFC`, whose message now reads "not in Unicode Normalization Form C" | XML Signature §8.1.3: every document a signature application generates MUST be in NFC. | [`1eb3aaa`][1eb3aaa] |
+| `Sign` refuses the base64 transform after an SwA attachment transform | SwA profile §5.4.4 and BSP R6101: attachment references MUST NOT carry base64 or transfer-encoding transforms. | [`caaf44e`][caaf44e] |
+| `wss.AssignID` returns an element's existing `xml:id` instead of adding a `wsu:Id` | SOAP Message Security §4: an element MUST NOT carry both. | [`caaf44e`][caaf44e] |
+| An enveloped-signature transform over a node set parsed from octets is `ErrMalformed` | XML Signature §6.6.4: it applies only to a node set from the signature's own document; it used to do nothing. | [`1eb3aaa`][1eb3aaa] |
+| A few refusals changed kind: an XPath transform with an expression is `ErrTransformRefused` (was `ErrMalformed`); a PBKDF2 key derivation under the default lists is `ErrAlgorithmNotAllowed` (was `ErrUnsupportedAlgorithm`) | Each now names what the caller can change: the allow-list. | [`13a61dc`][13a61dc], [`6736ffd`][6736ffd] |
+| `X509Data` descriptors beside a certificate stay ignored, as in v1.0.0; `VerifyOptions.StrictX509Data` refuses a mismatch | A real PEPPOL SMP response in the private corpus carries an `X509SubjectName` left stale by a certificate renewal, which Santuario also accepts. | [`7a6a367`][7a6a367] |
 
 ## v1.0.0 — 2026-09-26
 
@@ -111,3 +130,10 @@ First release.
 [57349cb]: https://github.com/knroy/go-xmlsec/commit/57349cb
 [bec715d]: https://github.com/knroy/go-xmlsec/commit/bec715d
 [6736ffd]: https://github.com/knroy/go-xmlsec/commit/6736ffd
+[1eb3aaa]: https://github.com/knroy/go-xmlsec/commit/1eb3aaa
+[51d76cc]: https://github.com/knroy/go-xmlsec/commit/51d76cc
+[11aa01d]: https://github.com/knroy/go-xmlsec/commit/11aa01d
+[bf72db6]: https://github.com/knroy/go-xmlsec/commit/bf72db6
+[996144a]: https://github.com/knroy/go-xmlsec/commit/996144a
+[caaf44e]: https://github.com/knroy/go-xmlsec/commit/caaf44e
+[7a6a367]: https://github.com/knroy/go-xmlsec/commit/7a6a367
