@@ -75,4 +75,15 @@ var (
 	// is refused rather than normalized: normalizing would change content
 	// that may already be signed.
 	ErrNotNFC = errors.New("xmlsec: not in Unicode Normalization Form C")
+
+	// ErrDecryptionFailed is wrapped by every failure of the decryption
+	// itself: a key unwrap whose integrity check fails, an RSA-OAEP key
+	// transport that does not decrypt, AES-GCM data whose tag does not
+	// verify, CBC data with bad padding, a session key of the wrong length
+	// for the data, and a decrypted EncryptedHeader that does not parse to
+	// one element. Each cause gives the same error, without detail, so that
+	// a receiver cannot be used as an oracle; report it as the WS-Security
+	// wsse:FailedCheck fault (SOAP Message Security 1.1.1 section 12) and
+	// never say which step failed.
+	ErrDecryptionFailed = errors.New("xmlsec: decryption failed")
 )

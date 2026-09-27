@@ -354,7 +354,7 @@ the QName as Subcode.
 | `ErrIDNotFound` while resolving a token reference | `wsse:SecurityTokenUnavailable` |
 | `ErrMalformed` from a token or token reference | `wsse:InvalidSecurityToken` |
 | other `ErrMalformed`, `ErrAmbiguousID`, `ErrIDNotFound`, `ErrUnverifiable`, `ErrLimitExceeded`, `ErrAttachmentNotFound` | `wsse:InvalidSecurity` |
-| `ErrDigestMismatch`, `ErrSignatureInvalid`, a key-unwrap or decryption failure | `wsse:FailedCheck` |
+| `ErrDigestMismatch`, `ErrSignatureInvalid`, `ErrDecryptionFailed` (every key-unwrap and decryption failure, one message whatever the cause) | `wsse:FailedCheck` |
 | `ErrUntrusted` | `wsse:FailedAuthentication` |
 | `ErrMessageExpired` | `wsse:MessageExpired` |
 
@@ -646,7 +646,7 @@ What to encrypt:
 |---|---|---|
 | `xenc.EncryptElement(doc, el, key, opts)` | an element, in place of itself | `xenc#Element` |
 | `xenc.EncryptContent(doc, el, key, opts)` | an element's content, such as the SOAP Body's | `xenc#Content` |
-| `xenc.EncryptHeader(doc, block, security, key, opts)` | a SOAP header block, as a `wsse11:EncryptedHeader` carrying the Security header's `mustUnderstand` and `actor`/`role` | `xenc#Element` |
+| `xenc.EncryptHeader(doc, block, security, key, opts)` | a SOAP header block, as a `wsse11:EncryptedHeader` carrying the Security header's `mustUnderstand` and `actor`/`role`; without `DataID` the `EncryptedData` gets a random `Id` (BSP R5624) | `xenc#Element` |
 | `xenc.EncryptAttachment(att, key, transform, opts)` | a MIME part, by `CipherReference` | the SwA Type |
 | `xenc.EncryptOctets(octets, key, opts)` | arbitrary octets, inline or by `CipherReference` | `opts.Type`, or none |
 
@@ -713,7 +713,7 @@ Key agreement and key wrap:
 Receiving:
 
 ```go
-edKey, err := xenc.FindEncryptedKey(edElement) // inline, RetrievalMethod, KeyName, or ReferenceList
+edKey, err := xenc.FindEncryptedKey(edElement) // inline, RetrievalMethod, KeyName, SecurityTokenReference, or ReferenceList
 allow := xenc.DecryptOptions{ // empty lists mean the secure defaults
     AllowedDataAlgorithms:         []string{xmlsec.EncAES128GCM},
     AllowedKeyTransportAlgorithms: []string{xmlsec.KeyTransportRSAOAEP},
@@ -739,11 +739,74 @@ It parses the plaintext with `xmlsec.Parse` as the content of an element
 declaring the namespaces in scope at the `EncryptedData`'s parent, so an
 element without a prefix takes its parent's default namespace unless it
 carries `xmlns=""`. `Element` must decrypt to one element, and so must an
-`EncryptedData` that is the document element; anything else, or another
-`Type`, is refused.
+`EncryptedData` that is the document element. Another `Type` is refused
+before decryption; a plaintext that does not parse or has the wrong shape is
+`ErrDecryptionFailed`, like a wrong key, since with CBC telling the two apart
+is an oracle. For a `wsse11:EncryptedHeader` use `DecryptHeader` (below),
+which replaces the whole header.
 `DecryptData` also follows a same-document `CipherReference` with the base64
 transform. `EncryptionMethod` is read strictly: a child the algorithm does not
 permit, or a `KeySize` inconsistent with it, is refused.
+
+### Symmetric binding
+
+WSS4J's symmetric binding turns the references round (SOAP Message Security
+1.1.1 §7.7, §9.4.1): the `EncryptedKey` carries no `ReferenceList`; a
+standalone `ReferenceList` in the header names the `EncryptedData`, and each
+`EncryptedData` names the key in its own `ds:KeyInfo`, by a
+`SecurityTokenReference` to the `EncryptedKey`'s `Id` (BSP R5629, R5426):
+
+```go
+ek, err := xenc.GenerateEncryptedKey(opts)
+ekID, err := wss.AssignID(doc, ek.Element)         // an unqualified Id
+err = ek.SetKeyInfo(recipientSTR)                  // which private key unwraps it
+opts.DataKeyInfo, err = wss.NewSecurityTokenReference(doc, ekID,
+    "http://docs.oasis-open.org/wss/oasis-wss-soap-message-security-1.1#EncryptedKey") // with TokenType (R3069)
+list, err := wss.NewReferenceList("ED-body", "ED-header")
+err = hdr.Prepend(list)
+err = hdr.Prepend(ek.Element)                      // ahead of the list
+opts.DataID = "ED-body"
+out, err := xenc.EncryptContent(doc, body, ek.SessionKey, opts)
+// parse out, then with opts.DataID = "ED-header":
+// xenc.EncryptHeader(doc2, block, security, ek.SessionKey, opts)
+```
+
+`DataKeyInfo` is the child of the `ds:KeyInfo`, which the library wraps
+around a copy of it after the `EncryptionMethod`, for every `Encrypt`
+function; one options value serves every part. It is refused together with
+`MasterKey`, `DirectKeyAgreement` or a `Password` with no session key, which
+put their own `DerivedKey` or `AgreementMethod` in that `ds:KeyInfo`.
+
+Receiving either shape:
+
+```go
+eds, err := xenc.ReferencedData(referenceList)  // the header's list, in order
+for _, ed := range eds {
+    ekEl, err := xenc.FindEncryptedKey(ed)      // follows the SecurityTokenReference one hop
+    key, err := xenc.DecryptEncryptedKey(ekEl, decrypter, allow)
+    if ed.Parent.IsElement(xmlsec.NSWSSE11, "EncryptedHeader") {
+        out, err := xenc.DecryptHeader(doc, ed.Parent, key, allow) // the document, header restored
+    } else {
+        plaintext, err := xenc.DecryptData(ed, key, allow)
+    }
+}
+```
+
+`xenc.DecryptHeader` (§9.4.4) requires exactly one `EncryptedData` in the
+`EncryptedHeader` (R3230), decrypts it, parses the plaintext in the
+`EncryptedHeader`'s namespace context with `xmlsec.Parse` (no DOCTYPE), and
+returns the whole document, canonical, with the header block in its place;
+`doc` is not modified. A plaintext that is not exactly one element is
+`ErrDecryptionFailed`, like a wrong key. It shares `DecryptAndReplace`'s parsing.
+
+`DecryptOptions.StrictBSP` checks what the Basic Security Profile says about
+the encryption elements received before any key is used: no `Type`,
+`MimeType`, `Encoding` or `Recipient` on an `EncryptedKey`; every `KeyInfo`
+exactly one `SecurityTokenReference`; no `EncryptedData` directly in the SOAP
+Header; a `KeyInfo` on every `EncryptedData` no `EncryptedKey` names.
+Refusals are `ErrMalformed`, in every Decrypt, Unwrap and Derive function. It refuses key agreement, PBKDF2 and derived keys, whose
+`KeyInfo` the profile does not allow, and leaves algorithms to the
+allow-lists.
 
 ### Finite-field Diffie-Hellman and passwords
 

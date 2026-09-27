@@ -176,6 +176,9 @@ func mgfHash(uri string) (crypto.Hash, bool) {
 // obtained, and a failure to obtain it reported, before any RSA operation,
 // so the countermeasure above is unchanged.
 func DecryptEncryptedKeyPKCS1v15(el, ed *xdm.Node, dec crypto.Decrypter, opts DecryptOptions) ([]byte, error) {
+	if err := strictKey(el, opts); err != nil {
+		return nil, err
+	}
 	if el == nil || !el.IsElement(xmlsec.NSXEnc, "EncryptedKey") {
 		return nil, malformed("not an xenc:EncryptedKey")
 	}

@@ -78,6 +78,7 @@ public final class Harness {
                 case "wss4j-process" -> wss4jProcess(a[1], a[2], a[3], a[4]);
                 case "wss4j-sign-attachments" -> wss4jSignAttachments(a[1], a[2], a[3], a[4], a[5], new Parts(a, 6));
                 case "wss4j-encrypt-attachments" -> wss4jEncryptAttachments(a[1], a[2], a[3], a[4], a[5], new Parts(a, 6));
+                case "wss4j-encrypt-symmetric" -> wss4jEncryptSymmetric(a[1], a[2], a[3], a[4]);
                 case "sign-external" -> signExternal(a[1], a[2], a[3], a[4], a[5], a[6], a.length > 7 ? a[7] : "");
                 case "verify-external" -> verifyExternal(a[1], a[2], a[3], a[4]);
                 case "pkcs7" -> pkcs7(a[1], a[2], java.util.Arrays.copyOfRange(a, 3, a.length));
@@ -723,6 +724,54 @@ public final class Harness {
         for (org.apache.wss4j.common.ext.Attachment r : parts.results) {
             Files.write(Path.of(outDir, r.getId()), Parts.serialize(r));
         }
+    }
+
+    /**
+     * wss4j-encrypt-symmetric soap.xml cert.pem header out.xml: WSS4J's
+     * symmetric-binding shape. An EncryptedKey (RSA-OAEP, XML Encryption 1.1,
+     * SHA-256 digest and MGF, the recipient by issuer and serial) with no
+     * ReferenceList, ahead of a header ReferenceList; the Body content, and
+     * the header block named by header ("{ns}local", or "-" for none) as an
+     * EncryptedHeader, encrypted with AES-128-GCM under its key, each
+     * EncryptedData naming the EncryptedKey by a SecurityTokenReference.
+     */
+    static void wss4jEncryptSymmetric(String soapPath, String certPath, String header, String out) throws Exception {
+        org.apache.wss4j.dom.engine.WSSConfig.init();
+        Document doc = parse(soapPath);
+        java.security.KeyStore ks = java.security.KeyStore.getInstance("PKCS12");
+        ks.load(null, null);
+        ks.setCertificateEntry("recipient", cert(certPath));
+        org.apache.wss4j.common.crypto.Merlin crypto = new org.apache.wss4j.common.crypto.Merlin();
+        crypto.setKeyStore(ks);
+
+        org.apache.wss4j.dom.message.WSSecHeader hdr = new org.apache.wss4j.dom.message.WSSecHeader(doc);
+        hdr.insertSecurityHeader();
+        SecretKey sk = org.apache.wss4j.common.util.KeyUtils.getKeyGenerator(org.apache.wss4j.dom.WSConstants.AES_128_GCM).generateKey();
+
+        org.apache.wss4j.dom.message.WSSecEncryptedKey ek = new org.apache.wss4j.dom.message.WSSecEncryptedKey(hdr);
+        ek.setUserInfo("recipient");
+        ek.setKeyIdentifierType(org.apache.wss4j.dom.WSConstants.ISSUER_SERIAL);
+        ek.setKeyEncAlgo(org.apache.wss4j.dom.WSConstants.KEYTRANSPORT_RSAOAEP_XENC11);
+        ek.setMGFAlgorithm(org.apache.wss4j.dom.WSConstants.MGF_SHA256);
+        ek.setDigestAlgorithm(SHA256);
+        ek.prepare(crypto, sk);
+
+        org.apache.wss4j.dom.message.WSSecEncrypt enc = new org.apache.wss4j.dom.message.WSSecEncrypt(hdr);
+        enc.setEncryptSymmKey(false);
+        enc.setEncKeyId(ek.getId());
+        enc.setCustomReferenceValue(org.apache.wss4j.dom.WSConstants.WSS_ENC_KEY_VALUE_TYPE);
+        enc.setSymmetricEncAlgorithm(org.apache.wss4j.dom.WSConstants.AES_128_GCM);
+        String soapNS = doc.getDocumentElement().getNamespaceURI();
+        enc.getParts().add(new org.apache.wss4j.common.WSEncryptionPart("Body", soapNS, "Content"));
+        if (!header.equals("-")) {
+            int close = header.indexOf('}');
+            enc.getParts().add(new org.apache.wss4j.common.WSEncryptionPart(
+                header.substring(close + 1), header.substring(1, close), "Header"));
+        }
+        enc.build(crypto, sk); // prepends the ReferenceList
+        ek.prependToHeader();  // ahead of it
+        doc.normalizeDocument(); // WSS4J leaves prefixes undeclared; this declares them
+        write(doc, out);
     }
 
     /**

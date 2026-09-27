@@ -32,8 +32,12 @@ func newSTR() *xdm.Node {
 // requires on the reference (R3059, R3058). Empty means the ValueType of the
 // token in doc bearing tokenID; a token that is not there, or has none, is
 // an error. A reference to an X509PKIPathv1 or PKCS7 token also carries the
-// wsse11:TokenType BSP requires (R5215, R5212). An X509v3 reference does
-// not: neither SOAP Message Security nor BSP asks for it there.
+// wsse11:TokenType BSP requires (R5215, R5212), and so does a reference to
+// an xenc:EncryptedKey by its Id, with valueType
+// "http://docs.oasis-open.org/wss/oasis-wss-soap-message-security-1.1#EncryptedKey"
+// (SOAP Message Security 1.1.1 section 7.7, R3069): the symmetric binding's
+// xenc.EncryptOptions.DataKeyInfo. An X509v3 reference does not: neither
+// SOAP Message Security nor BSP asks for it there.
 //
 // The element is detached; place it where it is used.
 func NewSecurityTokenReference(doc *xdm.Node, tokenID, valueType string) (*xdm.Node, error) {
@@ -50,7 +54,7 @@ func NewSecurityTokenReference(doc *xdm.Node, tokenID, valueType string) (*xdm.N
 		}
 	}
 	str := newSTR()
-	if valueType == xmlsec.BSTValueTypeX509PKIPath || valueType == xmlsec.BSTValueTypePKCS7 {
+	if valueType == xmlsec.BSTValueTypeX509PKIPath || valueType == xmlsec.BSTValueTypePKCS7 || valueType == valueTypeEncryptedKey {
 		str.AddNamespace("wsse11", xmlsec.NSWSSE11)
 		xmltree.SetAttr(str, "wsse11", xmlsec.NSWSSE11, "TokenType", valueType)
 	}

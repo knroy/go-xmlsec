@@ -73,14 +73,14 @@ func TestDecryptAndReplaceRefused(t *testing.T) {
 		doc  string
 		want error
 	}{
-		"two elements":            {`<r>` + ed(xenc.TypeElement, `<a/><b/>`) + `</r>`, xmlsec.ErrMalformed},
-		"text for an element":     {`<r>` + ed(xenc.TypeElement, `text`) + `</r>`, xmlsec.ErrMalformed},
-		"nothing for an element":  {`<r>` + ed(xenc.TypeElement, ``) + `</r>`, xmlsec.ErrMalformed},
-		"root content not single": {ed(xenc.TypeContent, `t<a/>`), xmlsec.ErrMalformed},
-		"not well-formed":         {`<r>` + ed(xenc.TypeContent, `<a>`) + `</r>`, xmlsec.ErrMalformed},
-		"closes the wrapper":      {`<r>` + ed(xenc.TypeContent, `</w><w>`) + `</r>`, xmlsec.ErrMalformed},
-		"DOCTYPE":                 {`<r>` + ed(xenc.TypeElement, `<!DOCTYPE a><a/>`) + `</r>`, xmlsec.ErrMalformed},
-		"undeclared prefix":       {`<r>` + ed(xenc.TypeElement, `<q:a/>`) + `</r>`, xmlsec.ErrMalformed},
+		"two elements":            {`<r>` + ed(xenc.TypeElement, `<a/><b/>`) + `</r>`, xmlsec.ErrDecryptionFailed},
+		"text for an element":     {`<r>` + ed(xenc.TypeElement, `text`) + `</r>`, xmlsec.ErrDecryptionFailed},
+		"nothing for an element":  {`<r>` + ed(xenc.TypeElement, ``) + `</r>`, xmlsec.ErrDecryptionFailed},
+		"root content not single": {ed(xenc.TypeContent, `t<a/>`), xmlsec.ErrDecryptionFailed},
+		"not well-formed":         {`<r>` + ed(xenc.TypeContent, `<a>`) + `</r>`, xmlsec.ErrDecryptionFailed},
+		"closes the wrapper":      {`<r>` + ed(xenc.TypeContent, `</w><w>`) + `</r>`, xmlsec.ErrDecryptionFailed},
+		"DOCTYPE":                 {`<r>` + ed(xenc.TypeElement, `<!DOCTYPE a><a/>`) + `</r>`, xmlsec.ErrDecryptionFailed},
+		"undeclared prefix":       {`<r>` + ed(xenc.TypeElement, `<q:a/>`) + `</r>`, xmlsec.ErrDecryptionFailed},
 		"octets Type":             {`<r>` + ed("urn:octets", `<a/>`) + `</r>`, xmlsec.ErrUnsupportedAlgorithm},
 		"no Type":                 {`<r>` + ed("", `<a/>`) + `</r>`, xmlsec.ErrUnsupportedAlgorithm},
 		"not allowed":             {`<r>` + covED(`Type="`+xenc.TypeElement+`"`, covEM(xmlsec.EncAES128CBC)) + `</r>`, xmlsec.ErrAlgorithmNotAllowed},

@@ -39,6 +39,11 @@
 // default set: every secure algorithm this package implements. A list can
 // never enable an algorithm this package does not implement.
 //
+// Every failure of the decryption itself, whatever its cause, wraps
+// xmlsec.ErrDecryptionFailed with a fixed message, so that a receiver is
+// no oracle; DecryptOptions.StrictBSP adds the WS-I Basic Security
+// Profile's structural checks, also before any cryptographic work.
+//
 // # Legacy algorithms, decryption only
 //
 // The legacy algorithms XML Encryption 1.1 still requires are implemented
@@ -225,6 +230,23 @@ type EncryptOptions struct {
 	// EncryptedKey (section 5.6). A receiver calls DecryptAgreedDataKey or
 	// DecryptAgreedDataKeyDH.
 	DirectKeyAgreement bool
+
+	// DataKeyInfo, if set, is placed in a ds:KeyInfo of each
+	// xenc:EncryptedData produced, after its EncryptionMethod, to name the
+	// key that decrypts it. It is the ds:KeyInfo's one child, not the
+	// ds:KeyInfo itself: a detached element such as a
+	// wsse:SecurityTokenReference with a wsse:Reference to the
+	// xenc:EncryptedKey's Id, as WS-Security's symmetric binding writes it
+	// (SOAP Message Security 1.1.1 sections 7.7 and 9.4.1). The Basic
+	// Security Profile requires one on every EncryptedData that no
+	// EncryptedKey's ReferenceList names (R5629), holding exactly one
+	// SecurityTokenReference (R5424, R5426). It is copied, so the same
+	// options can encrypt several parts. It cannot be combined with a key
+	// the EncryptedData's own ds:KeyInfo conveys (MasterKey,
+	// DirectKeyAgreement, or Password with no session key): that is
+	// refused, since one ds:KeyInfo naming the key two ways is ambiguous
+	// and BSP allows only the reference.
+	DataKeyInfo *xdm.Node
 }
 
 // keySizes maps each data algorithm to its AES key length.
@@ -328,6 +350,35 @@ type DecryptOptions struct {
 	// passes the same allow-list an explicit one would. Empty, a missing
 	// EncryptionMethod is xmlsec.ErrMalformed.
 	ImpliedDataAlgorithm, ImpliedKeyWrapAlgorithm, ImpliedKeyTransportAlgorithm string
+
+	// StrictBSP enforces the WS-I Basic Security Profile 1.1 rules on the
+	// shape of what is decrypted, before any cryptographic work, refusing
+	// with xmlsec.ErrMalformed:
+	//
+	//   - an xenc:EncryptedKey with a Type, MimeType, Encoding or Recipient
+	//     attribute (R3209, R5622, R5623, R5602);
+	//   - a ds:KeyInfo of an EncryptedKey or EncryptedData that does not
+	//     hold exactly one wsse:SecurityTokenReference (R5424, R5426), which
+	//     refuses key agreement and PBKDF2, whose ds:KeyInfo holds an
+	//     xenc:AgreementMethod or xenc11:DerivedKey;
+	//   - an xenc:EncryptedData that is a child of a SOAP Header (R3228), or
+	//     that has no ds:KeyInfo and is not named by the ReferenceList of
+	//     exactly one EncryptedKey in its document (R5629).
+	//
+	// Every Decrypt, Unwrap and Derive function applies them to the element
+	// it is given: the EncryptedKey rules to an EncryptedKey (DeriveKey's
+	// target included), the EncryptedData rules to an EncryptedData
+	// (DecryptData, DecryptAttachment, DecryptAgreedDataKey,
+	// DecryptAgreedDataKeyDH, DeriveKey's target, and through DecryptData,
+	// DecryptAndReplace and DecryptHeader). So under StrictBSP a key agreed
+	// or derived directly for an EncryptedData is refused as well.
+	//
+	// An EncryptionMethod on both (R5601, R5603) is required always, unless
+	// an Implied*Algorithm supplies it. The
+	// profile's algorithm lists (R5620, R5621, R5625, R5626), which name
+	// only CBC, 3DES, RSA v1.5 and rsa-oaep-mgf1p, are not enforced: the
+	// allow-lists decide algorithms, and those are decryption-only opt-ins.
+	StrictBSP bool
 }
 
 // The default allow-lists, used when a caller passes an empty one.
@@ -342,7 +393,20 @@ var (
 	defaultDigest       = []string{xmlsec.DigestSHA256, xmlsec.DigestSHA384, xmlsec.DigestSHA384XMLEnc, xmlsec.DigestSHA512}
 )
 
-var errDecrypt = errors.New("xenc: decryption failed")
+// failure is a decryption failure: its message carries no detail, and it
+// wraps xmlsec.ErrDecryptionFailed.
+type failure string
+
+func (f failure) Error() string { return string(f) }
+
+func (failure) Unwrap() error { return xmlsec.ErrDecryptionFailed }
+
+// errDecrypt is every data decryption failure, errUnwrap every key unwrap
+// failure.
+var (
+	errDecrypt error = failure("xenc: decryption failed")
+	errUnwrap  error = failure("xenc: key unwrap failed")
+)
 
 func malformed(format string, args ...any) error {
 	return fmt.Errorf("%w: "+format, append([]any{xmlsec.ErrMalformed}, args...)...)
@@ -418,6 +482,13 @@ func newEncryptedData(typ string, opts EncryptOptions) (*xdm.Node, error) {
 	encryptionMethod(ed, opts.DataAlgorithm)
 	if err := dataAttrs(ed, typ, opts); err != nil {
 		return nil, err
+	}
+	if k := opts.DataKeyInfo; k != nil {
+		if k.Kind != xdm.KindElement || k.Parent != nil || k.IsElement(xmlsec.NSDSig, "KeyInfo") {
+			return nil, errors.New("xenc: DataKeyInfo must be a detached element to go inside ds:KeyInfo")
+		}
+		nsElement(ed, "ds", xmlsec.NSDSig, "KeyInfo").AppendChild(xmltree.Clone(k))
+		place(ed)
 	}
 	return ed, nil
 }

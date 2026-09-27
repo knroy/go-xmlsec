@@ -326,6 +326,9 @@ func concatKDFParams(kdm *xdm.Node, size int, opts DecryptOptions) (func([]byte)
 // For finite-field Diffie-Hellman use DecryptAgreedKeyDH, and for an
 // AgreementMethod directly under an EncryptedData DecryptAgreedDataKey.
 func DecryptAgreedKey(el *xdm.Node, priv *ecdh.PrivateKey, opts DecryptOptions) ([]byte, error) {
+	if err := strictKey(el, opts); err != nil {
+		return nil, err
+	}
 	a, kek, err := agreedECDH(el, false, priv, opts)
 	if err != nil {
 		return nil, err
@@ -340,6 +343,9 @@ func DecryptAgreedKey(el *xdm.Node, priv *ecdh.PrivateKey, opts DecryptOptions) 
 // against opts.AllowedDataAlgorithms first. Everything else is as for
 // DecryptAgreedKey. Decrypt ed with the result by DecryptData.
 func DecryptAgreedDataKey(ed *xdm.Node, priv *ecdh.PrivateKey, opts DecryptOptions) ([]byte, error) {
+	if err := strictData(ed, opts); err != nil {
+		return nil, err
+	}
 	_, key, err := agreedECDH(ed, true, priv, opts)
 	return key, err
 }

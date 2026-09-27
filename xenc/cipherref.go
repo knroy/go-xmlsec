@@ -141,6 +141,9 @@ func contentType(att *xmlsec.Attachment) string {
 //     part's headers of the same names. A decrypted header the profile does
 //     not list, or one present twice, is refused.
 func DecryptAttachment(el *xdm.Node, ciphertext []byte, sessionKey []byte, opts DecryptOptions) (*xmlsec.Attachment, error) {
+	if err := strictData(el, opts); err != nil {
+		return nil, err
+	}
 	alg, err := dataAlgorithm(el, opts)
 	if err != nil {
 		return nil, err

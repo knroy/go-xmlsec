@@ -15,8 +15,6 @@ import (
 // kwIV is the RFC 3394 default initial value.
 var kwIV = [8]byte{0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6}
 
-var errUnwrap = errors.New("xenc: key unwrap failed")
-
 // kwCipher returns the AES block cipher for a KEK of alg's size.
 func kwCipher(alg string, kek []byte) (cipher.Block, error) {
 	b, err := aes.NewCipher(kek)
@@ -182,6 +180,9 @@ func unwrap(el *xdm.Node, alg string, kek []byte, opts DecryptOptions) ([]byte, 
 // xenc:CipherReference, resolved as DecryptData resolves one, through
 // opts.ResolveURI for an external URI, after the algorithm is accepted.
 func UnwrapEncryptedKey(el *xdm.Node, kek []byte, opts DecryptOptions) ([]byte, error) {
+	if err := strictKey(el, opts); err != nil {
+		return nil, err
+	}
 	alg, err := wrapMethod(el, opts)
 	if err != nil {
 		return nil, err

@@ -95,3 +95,19 @@ func AttrValue(e *xdm.Node, uri, local string) string {
 	}
 	return ""
 }
+
+// Clone returns a detached deep copy of n: its attributes, namespace
+// declarations and descendants.
+func Clone(n *xdm.Node) *xdm.Node {
+	c := &xdm.Node{Kind: n.Kind, Name: n.Name, Value: n.Value}
+	for _, a := range n.Attrs {
+		c.AddAttr(&xdm.Node{Name: a.Name, Value: a.Value})
+	}
+	for _, ns := range n.Namespaces {
+		c.AddNamespace(ns.Name.Local, ns.Value)
+	}
+	for _, k := range n.Children {
+		c.AppendChild(Clone(k))
+	}
+	return c
+}

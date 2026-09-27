@@ -24,11 +24,11 @@ import (
 // writes it, stays out of it. For Type Element the plaintext must be one
 // element; for Type Content its nodes, of any kind, take ed's place. When
 // ed is the document element the result must be one element either way,
-// the new document element. Anything else is xmlsec.ErrMalformed, and any
-// other Type xmlsec.ErrUnsupportedAlgorithm, refused before decryption.
-//
-// With a legacy CBC algorithm the parse happens after decryption like any
-// use of the plaintext, and a parse error is observable: see DecryptData.
+// the new document element. Anything else is xmlsec.ErrDecryptionFailed,
+// the error a wrong key gives, with no detail, as DecryptHeader reports
+// it: with a legacy CBC algorithm, telling the two apart is a padding
+// oracle. Any other Type is xmlsec.ErrUnsupportedAlgorithm, refused before
+// decryption.
 func DecryptAndReplace(doc, ed *xdm.Node, key []byte, opts DecryptOptions) ([]byte, error) {
 	if err := checkTarget(doc, ed); err != nil {
 		return nil, err
@@ -41,12 +41,14 @@ func DecryptAndReplace(doc, ed *xdm.Node, key []byte, opts DecryptOptions) ([]by
 	if err != nil {
 		return nil, err
 	}
+	// A plaintext of the wrong shape is a decryption failure like a wrong
+	// key: with CBC data, which of the two it was is a padding oracle.
 	nodes, err := parseIn(pt, ed.Parent)
 	if err != nil {
-		return nil, err
+		return nil, errDecrypt
 	}
 	if (typ == TypeElement || ed.Parent.Kind == xdm.KindDocument) && (len(nodes) != 1 || nodes[0].Kind != xdm.KindElement) {
-		return nil, malformed("the decrypted %s is not a single element", ed.Name.Local)
+		return nil, errDecrypt
 	}
 	kids := slices.Clone(ed.Parent.Children)
 	i := slices.Index(kids, ed)

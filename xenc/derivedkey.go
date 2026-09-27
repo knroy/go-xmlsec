@@ -54,6 +54,12 @@ func derivedKeyMethod(dk *xdm.Node) (*xdm.Node, error) {
 // there, with the limits UnwrapEncryptedKeyPassword documents. Pass the
 // result to DecryptData or UnwrapEncryptedKey.
 func DeriveKey(dk, target *xdm.Node, master []byte, opts DecryptOptions) ([]byte, error) {
+	if err := strictKey(target, opts); err != nil {
+		return nil, err
+	}
+	if err := strictData(target, opts); err != nil {
+		return nil, err
+	}
 	var size int
 	if target != nil && target.IsElement(xmlsec.NSXEnc, "EncryptedKey") {
 		alg, err := wrapMethod(target, opts)
@@ -106,6 +112,10 @@ func dataKey(ed *xdm.Node, sessionKey []byte, opts EncryptOptions) ([]byte, erro
 		return nil, nil
 	case n > 1:
 		return nil, errors.New("xenc: more than one of MasterKey, DirectKeyAgreement and Password")
+	case opts.DataKeyInfo != nil:
+		// The EncryptedData's ds:KeyInfo is taken: it holds what conveys
+		// this key.
+		return nil, errors.New("xenc: DataKeyInfo with a key the EncryptedData's own ds:KeyInfo conveys (MasterKey, DirectKeyAgreement or Password)")
 	}
 	if err := encryptable(opts.DataAlgorithm, opts.DigestAlgorithm); err != nil {
 		return nil, err

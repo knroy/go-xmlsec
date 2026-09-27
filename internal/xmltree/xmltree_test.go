@@ -7,6 +7,20 @@ import (
 	"github.com/knroy/go-xml/xdm"
 )
 
+func TestClone(t *testing.T) {
+	e := Element(nil, "p", "urn:p", "e")
+	e.AddNamespace("p", "urn:p")
+	SetAttr(e, "", "", "a", "1")
+	Text(Element(e, "p", "urn:p", "k"), "v")
+	c := Clone(e)
+	SetAttr(e, "", "", "a", "2")
+	e.Children[0].Children[0].Value = "w"
+	if c.Parent != nil || AttrValue(c, "", "a") != "1" || c.Attrs[0].Parent != c ||
+		c.Namespaces[0].Value != "urn:p" || c.Children[0].Parent != c || c.Children[0].StringValue() != "v" {
+		t.Fatalf("clone %+v", c)
+	}
+}
+
 func TestSetAttrAndAttrValue(t *testing.T) {
 	e := Element(nil, "p", "urn:p", "e")
 	if got := AttrValue(e, "", "a"); got != "" {

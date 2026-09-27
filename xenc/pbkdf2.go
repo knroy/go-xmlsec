@@ -166,6 +166,9 @@ func passwordKEK(ek *xdm.Node, size int, opts EncryptOptions) ([]byte, error) {
 // all before any derivation. opts.AllowedKeyWrapAlgorithms restricts the
 // key wrap as for UnwrapEncryptedKey.
 func UnwrapEncryptedKeyPassword(el *xdm.Node, password []byte, opts DecryptOptions) ([]byte, error) {
+	if err := strictKey(el, opts); err != nil {
+		return nil, err
+	}
 	alg, err := wrapMethod(el, opts)
 	if err != nil {
 		return nil, err

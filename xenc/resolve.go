@@ -34,7 +34,10 @@ var (
 //     ds:RetrievalMethod with Type TypeEncryptedKey whose URI "#id" names
 //     an xenc:EncryptedKey, or several that all name the same one; or a
 //     ds:KeyName equal to the xenc:CarriedKeyName of exactly one
-//     xenc:EncryptedKey in the document;
+//     xenc:EncryptedKey in the document; or a wsse:SecurityTokenReference
+//     holding exactly one wsse:Reference whose URI "#id" names an
+//     xenc:EncryptedKey (WS-Security's symmetric binding, SOAP Message
+//     Security 1.1.1 section 7.7);
 //   - el has no ds:KeyInfo: the one xenc:EncryptedKey in the document whose
 //     xenc:ReferenceList has an xenc:DataReference (for an EncryptedData)
 //     or xenc:KeyReference (for an EncryptedKey) to el's Id, as a
@@ -131,6 +134,8 @@ func inKeyInfo(el, ki *xdm.Node, k keyKind) (*xdm.Node, error) {
 			}
 			return false
 		})
+	case k == encryptedKeyKind && c.IsElement(xmlsec.NSWSSE, "SecurityTokenReference"):
+		return strEncryptedKey(el, c)
 	}
 	return nil, fmt.Errorf("%w: %s in the ds:KeyInfo of an xenc:%s", xmlsec.ErrUnsupportedKeyInfo, c.Name.Local, el.Name.Local)
 }

@@ -283,6 +283,9 @@ func EncryptContent(doc *xdm.Node, target *xdm.Node, sessionKey []byte, opts Enc
 // from anything that differs afterwards, such as whether the plaintext
 // parses. Only authentication bound to the key closes it: AES-GCM.
 func DecryptData(el *xdm.Node, sessionKey []byte, opts DecryptOptions) ([]byte, error) {
+	if err := strictData(el, opts); err != nil {
+		return nil, err
+	}
 	alg, err := dataAlgorithm(el, opts)
 	if err != nil {
 		return nil, err

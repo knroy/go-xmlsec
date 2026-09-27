@@ -343,6 +343,7 @@ func TestNewSecurityTokenReference(t *testing.T) {
 		{"X509v3: no TokenType", "tok", xmlsec.BSTValueTypeX509v3, xmlsec.BSTValueTypeX509v3, ""},
 		{"PKIPath read from the token (R5215)", "pki", "", xmlsec.BSTValueTypeX509PKIPath, xmlsec.BSTValueTypeX509PKIPath},
 		{"PKCS7 (R5212)", "p7", xmlsec.BSTValueTypePKCS7, xmlsec.BSTValueTypePKCS7, xmlsec.BSTValueTypePKCS7},
+		{"EncryptedKey (R3069)", "EK-1", valueTypeEncryptedKey, valueTypeEncryptedKey, valueTypeEncryptedKey},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			str, err := NewSecurityTokenReference(doc, c.id, c.valueType)

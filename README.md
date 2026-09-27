@@ -22,10 +22,14 @@ because a signature is only as correct as the canonical octets it covers.
   attachments a signature covers, the defence against XML Signature Wrapping.
 - **WS-Security**: the `wsse:Security` header in processing order, binary
   security tokens (X509v3, PKIPath and PKCS7), direct, key-identifier and issuer-serial token references,
-  `wsu:Id`, and timestamps checked on receipt.
+  `wsu:Id`, timestamps checked on receipt, and the symmetric binding: a
+  header `ReferenceList`, each `EncryptedData` naming its `EncryptedKey` by
+  a token reference; opt-in Basic Security Profile checks on what is
+  decrypted, and one generic `ErrDecryptionFailed` for the `FailedCheck`
+  fault.
 - **XML Encryption**: RSA-OAEP key transport with an explicit MGF, AES key
   wrap, ECDH-ES key agreement, and AES-GCM for elements, element content,
-  SOAP header blocks (`wsse11:EncryptedHeader`), attachments and arbitrary
+  SOAP header blocks (`wsse11:EncryptedHeader`, both ways), attachments and arbitrary
   octets; decryption in place; every `KeyInfo` form of section 3.5:
   `EncryptedKey` chains, `xenc11:DerivedKey` from a master key, and key
   agreement directly on the data; as opt-ins, finite-field Diffie-Hellman
@@ -147,7 +151,7 @@ requirement by requirement, are in [docs/security.md](docs/security.md#conforman
 | | |
 |---|---|
 | Unit and conformance tests | Linux, macOS and Windows on every commit; 100% statement coverage, enforced |
-| Interoperability | [`xmlsec1`](https://www.aleksey.com/xmlsec/) 1.3 and [Apache Santuario](https://santuario.apache.org/) 4.0.4 verify our signatures and decrypt our output, and we do the same for theirs, on every commit. [Apache WSS4J](https://ws.apache.org/wss4j/) 4.0.1 processes our WS-Security headers, with Basic Security Profile enforcement, and decrypts our encryption |
+| Interoperability | [`xmlsec1`](https://www.aleksey.com/xmlsec/) 1.3 and [Apache Santuario](https://santuario.apache.org/) 4.0.4 verify our signatures and decrypt our output, and we do the same for theirs, on every commit. [Apache WSS4J](https://ws.apache.org/wss4j/) 4.0.1 processes our WS-Security headers, with Basic Security Profile enforcement, and decrypts our encryption, symmetric binding included, and we decrypt its |
 | Byte equality | the same document signed with the same key produces a `SignatureValue` byte-identical to Santuario's, enveloped and WS-Security |
 | Static analysis | `staticcheck` and `gosec`, clean, on every commit |
 | Real-world documents | 122 real Peppol SMP responses, from 62 providers, all verify; kept in a separate corpus module |
