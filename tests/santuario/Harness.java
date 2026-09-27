@@ -81,6 +81,9 @@ public final class Harness {
                 case "sign-external" -> signExternal(a[1], a[2], a[3], a[4], a[5], a[6], a.length > 7 ? a[7] : "");
                 case "verify-external" -> verifyExternal(a[1], a[2], a[3], a[4]);
                 case "pkcs7" -> pkcs7(a[1], a[2], java.util.Arrays.copyOfRange(a, 3, a.length));
+                case "verify-hmac" -> verifyHMAC(a[1], a[2]);
+                case "sign-enveloping" -> signEnveloping(a[1], a[2], a[3]);
+                case "sign-manifest" -> signManifest(a[1], a[2], a[3], a[4]);
                 default -> throw new IllegalArgumentException("unknown command " + a[0]);
             }
         } catch (Exception e) {
@@ -635,6 +638,91 @@ public final class Harness {
             throw new IllegalStateException("signature does not verify");
         }
         System.out.println("OK");
+    }
+
+    /** verify-hmac doc.xml key.bin: checks the first ds:Signature, an HMAC, with the raw secret in key.bin. */
+    static void verifyHMAC(String docPath, String keyPath) throws Exception {
+        Document doc = parse(docPath);
+        XMLSignature sig = new XMLSignature(first(doc, Constants.SignatureSpecNS, "Signature"), "", true);
+        byte[] k = Files.readAllBytes(Path.of(keyPath));
+        if (!sig.checkSignatureValue(new javax.crypto.spec.SecretKeySpec(k, "HmacSHA256"))) {
+            throw new IllegalStateException("signature does not verify");
+        }
+        System.out.println("OK");
+    }
+
+    /**
+     * sign-enveloping key.pem cert.pem out.xml: an enveloping RSA-SHA256
+     * signature, ds:Signature Id="sig" as the document element, over
+     * ds:Object Id="obj" holding p:data and ds:SignatureProperty Id="prop",
+     * each through exclusive C14N, with the certificate in ds:X509Data.
+     */
+    static void signEnveloping(String keyPath, String certPath, String out) throws Exception {
+        DocumentBuilderFactory f = DocumentBuilderFactory.newInstance();
+        f.setNamespaceAware(true);
+        Document doc = f.newDocumentBuilder().newDocument();
+        String exc = Transforms.TRANSFORM_C14N_EXCL_OMIT_COMMENTS;
+        XMLSignature sig = new XMLSignature(doc, "", XMLSignature.ALGO_ID_SIGNATURE_RSA_SHA256, exc);
+        sig.setId("sig");
+        doc.appendChild(sig.getElement());
+
+        org.apache.xml.security.signature.ObjectContainer obj = new org.apache.xml.security.signature.ObjectContainer(doc);
+        obj.setId("obj");
+        Element data = doc.createElementNS("urn:example:p", "p:data");
+        data.setAttributeNS("http://www.w3.org/2000/xmlns/", "xmlns:p", "urn:example:p");
+        data.setTextContent("hello");
+        obj.appendChild(data);
+        sig.appendObject(obj);
+
+        org.apache.xml.security.signature.SignatureProperties props = new org.apache.xml.security.signature.SignatureProperties(doc);
+        org.apache.xml.security.signature.SignatureProperty prop = new org.apache.xml.security.signature.SignatureProperty(doc, "#sig", "prop");
+        Element time = doc.createElementNS("urn:example:t", "t:time");
+        time.setAttributeNS("http://www.w3.org/2000/xmlns/", "xmlns:t", "urn:example:t");
+        time.setTextContent("2026-09-26");
+        prop.appendChild(time);
+        props.addSignatureProperty(prop);
+        org.apache.xml.security.signature.ObjectContainer propObj = new org.apache.xml.security.signature.ObjectContainer(doc);
+        propObj.appendChild(props.getElement());
+        sig.appendObject(propObj);
+
+        for (String id : new String[] {"obj", "prop"}) {
+            Transforms t = new Transforms(doc);
+            t.addTransform(exc);
+            sig.addDocument("#" + id, t, SHA256);
+        }
+        sig.addKeyInfo(cert(certPath));
+        sig.sign(key(keyPath));
+        write(doc, out);
+    }
+
+    /**
+     * sign-manifest in.xml key.pem cert.pem out.xml: an RSA-SHA256
+     * signature appended to the document element, over ds:Manifest Id="m"
+     * (in a ds:Object) whose one reference is #a, each through exclusive
+     * C14N, with the certificate in ds:X509Data.
+     */
+    static void signManifest(String in, String keyPath, String certPath, String out) throws Exception {
+        Document doc = parse(in);
+        String exc = Transforms.TRANSFORM_C14N_EXCL_OMIT_COMMENTS;
+        XMLSignature sig = new XMLSignature(doc, "", XMLSignature.ALGO_ID_SIGNATURE_RSA_SHA256, exc);
+        doc.getDocumentElement().appendChild(sig.getElement());
+
+        org.apache.xml.security.signature.Manifest m = new org.apache.xml.security.signature.Manifest(doc);
+        m.setId("m");
+        Transforms mt = new Transforms(doc);
+        mt.addTransform(exc);
+        m.addDocument("", "#a", mt, SHA256, null, null);
+        m.generateDigestValues();
+        org.apache.xml.security.signature.ObjectContainer obj = new org.apache.xml.security.signature.ObjectContainer(doc);
+        obj.appendChild(m.getElement());
+        sig.appendObject(obj);
+
+        Transforms t = new Transforms(doc);
+        t.addTransform(exc);
+        sig.addDocument("#m", t, SHA256, null, org.apache.xml.security.signature.Reference.MANIFEST_URI);
+        sig.addKeyInfo(cert(certPath));
+        sig.sign(key(keyPath));
+        write(doc, out);
     }
 
     /** A resolver that serves exactly uri from a local file, and nothing else. */
