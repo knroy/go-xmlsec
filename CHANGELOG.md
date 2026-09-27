@@ -5,7 +5,7 @@ versioning](https://semver.org): within v1 no exported name is removed or
 changed. See [RELEASE.md](RELEASE.md) for the compatibility promise and how a
 release is cut.
 
-## Unreleased
+## v1.1.0 — 2026-09-26
 
 Every requirement of the implemented specifications that v1.0.0 left out,
 found by a clause-by-clause audit of XML Signature 1.1, XML Encryption 1.1,
