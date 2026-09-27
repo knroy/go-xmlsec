@@ -14,8 +14,10 @@ because a signature is only as correct as the canonical octets it covers.
 
 ## Features
 
-- **XML Signature**: enveloped signatures over a whole document, and detached
-  signatures over elements by ID and over MIME attachments by `cid:`.
+- **XML Signature**: enveloped signatures over a whole document, detached
+  signatures over elements by ID and over MIME attachments by `cid:`, and
+  enveloping signatures over `ds:Object`; `ds:Manifest` and
+  `ds:SignatureProperties`; HMAC-SHA2 with a shared secret.
 - **Signature coverage**: verification reports exactly which elements and
   attachments a signature covers, the defence against XML Signature Wrapping.
 - **WS-Security**: the `wsse:Security` header in processing order, binary
@@ -118,7 +120,7 @@ default produces a signature that looks valid and that no peer accepts.
 
 | Purpose | Supported |
 |---|---|
-| Signature | RSA PKCS#1 v1.5 and ECDSA, each with SHA-256, SHA-384, SHA-512 |
+| Signature | RSA PKCS#1 v1.5 and ECDSA, each with SHA-256, SHA-384, SHA-512; HMAC-SHA256, 384, 512 with a caller's shared secret (opt-in on verification) |
 | Digest | SHA-256, SHA-384, SHA-512 |
 | Canonicalization | Canonical XML 1.0 and 1.1, Exclusive Canonical XML 1.0, with or without comments, from `go-xml/c14n` |
 | Transforms | enveloped signature, base64, SwA `Attachment-Content-Signature` and `Attachment-Complete-Signature`; XPath, XPath Filter 2.0 and XSLT, verified only for allowed expressions and stylesheets |
@@ -129,13 +131,14 @@ default produces a signature that looks valid and that no peer accepts.
 | Data encryption | AES-128-GCM, AES-192-GCM, AES-256-GCM; attachments as SwA `Attachment-Content-Only` or `Attachment-Complete` |
 
 Never produced, and accepted only when a caller names each one: SHA-1,
-DSA, HMAC, `rsa-oaep-mgf1p`, `rsa-1_5`, AES-CBC, 3DES and `kw-tripledes`, which
+DSA, HMAC-SHA1, `rsa-oaep-mgf1p`, `rsa-1_5`, AES-CBC, 3DES and `kw-tripledes`, which
 the specifications require but which are weak. The XPath, XPath Filter 2.0
 and XSLT transforms are produced on request and verified only for
 expressions and stylesheets the caller allows by exact text. Refused
 outright: DOCTYPE. The library never fetches anything: a URI outside the
 document and its attachments is dereferenced only through a resolver the
-caller supplies (`ResolveURI`), and refused without one. The reasons, and how this measures against each specification
+caller supplies (`ResolveURI`), and refused without one; a relative URI
+also needs the caller's `BaseURI`, never the document's `xml:base`. The reasons, and how this measures against each specification
 requirement by requirement, are in [docs/security.md](docs/security.md#conformance).
 
 ## How it is tested

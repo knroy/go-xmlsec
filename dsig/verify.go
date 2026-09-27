@@ -58,7 +58,10 @@ type VerifyOptions struct {
 	// interoperability is outside the default set, and accepted only when
 	// named in the list: xmlsec.SigRSASHA1, SigDSASHA1 and the SigHMAC*
 	// constants here, xmlsec.DigestSHA1 for digests. They are verified, and
-	// never produced by Sign.
+	// never produced by Sign, except HMAC-SHA256, 384 and 512, which Sign
+	// produces with SignOptions.HMACKey and which are not weak: they are
+	// outside the default set because their key is a shared secret only
+	// the caller can supply.
 	AllowedSignatureAlgorithms []string
 
 	// AllowedDigestAlgorithms restricts ds:DigestMethod values. Empty means

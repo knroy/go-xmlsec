@@ -69,6 +69,12 @@ Named `TestConformance_<ID>_<description>` for the requirement they prove.
 | `TestPinnedCertificateIgnoresEmbeddedKey`, `TestAlgorithmConfusion` | an attacker's own key is refused against a pinned certificate; HMAC, SHA-1 and key-type confusion are refused |
 | `TestXPointerReferences`, `TestBase64OfNodeSet`, `TestOmittedURI`, `TestKeyInfoReference`, `TestPinnedKeyIgnoresUnsupportedKeyInfo` | the XML Signature 1.1 processing rules: XPointer forms keeping comments, base64 over a node set, the one URI-less reference, same-document `KeyInfoReference`, and a pinned key tolerating an unsupported `KeyInfo` |
 | `TestSignInPlace`, `TestSignInPlaceRefusals` | in-place signing with any canonicalization, and a failed `Sign` leaving the document unchanged |
+| `TestEnvelopingSignature`, `TestObjectInDetachedSignature`, `TestOwnIDs`, `TestObjectRefusals` (`dsig/object_test.go`) | an enveloping signature (nil document) over its `ds:Object`, a `ds:SignatureProperty` and its `ds:KeyInfo`, each by the `Id` Sign gave it, verifying without `IDAttrDSig` and failing once any changes; a detached signature's own `ds:Object`; a repeated Object `Id` anywhere is `ErrAmbiguousID`; only the signature's own elements, where Sign puts them, count; malformed Objects, properties and Ids refused |
+| `TestManifest`, `TestVerifyManifestRefusals`, `TestBuildManifestRefusals` (`dsig/manifest_test.go`) | a `ds:Manifest` with `#id`, relative (through `BaseURI`), whole-document and omitted-URI references, signed through its own `Id` or its `ds:Object`; `VerifyManifest` reports its coverage, and a changed target fails the Manifest while the signature stays valid; an unsigned or foreign Manifest, and every malformed or disallowed reference, refused |
+| `TestSignHMAC`, `TestSignHMACRefusals` (`dsig/hmac_sign_test.go`) | HMAC-SHA256, 384 and 512 produced with `HMACKey`, full and truncated, verified with the same secret only; HMAC-SHA1, a short key, a `KeyInfo` and every out-of-range `HMACOutputLength` refused |
+| `TestSignRefusesNonNFC`, `TestVerifyRequireNFC` (`dsig/nfc_test.go`) | `Sign` refuses a non-NFC reference or `ds:SignedInfo` with `ErrNotNFC`; `Verify` accepts one by default and refuses it with `RequireNFC` |
+| `TestCanonicalizationPrefixes`, `TestSignOmittedURI` | the SignedInfo `PrefixList` is emitted and applied (rebinding a listed prefix breaks the signature), and refused detached, inclusive or malformed; a Reference without `URI` round-trips through `ResolveOmittedURI` |
+| `TestBaseURI`, `TestEnvelopedOnReparsedOctets` | relative URIs resolved against `BaseURI` and never `xml:base`, reported in absolute form, refused without it or with a relative base; the enveloped-signature transform over a reparsed node set is `ErrMalformed` (XML Signature §6.6.4) |
 | `TestStrictSecurityTokenReference` | the Basic Security Profile rules on a received token reference |
 | `TestPKCS7RoundTrip`, `TestParsePKCS7Errors`, `TestAddBinarySecurityTokenPKCS7Errors`, `TestSecurityTokenReferencePKCS7` | PKCS7 tokens: the leaf found whatever the certificate order, lenient and strict resolution, signing and verifying through one; truncated, trailing, wrong content types, versions and tags, no or too many certificates, non-X.509 certificates, ambiguous leaves and key identifiers that do not match are refused; CRLs and signer infos are ignored |
 | `TestMarshalPKCS7IsDER`, `TestPKCS7OpenSSLFixtures` | the PKCS7 encoding is DER, byte-identical to OpenSSL's `crl2pkcs7` for the same certificates, and OpenSSL's output parses in either certificate order |
@@ -124,6 +130,10 @@ package, does not implement XML Encryption 1.1 `rsa-oaep`.
 | `TestPKCS7TokenWithJDK` | JDK and Santuario, both ways | a header signed with a PKCS7 token of a leaf and its CA: the JDK's PKCS#7 codec reads both certificates and Santuario verifies with the leaf; the JDK encodes the same certificates to byte-identical DER, and its token resolves to the leaf under `StrictSecurityTokenReference`. WSS4J 4.0.1 reads no PKCS7 token, so it is not the peer here |
 | `TestSantuarioXPointerReferences` | Santuario, both ways | `#xpointer(/)` and `#xpointer(id('…'))` with comments; byte-identical `SignatureValue`; a changed comment is refused |
 | `TestSantuarioVerifiesOurInPlaceInclusiveSignature` | ours → Santuario | an inclusive-canonicalization signature computed in place (`SignOptions.Parent`) |
+| `TestPeersVerifyOurEnvelopingSignature`, `TestWeVerifySantuarioEnvelopingSignature` (`tests/interop/object_test.go`) | ours → both; Santuario → ours | an enveloping signature over `ds:Object`, `ds:SignatureProperty` and (ours) `ds:KeyInfo`; a changed Object is refused. We verify Santuario's with no ID attribute named |
+| `TestSantuarioVerifiesOurManifest`, `TestWeVerifySantuarioManifest` | Santuario, both ways, digest equality | Santuario verifies our signature over a `ds:Manifest` and refuses a changed Manifest; our Manifest reference digest equals Santuario's for the same input; `VerifyManifest` accepts Santuario's. Santuario follows a Manifest only through a reference ending in a node set, which `Sign` never produces (behind a canonicalization it reparses the Manifest alone and cannot resolve its `#id`), so its Manifest following is not the check |
+| `TestPeersVerifyOurCanonicalizationPrefixes` | ours → both | a `PrefixList` on `ds:CanonicalizationMethod`; rebinding the listed prefix is refused |
+| `TestSantuarioVerifiesOurHMAC` | ours → Santuario | HMAC-SHA256 with a 32-octet secret; another secret is refused |
 | `TestWeVerifySantuarioExternalReference`, `TestSantuarioVerifiesOurExternalReference` | Santuario, both ways | a reference to `http://example.invalid/…`, as raw octets and through exclusive C14N, served from a local file by a Santuario `ResourceResolver` and by our `ResolveURI`: nothing is fetched; Santuario refuses other octets |
 | `TestSantuarioTransforms` | Santuario, both ways, digest equality | the XPath transform, the absolute `not(//ancestor-or-self::x)`, which both sides digest as the empty node set, XPath Filter 2.0 intersect, subtract and union, and XSLT; equal `DigestValue`s, so byte-identical transform output; changing a dropped node verifies, changing a kept one fails, on both sides |
 | `TestXmlsec1VerifiesOurHere` | ours → xmlsec1 | `here()` in an XPath and an XPath Filter 2.0 transform. Santuario 4 has no `here()`: its JDK XPath engine reports the function unknown |
@@ -226,8 +236,11 @@ commands: `verify`, `sign-enveloped`, `sign-detached`, `encrypt`, `decrypt`,
 `encrypt-ecdh`, `encrypt-kw`, `decrypt-kw`, `wss4j-verify`, `wss4j-decrypt`,
 `wss4j-process` (both keys: decrypt, then verify), the attachment commands,
 `sign-external` and `verify-external`, which serve one external URI from a
-local file through a `ResourceResolver`, and `pkcs7` (the JDK's PKCS#7 codec:
-read one token, write another); `--id-attr NAME` registers extra ID
+local file through a `ResourceResolver`, `pkcs7` (the JDK's PKCS#7 codec:
+read one token, write another), `verify-hmac` (an HMAC keyed with a raw
+secret file), `sign-enveloping` (a signature as the document element over a
+`ds:Object` and a `ds:SignatureProperty`) and `sign-manifest` (a signature
+over a `ds:Manifest` in a `ds:Object`); `--id-attr NAME` registers extra ID
 attributes.
 
 **PKCS#7 fixtures.** `wss/testdata/pkcs7/openssl.p7b` and

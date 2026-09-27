@@ -41,8 +41,15 @@ belongs in: `Sign` then appends it there first and computes it in place,
 leaves it there, and leaves the document unchanged if it fails.
 
 `Sign` refuses RSA keys under 2048 bits (XML Signature §6.4.2), a
-`SignatureID` or `Reference.ID` that is not an XML name, and a
-`Reference.Type` that is not a URI.
+`SignatureID`, `SignedInfoID`, `SignatureValueID`, `KeyInfoID` or
+`Reference.ID` that is not an XML name, an Id emitted twice, and a
+`Reference.Type` that is not a URI. It refuses with `xmlsec.ErrNotNFC` to
+sign a same-document reference, or a `ds:SignedInfo`, whose canonical form is
+not in Unicode Normalization Form C (§8.1.3): normalize your content first.
+
+`ds:KeyInfo` and every `ds:Object` are built before any reference is
+digested, so a reference to `"#"+KeyInfoID` signs the key information as it
+is sent (§4.5 suggests this when it must not be substituted).
 
 Reference forms:
 
@@ -54,6 +61,9 @@ Reference forms:
 | `"#xpointer(/)"` | `TransformEnvelopedSignature`, then a canonicalization | as `""`, comments included |
 | `"cid:..."` | `TransformAttachmentContentSignature`, first | the attachment content, canonicalized: Exclusive C14N for XML types, CRLF line endings for other text, the octets as they are otherwise |
 | `"cid:..."` | `TransformAttachmentCompleteSignature`, first | as above, preceded by the canonical Content-Description, -Disposition, -ID, -Location and -Type headers |
+| `"#id"` of the signature's own `ds:Object`, `ds:KeyInfo`, or a `ds:Manifest`, `ds:SignatureProperties` or `ds:SignatureProperty` in its `ds:Object` | a canonicalization, last | that element; its unqualified `Id` counts for this signature's own references without `IDAttrDSig` |
+| `"http://..."` or relative | any, or none | the octets `ResolveURI` returns; a relative URI needs `BaseURI` (see External references) |
+| omitted (`OmitURI: true`) | any that accept octets | `SignOptions.OmittedURIData`; at most one Reference |
 
 Any other XPointer is refused. A canonicalization that follows octets parses
 them with `xmlsec.Parse`, and the base64 transform over an element decodes
@@ -78,6 +88,107 @@ Exclusive C14N in `AllowedCanonicalizationAlgorithms`.
 `TransformAttachmentContentOnly` and `TransformAttachmentComplete` are the
 SwA profile's `EncryptedData` Type URIs, not signature transforms. A
 `ds:Transform` naming either is refused: no WS-Security peer accepts it.
+
+### Objects and enveloping signatures
+
+`SignOptions.Objects` adds `ds:Object` elements after `ds:SignatureValue` and
+`ds:KeyInfo` (XML Signature §4.6), with optional `ID`, `MimeType` and
+`Encoding`; their `Content` nodes are copied, with the namespace bindings in
+scope where they stand. Sign builds them before digesting, so a reference to
+`"#"+ID` covers one. With a nil document, `Sign` makes an enveloping
+signature: references resolve only within the signature, and you make the
+returned element a document's element.
+
+```go
+sig, err := dsig.Sign(nil, key, dsig.SignOptions{
+    SignatureAlgorithm:        xmlsec.SigRSASHA256,
+    CanonicalizationAlgorithm: string(c14n.Exclusive10),
+    KeyInfo:                   dsig.KeyInfoX509Data,
+    Objects:                   []dsig.Object{{ID: "obj", Content: payload.Children}},
+    References: []dsig.Reference{{URI: "#obj", DigestAlgorithm: xmlsec.DigestSHA256,
+        Transforms: []dsig.TransformSpec{{Algorithm: string(c14n.Exclusive10)}}}},
+})
+doc := &xdm.Node{Kind: xdm.KindDocument}
+doc.AppendChild(sig)
+out, err := c14n.Bytes(doc, c14n.Options{Algorithm: c14n.Inclusive10})
+```
+
+`Verify` resolves `#obj` to the signature's own `ds:Object` without
+`IDAttrDSig`, and still refuses the reference as ambiguous if any other
+counted ID attribute in the document carries the same value.
+
+`SignOptions.Properties` adds one `ds:SignatureProperties`, in a `ds:Object`
+after the others (§5.2). Each `dsig.SignatureProperty` has an optional `ID`,
+a `Target` (empty means `"#"+SignatureID`, which must then be set) and
+`Content` holding at least one element in a namespace other than XML
+Signature's. It is signed only through a reference to `"#"+ID`:
+
+```go
+Properties: []dsig.SignatureProperty{{ID: "time", Content: timestamp}},
+References: []dsig.Reference{{URI: "#time", ...}},
+SignatureID: "sig",
+```
+
+### Manifests
+
+A `ds:Manifest` (§5.1) is a list of references whose validity the
+application, not the signature, decides. `dsig.BuildManifest(doc, refs,
+opts)` digests `refs` as `Sign` would and returns the Manifest, with its
+`Id` from `opts.ManifestID`. Place it in a `ds:Object` and sign it:
+
+```go
+m, err := dsig.BuildManifest(doc, refs, dsig.SignOptions{ManifestID: "m"})
+sig, err := dsig.Sign(doc, key, dsig.SignOptions{
+    ...
+    Objects:    []dsig.Object{{Content: []*xdm.Node{m}}},
+    References: []dsig.Reference{{URI: "#m", Type: xmlsec.TypeManifest, ...}},
+})
+```
+
+On receipt, `Verify` checks the signature over the Manifest, not the
+Manifest's references. `dsig.VerifyManifest(doc, manifest, cov, opts)`
+checks those, with the same allow-lists, transform opt-ins, `MaxReferences`
+and resolvers as `Verify`, and returns a `Coverage` of what they cover. It
+refuses a Manifest that is not in `cov.SignedElements` (itself, or its
+`ds:Object`), with `ErrSignatureInvalid`: an unsigned Manifest proves nothing.
+
+```go
+cov, err := dsig.Verify(doc, sig, opts)
+mcov, err := dsig.VerifyManifest(doc, manifest, cov, opts)
+// inspect mcov exactly as cov
+```
+
+### Ids, SignedInfo prefixes and omitted URIs
+
+`SignedInfoID`, `SignatureValueID` and `KeyInfoID` put an `Id` on those
+elements (§4.3 to §4.5); `KeyInfoID` needs a `ds:KeyInfo`.
+
+`CanonicalizationPrefixes` becomes the `InclusiveNamespaces` `PrefixList` of
+`ds:CanonicalizationMethod` (§4.4.1), with `""` for the default namespace,
+and `ds:SignedInfo` is canonicalized with it. It needs an exclusive
+algorithm and `Parent`: which listed prefixes are rendered depends on where
+the signature stands.
+
+`Reference.OmitURI` emits a reference without a `URI` attribute (§4.4.3.1),
+over `SignOptions.OmittedURIData`; the verifier supplies the same octets with
+`VerifyOptions.ResolveOmittedURI`. At most one reference may omit its URI.
+
+### HMAC
+
+With `SignOptions.HMACKey`, `Sign` produces an HMAC (§6.3):
+`SigHMACSHA256`, `SigHMACSHA384` or `SigHMACSHA512`, keyed with your shared
+secret, which must be at least as long as the hash output. The `KeyProvider`
+is not used, and `KeyInfo` must be `KeyInfoNone`: nothing about the secret
+travels. `HMACOutputLength` truncates the MAC to that many bits, a multiple
+of 8 no smaller than half the hash and 80 bits (CVE-2009-0217); zero means
+full length. `SigHMACSHA1` stays verification-only.
+
+```go
+signed, err := dsig.SignEnveloped(doc, xmlsec.KeyProvider{}, dsig.SignOptions{
+    SignatureAlgorithm: xmlsec.SigHMACSHA256, HMACKey: secret, ...})
+cov, err := dsig.Verify(d, sig, dsig.VerifyOptions{HMACKey: secret,
+    AllowedSignatureAlgorithms: []string{xmlsec.SigHMACSHA256}})
+```
 
 ### XPath, XPath Filter 2.0 and XSLT transforms
 
@@ -307,8 +418,10 @@ default set: every secure algorithm this library implements. An algorithm
 kept only for legacy interoperability is outside that set and is accepted
 only when named explicitly.
 
-Legacy algorithms verify only when listed: `SigRSASHA1`, `SigDSASHA1`, the
-`SigHMAC*` constants and `DigestSHA1`. `Sign` never produces them.
+Legacy algorithms verify only when listed: `SigRSASHA1`, `SigDSASHA1`,
+`SigHMACSHA1` and `DigestSHA1`. `Sign` never produces them. The HMAC-SHA2
+constants are also outside the default set, and verify only when listed and
+keyed with `HMACKey`; `Sign` produces them with `SignOptions.HMACKey`.
 
 To pin a sender known by a raw key rather than a certificate, set
 `VerifyOptions.PublicKey` instead of `Certificate`; setting both is an
@@ -330,6 +443,8 @@ More options:
 | `AllowedXPathExpressions []dsig.XPathExpression`, `AllowedXSLTStylesheets []*xdm.Node` | Opt in to the XPath, XPath Filter 2.0 and XSLT transforms for exactly these programs; see [XPath, XPath Filter 2.0 and XSLT transforms](#xpath-xpath-filter-20-and-xslt-transforms). Empty refuses them. |
 | `ResolveOmittedURI func() ([]byte, error)` | Supplies the data of the one `ds:Reference` without a URI that XML Signature §4.4.3.1 allows; `Coverage.OmittedURISigned` reports that it was covered. Without it, such a reference is refused. |
 | `ResolveURI xmlsec.URIResolver` | Supplies the octets of a reference to an absolute URI such as `http:`; see External references below. Without it, such a reference is refused. |
+| `BaseURI string` | The absolute URI a relative reference URI is resolved against before `ResolveURI` sees it; never taken from the document. Without it, a relative URI is refused. |
+| `RequireNFC` | Refuse with `ErrNotNFC` a `ds:SignedInfo`, or the canonical octets of a same-document reference, that is not in Unicode Normalization Form C. Off by default. |
 
 Then check `Coverage`, every time:
 
@@ -364,8 +479,11 @@ A `ds:Reference` to an absolute URI other than `cid:`, such as
 `VerifyOptions.ResolveURI`. The library never fetches anything itself. The
 octets you return go through the reference's transforms as an octet stream:
 with none they are digested as they are, and a canonicalization parses them
-with `xmlsec.Parse` first, under the same limits. A relative URI is always
-refused, since there is no base URI to resolve it against.
+with `xmlsec.Parse` first, under the same limits. A relative URI, such as
+`data.xml`, is refused unless you set `BaseURI` on `SignOptions` and
+`VerifyOptions`: it is then resolved against that (RFC 3986), your resolver
+gets the absolute URI, and `Coverage.ExternalURIs` reports it. The base is
+always yours, never `xml:base` or anything else the signer wrote.
 
 ```go
 allowed := map[string]bool{"http://example.com/schema.xml": true}
