@@ -175,9 +175,23 @@ type VerifyOptions struct {
 	// untrusted or wrong key never makes it fetch. It is still called with
 	// URIs the signer chose: see xmlsec.URIResolver for what a safe one
 	// does. An error it returns is wrapped with xmlsec.ErrDereference. When
-	// nil, such a reference is refused, and a relative URI is always
-	// refused.
+	// nil, such a reference is refused, and so is a relative URI without
+	// BaseURI.
 	ResolveURI xmlsec.URIResolver
+
+	// BaseURI, if set, is the absolute URI a relative reference URI is
+	// resolved against (XML-DSig 4.4.3.1, RFC 3986) before it is given to
+	// ResolveURI; Coverage.ExternalURIs reports the resolved form. It is the
+	// caller's, and never taken from xml:base or anything else in the
+	// document, which the signer controls. Without it, a relative URI is
+	// refused.
+	BaseURI string
+
+	// RequireNFC refuses with xmlsec.ErrNotNFC a signature whose canonical
+	// ds:SignedInfo, or the canonical octets of a same-document reference,
+	// are not in Unicode Normalization Form C (XML-DSig 8.1.3), as Sign
+	// never produces. Off by default: other signers need not normalize.
+	RequireNFC bool
 }
 
 // Coverage describes exactly what a verified signature covered. A
@@ -285,10 +299,16 @@ func (c *Coverage) CoversAttachments(attachmentIDs ...string) bool {
 // the certificate or key is trusted.
 func Verify(doc *xdm.Node, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 	cov, err := verify(doc, sig, opts)
+	return cov, unverifiable(err)
+}
+
+// unverifiable wraps with xmlsec.ErrUnverifiable an error that means the
+// document has no canonical form.
+func unverifiable(err error) error {
 	if errors.Is(err, c14n.ErrRelativeNamespaceURI) || errors.Is(err, c14n.ErrXML11) {
-		err = fmt.Errorf("%w: %w", xmlsec.ErrUnverifiable, err)
+		return fmt.Errorf("%w: %w", xmlsec.ErrUnverifiable, err)
 	}
-	return cov, err
+	return err
 }
 
 func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
@@ -304,25 +324,15 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 	if len(opts.HMACKey) > 0 && (opts.Certificate != nil || opts.PublicKey != nil) {
 		return nil, errors.New("dsig: VerifyOptions.HMACKey is set with Certificate or PublicKey")
 	}
-	maxRefs := opts.MaxReferences
-	if maxRefs <= 0 {
-		maxRefs = DefaultMaxReferences
+	if err := checkBaseURI(opts.BaseURI); err != nil {
+		return nil, err
 	}
-	p, err := parseSignature(sig, maxRefs)
+	p, err := parseSignature(sig, maxReferences(opts))
 	if err != nil {
 		return nil, err
 	}
-	omitted := 0
-	for _, r := range p.refs {
-		if r.omitted {
-			omitted++
-		}
-	}
-	switch {
-	case omitted > 1:
-		return nil, malformed("%d ds:Reference elements without URI; at most one is allowed", omitted)
-	case omitted == 1 && opts.ResolveOmittedURI == nil:
-		return nil, malformed("ds:Reference without URI, and no VerifyOptions.ResolveOmittedURI")
+	if err := checkOmitted(p.refs, opts); err != nil {
+		return nil, err
 	}
 
 	// Every algorithm is checked before any cryptographic work.
@@ -352,46 +362,8 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 	if err := allowed("canonicalization", string(p.c14n.Algorithm), opts.AllowedCanonicalizationAlgorithms, defaultC14N); err != nil {
 		return nil, err
 	}
-	for _, r := range p.refs {
-		if err := allowed("digest", r.digestAlg, opts.AllowedDigestAlgorithms, defaultDigest); err != nil {
-			return nil, err
-		}
-		if _, ok := digestHash(r.digestAlg); !ok {
-			return nil, fmt.Errorf("%w: digest %q", xmlsec.ErrUnsupportedAlgorithm, r.digestAlg)
-		}
-		for _, t := range r.transforms {
-			if isC14N(t.Algorithm) {
-				if err := allowed("canonicalization", t.Algorithm, opts.AllowedCanonicalizationAlgorithms, defaultC14N); err != nil {
-					return nil, err
-				}
-			}
-		}
-		// The SwA signature transforms canonicalize an XML attachment with
-		// Exclusive C14N (SwA profile 5.4.2), so they need it allowed.
-		for _, t := range r.transforms {
-			if t.Algorithm == xmlsec.TransformAttachmentContentSignature || t.Algorithm == xmlsec.TransformAttachmentCompleteSignature {
-				if err := allowed("attachment canonicalization", string(c14n.Exclusive10), opts.AllowedCanonicalizationAlgorithms, defaultC14N); err != nil {
-					return nil, err
-				}
-			}
-		}
-		for j := range r.transforms {
-			if isProgramTransform(r.transforms[j].Algorithm) {
-				if err := admitTransform(&r.transforms[j], opts); err != nil {
-					return nil, err
-				}
-			}
-		}
-		// The implicit Canonical XML 1.0 is subject to the allow-list like
-		// any named one.
-		if impliesC14N(!r.omitted && isSameDocument(r.uri), r.transforms) {
-			if opts.RequireExplicitCanonicalization {
-				return nil, fmt.Errorf("%w: reference %q relies on implicit canonicalization", xmlsec.ErrAlgorithmNotAllowed, r.uri)
-			}
-			if err := allowed("implicit canonicalization", string(c14n.Inclusive10), opts.AllowedCanonicalizationAlgorithms, defaultC14N); err != nil {
-				return nil, err
-			}
-		}
+	if err := admitReferences(p.refs, opts); err != nil {
+		return nil, err
 	}
 
 	// Each Reference's canonical form, for Coverage.Raw. Taken before
@@ -443,7 +415,10 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 	} else {
 		h = sigHash.New()
 	}
-	if _, err := c14n.DigestNodeSet(h, c14n.Subtree(p.signedInfo), p.c14n); err != nil {
+	if err := checkNFC(opts.RequireNFC, h, "ds:SignedInfo", func(w hash.Hash) error {
+		_, err := c14n.DigestNodeSet(w, c14n.Subtree(p.signedInfo), p.c14n)
+		return err
+	}); err != nil {
 		return nil, err
 	}
 	if mac {
@@ -456,21 +431,101 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 	}
 
 	cov := &Coverage{Certificate: cert, PublicKey: pub, KeyInfoForm: form}
-	for i, r := range p.refs {
+	if err := digestReferences(cov, doc, sig, p.refs, raw, opts); err != nil {
+		return nil, err
+	}
+	return cov, nil
+}
+
+// checkOmitted applies XML-DSig 4.4.3.1 to received references: at most
+// one without a URI, and only with VerifyOptions.ResolveOmittedURI.
+func checkOmitted(refs []parsedReference, opts VerifyOptions) error {
+	omitted := 0
+	for _, r := range refs {
+		if r.omitted {
+			omitted++
+		}
+	}
+	switch {
+	case omitted > 1:
+		return malformed("%d ds:Reference elements without URI; at most one is allowed", omitted)
+	case omitted == 1 && opts.ResolveOmittedURI == nil:
+		return malformed("ds:Reference without URI, and no VerifyOptions.ResolveOmittedURI")
+	}
+	return nil
+}
+
+// admitReferences checks the algorithms and transforms of received
+// references against the allow-lists, before any cryptographic work.
+func admitReferences(refs []parsedReference, opts VerifyOptions) error {
+	for _, r := range refs {
+		if err := allowed("digest", r.digestAlg, opts.AllowedDigestAlgorithms, defaultDigest); err != nil {
+			return err
+		}
+		if _, ok := digestHash(r.digestAlg); !ok {
+			return fmt.Errorf("%w: digest %q", xmlsec.ErrUnsupportedAlgorithm, r.digestAlg)
+		}
+		for _, t := range r.transforms {
+			if isC14N(t.Algorithm) {
+				if err := allowed("canonicalization", t.Algorithm, opts.AllowedCanonicalizationAlgorithms, defaultC14N); err != nil {
+					return err
+				}
+			}
+		}
+		// The SwA signature transforms canonicalize an XML attachment with
+		// Exclusive C14N (SwA profile 5.4.2), so they need it allowed.
+		for _, t := range r.transforms {
+			if t.Algorithm == xmlsec.TransformAttachmentContentSignature || t.Algorithm == xmlsec.TransformAttachmentCompleteSignature {
+				if err := allowed("attachment canonicalization", string(c14n.Exclusive10), opts.AllowedCanonicalizationAlgorithms, defaultC14N); err != nil {
+					return err
+				}
+			}
+		}
+		for j := range r.transforms {
+			if isProgramTransform(r.transforms[j].Algorithm) {
+				if err := admitTransform(&r.transforms[j], opts); err != nil {
+					return err
+				}
+			}
+		}
+		// The implicit Canonical XML 1.0 is subject to the allow-list like
+		// any named one.
+		if impliesC14N(!r.omitted && isSameDocument(r.uri), r.transforms) {
+			if opts.RequireExplicitCanonicalization {
+				return fmt.Errorf("%w: reference %q relies on implicit canonicalization", xmlsec.ErrAlgorithmNotAllowed, r.uri)
+			}
+			if err := allowed("implicit canonicalization", string(c14n.Inclusive10), opts.AllowedCanonicalizationAlgorithms, defaultC14N); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// digestReferences digests each of refs, which admitReferences has
+// admitted, compares it with its DigestValue and records what it covered
+// in cov. sig is what the enveloped-signature transform removes, and whose
+// own Ids "#id" resolves against; raw holds each reference's canonical form.
+func digestReferences(cov *Coverage, doc, sig *xdm.Node, refs []parsedReference, raw [][]byte, opts VerifyOptions) error {
+	for i, r := range refs {
 		dh, _ := digestHash(r.digestAlg)
 		h := dh.New()
 		var got dereferenced
 		covered := true
-		if r.omitted {
-			covered, err = digestOmitted(h, r.transforms, opts.ResolveOmittedURI)
-		} else {
-			got, err = digestReference(h, doc, sig, r.uri, r.transforms, opts.Attachments, true, opts.IDAttributes, opts.ResolveURI)
-		}
+		err := checkNFC(opts.RequireNFC && !r.omitted && isSameDocument(r.uri), h, fmt.Sprintf("reference %q", r.uri), func(w hash.Hash) error {
+			var err error
+			if r.omitted {
+				covered, err = digestOmitted(w, r.transforms, opts.ResolveOmittedURI)
+			} else {
+				got, err = digestReference(w, doc, sig, absoluteURI(opts.BaseURI, r.uri), r.transforms, opts.Attachments, true, opts.IDAttributes, opts.ResolveURI)
+			}
+			return err
+		})
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if subtle.ConstantTimeCompare(h.Sum(nil), r.digest) != 1 {
-			return nil, fmt.Errorf("%w: reference %q", xmlsec.ErrDigestMismatch, r.uri)
+			return fmt.Errorf("%w: reference %q", xmlsec.ErrDigestMismatch, r.uri)
 		}
 		switch {
 		case r.omitted:
@@ -490,7 +545,15 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 			DigestValue: r.digest, Transforms: r.transforms, Raw: raw[i],
 		})
 	}
-	return cov, nil
+	return nil
+}
+
+// maxReferences is VerifyOptions.MaxReferences, or its default.
+func maxReferences(opts VerifyOptions) int {
+	if opts.MaxReferences <= 0 {
+		return DefaultMaxReferences
+	}
+	return opts.MaxReferences
 }
 
 // digestOmitted digests the data object of a Reference without a URI, as

@@ -437,7 +437,7 @@ func TestSignRefusals(t *testing.T) {
 		{"whole document without enveloped", func(o *dsig.SignOptions) {
 			o.References = ref(string(c14n.Exclusive10))
 		}, xmlsec.ErrMalformed},
-		// The legacy algorithms are verification-only.
+		// The legacy algorithms are verification-only; HMAC-SHA2 needs HMACKey.
 		{"rsa-sha1", func(o *dsig.SignOptions) { o.SignatureAlgorithm = xmlsec.SigRSASHA1 }, xmlsec.ErrUnsupportedAlgorithm},
 		{"dsa-sha1", func(o *dsig.SignOptions) { o.SignatureAlgorithm = xmlsec.SigDSASHA1 }, xmlsec.ErrUnsupportedAlgorithm},
 		{"hmac-sha1", func(o *dsig.SignOptions) { o.SignatureAlgorithm = xmlsec.SigHMACSHA1 }, xmlsec.ErrUnsupportedAlgorithm},
@@ -450,8 +450,7 @@ func TestSignRefusals(t *testing.T) {
 			o.CanonicalizationAlgorithm = string(c14n.Inclusive10)
 		}, xmlsec.ErrUnsupportedAlgorithm},
 	}
-	legacy := map[string]bool{"rsa-sha1": true, "dsa-sha1": true, "hmac-sha1": true, "hmac-sha256": true,
-		"hmac-sha384": true, "hmac-sha512": true, "sha1 digest": true}
+	legacy := map[string]bool{"rsa-sha1": true, "dsa-sha1": true, "hmac-sha1": true, "sha1 digest": true}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			opts := base

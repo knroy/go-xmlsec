@@ -69,8 +69,10 @@ var (
 
 	// ErrNotNFC is returned when an element or element content to be
 	// encrypted is not in Unicode Normalization Form C, which XML Encryption
-	// 1.1 section 4.3 requires of the plaintext. It is refused rather than
-	// normalized: normalizing would change content that may already be
-	// signed.
-	ErrNotNFC = errors.New("xmlsec: plaintext is not in Unicode Normalization Form C")
+	// 1.1 section 4.3 requires of the plaintext; when dsig.Sign is asked to
+	// sign content, or a ds:SignedInfo, that is not (XML Signature 1.1
+	// section 8.1.3); and by dsig.Verify with VerifyOptions.RequireNFC. It
+	// is refused rather than normalized: normalizing would change content
+	// that may already be signed.
+	ErrNotNFC = errors.New("xmlsec: not in Unicode Normalization Form C")
 )

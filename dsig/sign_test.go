@@ -440,3 +440,112 @@ func TestSignInPlaceRefusals(t *testing.T) {
 		t.Fatal("a failed Sign left a signature in the document")
 	}
 }
+
+// XML-DSig 4.4.1: CanonicalizationPrefixes becomes the PrefixList of
+// ds:CanonicalizationMethod and is applied to ds:SignedInfo: with "p"
+// listed, the signature depends on the in-scope but unused p binding.
+func TestCanonicalizationPrefixes(t *testing.T) {
+	key := newKey(t, rsaKey)
+	for _, prefixes := range [][]string{nil, {"p", ""}} {
+		doc := parse(t, []byte(`<r xmlns:p="urn:p"><a xml:id="a">x</a></r>`))
+		_, err := dsig.Sign(doc, key, dsig.SignOptions{
+			SignatureAlgorithm:        xmlsec.SigRSASHA256,
+			CanonicalizationAlgorithm: string(c14n.Exclusive10),
+			CanonicalizationPrefixes:  prefixes,
+			References:                []dsig.Reference{ref("#a")},
+			Parent:                    xmltree.DocumentElement(doc),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		signed := serialize(t, doc)
+		if got := strings.Contains(string(signed), `<ec:InclusiveNamespaces xmlns:ec="`+xmlsec.NSExcC14N+`" PrefixList="p #default">`); got != (prefixes != nil) {
+			t.Fatalf("PrefixList emitted %v:\n%s", got, signed)
+		}
+		opts := dsig.VerifyOptions{PublicKey: &rsaKey.PublicKey}
+		d := parse(t, signed)
+		if _, err := dsig.Verify(d, findSignature(d), opts); err != nil {
+			t.Fatal(err)
+		}
+		d = parse(t, []byte(strings.Replace(string(signed), `xmlns:p="urn:p"`, `xmlns:p="urn:changed"`, 1)))
+		if _, err := dsig.Verify(d, findSignature(d), opts); (err != nil) != (prefixes != nil) {
+			t.Fatalf("rebinding p with PrefixList %v: %v", prefixes, err)
+		}
+	}
+
+	doc := parse(t, []byte(`<r/>`))
+	for name, c := range map[string]struct {
+		alg      c14n.Algorithm
+		prefixes []string
+		parent   *xdm.Node
+	}{
+		"detached":     {c14n.Exclusive10, []string{"p"}, nil},
+		"inclusive":    {c14n.Inclusive10, []string{"p"}, xmltree.DocumentElement(doc)},
+		"not a prefix": {c14n.Exclusive10, []string{"a b"}, xmltree.DocumentElement(doc)},
+	} {
+		_, err := dsig.Sign(doc, key, dsig.SignOptions{
+			SignatureAlgorithm: xmlsec.SigRSASHA256, CanonicalizationAlgorithm: string(c.alg),
+			CanonicalizationPrefixes: c.prefixes, Parent: c.parent,
+			References: []dsig.Reference{{URI: "", DigestAlgorithm: xmlsec.DigestSHA256,
+				Transforms: []dsig.TransformSpec{{Algorithm: xmlsec.TransformEnvelopedSignature}, excC14N[0]}}},
+		})
+		if !errors.Is(err, xmlsec.ErrMalformed) {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+
+	// The ec prefix of the PrefixList element may not shadow another.
+	doc = parse(t, []byte(`<r xmlns:ec="urn:other"><a xml:id="a"/></r>`))
+	if _, err := dsig.Sign(doc, key, dsig.SignOptions{
+		SignatureAlgorithm: xmlsec.SigRSASHA256, CanonicalizationAlgorithm: string(c14n.Exclusive10),
+		CanonicalizationPrefixes: []string{"p"}, Parent: xmltree.DocumentElement(doc), References: []dsig.Reference{ref("#a")},
+	}); err == nil || !strings.Contains(err.Error(), "already bound") {
+		t.Fatalf("ec rebound: %v", err)
+	}
+}
+
+// XML-DSig 4.4.3.1: one Reference may omit its URI; its data object is
+// OmittedURIData, which the verifier supplies again.
+func TestSignOmittedURI(t *testing.T) {
+	key := newKey(t, rsaKey)
+	omitted := dsig.Reference{OmitURI: true, DigestAlgorithm: xmlsec.DigestSHA256}
+	doc := parse(t, []byte(`<r><a xml:id="a"/></r>`))
+	_, err := dsig.Sign(doc, key, dsig.SignOptions{
+		SignatureAlgorithm: xmlsec.SigRSASHA256, CanonicalizationAlgorithm: string(c14n.Exclusive10),
+		References: []dsig.Reference{ref("#a"), omitted}, OmittedURIData: []byte("known"),
+		Parent: xmltree.DocumentElement(doc),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	signed := serialize(t, doc)
+	if strings.Count(string(signed), "URI=") != 1 {
+		t.Fatalf("the omitted URI is emitted:\n%s", signed)
+	}
+	for data, want := range map[string]error{"known": nil, "other": xmlsec.ErrDigestMismatch} {
+		d := parse(t, signed)
+		cov, err := dsig.Verify(d, findSignature(d), dsig.VerifyOptions{PublicKey: &rsaKey.PublicKey,
+			ResolveOmittedURI: func() ([]byte, error) { return []byte(data), nil }})
+		if !errors.Is(err, want) || err == nil && !cov.OmittedURISigned {
+			t.Fatalf("%s: %v", data, err)
+		}
+	}
+
+	for name, c := range map[string]struct {
+		refs []dsig.Reference
+		data []byte
+	}{
+		"two":        {[]dsig.Reference{omitted, omitted}, []byte("x")},
+		"no data":    {[]dsig.Reference{omitted}, nil},
+		"with a URI": {[]dsig.Reference{{OmitURI: true, URI: "#a", DigestAlgorithm: xmlsec.DigestSHA256}}, []byte("x")},
+		"enveloped":  {[]dsig.Reference{{OmitURI: true, DigestAlgorithm: xmlsec.DigestSHA256, Transforms: []dsig.TransformSpec{{Algorithm: xmlsec.TransformEnvelopedSignature}}}}, []byte("x")},
+	} {
+		_, err := dsig.Sign(doc, key, dsig.SignOptions{
+			SignatureAlgorithm: xmlsec.SigRSASHA256, CanonicalizationAlgorithm: string(c14n.Exclusive10),
+			References: c.refs, OmittedURIData: c.data,
+		})
+		if !errors.Is(err, xmlsec.ErrMalformed) {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+}

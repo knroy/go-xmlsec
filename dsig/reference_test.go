@@ -345,3 +345,68 @@ func TestExternalReferences(t *testing.T) {
 		}
 	}
 }
+
+// XML-DSig 4.4.3.1: with BaseURI, a relative reference is resolved against
+// it, never against xml:base, and the resolver and Coverage see the
+// absolute URI; without it a relative URI is refused, and a relative
+// BaseURI is refused.
+func TestBaseURI(t *testing.T) {
+	const base = "http://example.invalid/dir/"
+	var calls []string
+	resolve := func(uri string) ([]byte, error) { calls = append(calls, uri); return []byte("octets"), nil }
+	key := newKey(t, rsaKey)
+	opts := dsig.SignOptions{
+		SignatureAlgorithm: xmlsec.SigRSASHA256, CanonicalizationAlgorithm: string(c14n.Exclusive10),
+		References: []dsig.Reference{{URI: "data.bin", DigestAlgorithm: xmlsec.DigestSHA256},
+			{URI: "../up.bin", DigestAlgorithm: xmlsec.DigestSHA256}, ref("#a")},
+		ResolveURI: resolve, BaseURI: base,
+	}
+	doc := parse(t, []byte(`<r xml:base="http://evil.invalid/"><a xml:id="a"/></r>`))
+	sig, err := dsig.Sign(doc, key, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{base + "data.bin", "http://example.invalid/up.bin"}
+	if !slices.Equal(calls, want) {
+		t.Fatalf("resolver called with %v", calls)
+	}
+	xmltree.DocumentElement(doc).AppendChild(sig)
+	signed := serialize(t, doc)
+	if !strings.Contains(string(signed), `URI="data.bin"`) {
+		t.Fatalf("the relative URI is not kept:\n%s", signed)
+	}
+	verify := func(base string) (*dsig.Coverage, error) {
+		doc := parse(t, signed)
+		return dsig.Verify(doc, findSignature(doc), dsig.VerifyOptions{PublicKey: &rsaKey.PublicKey, ResolveURI: resolve, BaseURI: base})
+	}
+	cov, err := verify(base)
+	if err != nil || !slices.Equal(cov.ExternalURIs, want) || cov.References[0].URI != "data.bin" {
+		t.Fatalf("coverage %+v: %v", cov, err)
+	}
+	for _, b := range []string{"", "dir/"} {
+		if _, err := verify(b); !errors.Is(err, xmlsec.ErrMalformed) {
+			t.Fatalf("verify with BaseURI %q: %v", b, err)
+		}
+	}
+	for _, c := range []struct{ base, uri string }{{"dir/", "data.bin"}, {base, "%zz"}} {
+		opts.BaseURI, opts.References = c.base, []dsig.Reference{{URI: c.uri, DigestAlgorithm: xmlsec.DigestSHA256}}
+		if _, err := dsig.Sign(parse(t, []byte(`<r/>`)), key, opts); !errors.Is(err, xmlsec.ErrMalformed) {
+			t.Fatalf("sign %q against %q: %v", c.uri, c.base, err)
+		}
+	}
+}
+
+// XML-DSig 6.6.4: the enveloped-signature transform applies only to a node
+// set from the original document, never to one parsed from octets.
+func TestEnvelopedOnReparsedOctets(t *testing.T) {
+	_, err := dsig.Sign(parse(t, []byte(`<r/>`)), newKey(t, rsaKey), dsig.SignOptions{
+		SignatureAlgorithm: xmlsec.SigRSASHA256, CanonicalizationAlgorithm: string(c14n.Exclusive10),
+		References: []dsig.Reference{{URI: "http://example.invalid/doc.xml", DigestAlgorithm: xmlsec.DigestSHA256,
+			Transforms: []dsig.TransformSpec{{Algorithm: xmlsec.TransformXPath, XPath: "true()"},
+				{Algorithm: xmlsec.TransformEnvelopedSignature}, excC14N[0]}}},
+		ResolveURI: func(string) ([]byte, error) { return []byte(`<a/>`), nil },
+	})
+	if !errors.Is(err, xmlsec.ErrMalformed) || !strings.Contains(err.Error(), "parsed from octets") {
+		t.Fatalf("got %v", err)
+	}
+}

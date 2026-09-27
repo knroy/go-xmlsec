@@ -3,6 +3,7 @@ package dsig
 import (
 	"crypto"
 	"crypto/ecdsa"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -10,11 +11,11 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"hash"
 	"math/big"
-	"net/url"
 	"slices"
+	"strconv"
 	"strings"
-	"unicode"
 
 	"github.com/knroy/go-xml/c14n"
 	"github.com/knroy/go-xml/xdm"
@@ -27,13 +28,37 @@ import (
 // SignOptions configures signature generation.
 type SignOptions struct {
 	// SignatureAlgorithm is a Sig* constant. Required. The legacy
-	// verification-only algorithms (SigRSASHA1, SigDSASHA1, SigHMAC*) are
-	// refused with xmlsec.ErrUnsupportedAlgorithm.
+	// verification-only algorithms (SigRSASHA1, SigDSASHA1, SigHMACSHA1) are
+	// refused with xmlsec.ErrUnsupportedAlgorithm. SigHMACSHA256, 384 and
+	// 512 need HMACKey, and are the only ones accepted with it.
 	SignatureAlgorithm string
 
 	// CanonicalizationAlgorithm canonicalizes ds:SignedInfo itself,
 	// independent of the algorithms used inside references. Required.
 	CanonicalizationAlgorithm string
+
+	// CanonicalizationPrefixes populates the ec:InclusiveNamespaces
+	// PrefixList of ds:CanonicalizationMethod (XML-DSig 4.4.1, Exclusive
+	// C14N 3), with "" for the default namespace, and ds:SignedInfo is
+	// canonicalized with it. It needs an exclusive CanonicalizationAlgorithm
+	// and Parent: which listed prefixes are rendered depends on where the
+	// signature stands, so a detached signature would break when placed.
+	CanonicalizationPrefixes []string
+
+	// HMACKey, if set, makes the signature an HMAC keyed with this shared
+	// secret (XML-DSig 6.3): SignatureAlgorithm must then be SigHMACSHA256,
+	// SigHMACSHA384 or SigHMACSHA512 (SigHMACSHA1 is verification-only), the
+	// key must be at least as long as the hash output (RFC 2104 section 3),
+	// the KeyProvider is not used and KeyInfo must be KeyInfoNone: the
+	// verifier already holds the secret, and nothing about it travels.
+	HMACKey []byte
+
+	// HMACOutputLength, with HMACKey, truncates the MAC to this many bits
+	// and emits ds:HMACOutputLength. Zero means the full hash output, with
+	// no ds:HMACOutputLength. Otherwise it must be a multiple of 8, no
+	// larger than the hash output and no smaller than half of it or 80 bits
+	// (XML-DSig 4.4.2 and 6.3.1, CVE-2009-0217).
+	HMACOutputLength int
 
 	// References are signed in the order given, which is preserved on the
 	// wire.
@@ -50,6 +75,44 @@ type SignOptions struct {
 	// SignatureID, if set, becomes the Id attribute of ds:Signature. It must
 	// be an NCName.
 	SignatureID string
+
+	// SignedInfoID, SignatureValueID and KeyInfoID, if set, become the Id
+	// attributes of ds:SignedInfo, ds:SignatureValue and ds:KeyInfo
+	// (XML-DSig 4.3 to 4.5). Each must be an NCName, and every Id Sign
+	// emits must differ. KeyInfoID needs a ds:KeyInfo to put it on. A
+	// reference to "#"+KeyInfoID signs the ds:KeyInfo, which XML-DSig 4.5
+	// suggests when the key information must not be substituted.
+	SignedInfoID     string
+	SignatureValueID string
+	KeyInfoID        string
+
+	// Objects are emitted as ds:Object elements after ds:KeyInfo, in order
+	// (XML-DSig 4.6). They are built before any reference is digested, so a
+	// reference to "#"+Object.ID covers one: with the signature as the
+	// document element, that is an enveloping signature.
+	Objects []Object
+
+	// Properties are emitted in one ds:SignatureProperties, in a ds:Object
+	// after Objects (XML-DSig 5.2). A reference to "#"+SignatureProperty.ID
+	// signs one.
+	Properties []SignatureProperty
+
+	// OmittedURIData is the data object of the one Reference with OmitURI
+	// set, digested through its transforms as octets (XML-DSig 4.4.3.1).
+	// The verifier supplies the same octets with
+	// VerifyOptions.ResolveOmittedURI. Required with OmitURI.
+	OmittedURIData []byte
+
+	// BaseURI, if set, is the absolute URI a relative reference URI, such
+	// as "data.xml", is resolved against (XML-DSig 4.4.3.1, RFC 3986) before
+	// it is given to ResolveURI. It is never taken from xml:base or anything
+	// else in the document. Without it, a relative URI is refused.
+	BaseURI string
+
+	// ManifestID, if set, becomes the Id attribute of the ds:Manifest that
+	// BuildManifest returns, which a Reference of Type xmlsec.TypeManifest
+	// names. It must be an NCName. Sign ignores it.
+	ManifestID string
 
 	// Attachments resolves cid: references. Required if any reference uses
 	// a cid: URI.
@@ -76,7 +139,7 @@ type SignOptions struct {
 	// stream: with none they are digested as they are, and a
 	// canonicalization parses them with xmlsec.Parse first. This library
 	// never fetches anything itself; see xmlsec.URIResolver. When nil, such
-	// a reference is refused, and a relative URI is always refused.
+	// a reference is refused, and so is a relative URI without BaseURI.
 	ResolveURI xmlsec.URIResolver
 }
 
@@ -93,7 +156,14 @@ type SignOptions struct {
 // for example inside wsse:Security, and the document is not modified. Then
 // the CanonicalizationAlgorithm must be exclusive: ds:SignedInfo is
 // canonicalized before it is placed, and only exclusive canonicalization is
-// independent of where it ends up.
+// independent of where it ends up. doc may then be nil, for an enveloping
+// signature: references resolve only within the signature, such as to a
+// ds:Object of opts.Objects, and the caller makes the returned element a
+// document's element.
+//
+// Sign refuses with xmlsec.ErrNotNFC to sign a same-document reference, or
+// a ds:SignedInfo, whose canonical form is not in Unicode Normalization Form
+// C (XML-DSig 8.1.3): a verifier may normalize what it receives.
 func Sign(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions) (*xdm.Node, error) {
 	if opts.Parent == nil {
 		if !c14n.Algorithm(opts.CanonicalizationAlgorithm).Exclusive() {
@@ -142,65 +212,216 @@ func SignEnveloped(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions) ([]b
 // sign builds the signature, attaching it to parent first if non-nil so
 // that references and ds:SignedInfo are processed in their final position.
 func sign(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions, parent *xdm.Node) (*xdm.Node, error) {
-	if err := refuseLegacy(opts.SignatureAlgorithm); err != nil {
+	sigHash, err := signatureMethod(opts)
+	if err != nil {
 		return nil, err
 	}
-	sigHash, ok := hashes.Signature(opts.SignatureAlgorithm)
-	if !ok {
-		return nil, fmt.Errorf("%w: signature %q", xmlsec.ErrUnsupportedAlgorithm, opts.SignatureAlgorithm)
-	}
+	mac := len(opts.HMACKey) > 0
 	if !isC14N(opts.CanonicalizationAlgorithm) {
 		return nil, fmt.Errorf("%w: canonicalization %q", xmlsec.ErrUnsupportedAlgorithm, opts.CanonicalizationAlgorithm)
+	}
+	if err := checkPrefixes(opts, parent != nil); err != nil {
+		return nil, err
 	}
 	if len(opts.References) == 0 {
 		return nil, errors.New("dsig: no references")
 	}
-	if key.Signer == nil || key.Certificate == nil {
-		return nil, errors.New("dsig: KeyProvider needs Signer and Certificate")
-	}
-	if pub, ok := key.Signer.Public().(interface{ Equal(crypto.PublicKey) bool }); !ok || !pub.Equal(key.Certificate.PublicKey) {
-		return nil, errors.New("dsig: Signer does not match Certificate")
-	}
-	// XML-DSig 6.4.2: implementations "MUST use at least 2048-bit keys for
-	// creating signatures".
-	if k, ok := key.Signer.Public().(*rsa.PublicKey); ok {
-		if err := checkRSASize(k); err != nil {
+	if !mac {
+		if err := checkKey(key); err != nil {
 			return nil, err
 		}
 	}
-	if opts.SignatureID != "" && !xdm.IsNCName(opts.SignatureID) {
-		return nil, fmt.Errorf("%w: SignatureID %q is not an NCName", xmlsec.ErrMalformed, opts.SignatureID)
+	if err := checkReferences(opts.References, opts, doc == nil); err != nil {
+		return nil, err
 	}
-	for _, r := range opts.References {
-		if err := checkReference(r); err != nil {
-			return nil, err
-		}
+	if err := checkObjects(opts); err != nil {
+		return nil, err
+	}
+	if err := checkIDs(map[string]string{
+		"SignatureID": opts.SignatureID, "SignedInfoID": opts.SignedInfoID,
+		"SignatureValueID": opts.SignatureValueID, "KeyInfoID": opts.KeyInfoID,
+	}, signatureIDs(opts, opts.References)); err != nil {
+		return nil, err
 	}
 
 	sig := xmltree.Element(parent, "ds", xmlsec.NSDSig, "Signature")
 	if err := xmltree.Declare(sig, "ds", xmlsec.NSDSig); err != nil {
 		return nil, err
 	}
-	if opts.SignatureID != "" {
-		xmltree.SetAttr(sig, "", "", "Id", opts.SignatureID)
+	if doc == nil {
+		doc = sig // enveloping: the signature is all there is
 	}
+	setOptional(sig, "Id", opts.SignatureID)
 	si := xmltree.Element(sig, "ds", xmlsec.NSDSig, "SignedInfo")
-	algElement(si, "CanonicalizationMethod", opts.CanonicalizationAlgorithm)
-	algElement(si, "SignatureMethod", opts.SignatureAlgorithm)
+	setOptional(si, "Id", opts.SignedInfoID)
+	cm := algElement(si, "CanonicalizationMethod", opts.CanonicalizationAlgorithm)
+	if err := transformParams(cm, TransformSpec{Algorithm: opts.CanonicalizationAlgorithm, InclusiveNamespacePrefixes: opts.CanonicalizationPrefixes}); err != nil {
+		return nil, err
+	}
+	sm := algElement(si, "SignatureMethod", opts.SignatureAlgorithm)
+	if opts.HMACOutputLength > 0 {
+		xmltree.Text(xmltree.Element(sm, "ds", xmlsec.NSDSig, "HMACOutputLength"), strconv.Itoa(opts.HMACOutputLength))
+	}
 
-	for _, r := range opts.References {
+	// Everything after ds:SignedInfo is built before any reference is
+	// digested, so that a reference to ds:KeyInfo (XML-DSig 4.5) or to a
+	// ds:Object covers it as it will stand; ds:SignatureValue is filled in
+	// last.
+	sv := xmltree.Element(sig, "ds", xmlsec.NSDSig, "SignatureValue")
+	setOptional(sv, "Id", opts.SignatureValueID)
+	if err := addKeyInfo(sig, doc, key, opts); err != nil {
+		return nil, err
+	}
+	if opts.KeyInfoID != "" {
+		kids := sig.ChildElements()
+		ki := kids[len(kids)-1]
+		if !ki.IsElement(xmlsec.NSDSig, "KeyInfo") {
+			return nil, fmt.Errorf("%w: KeyInfoID is set, and no ds:KeyInfo is emitted", xmlsec.ErrMalformed)
+		}
+		xmltree.SetAttr(ki, "", "", "Id", opts.KeyInfoID)
+	}
+	addObjects(sig, opts)
+
+	if err := addReferences(si, doc, sig, opts.References, opts); err != nil {
+		return nil, err
+	}
+
+	var h hash.Hash
+	if mac {
+		h = hmac.New(sigHash.New, opts.HMACKey)
+	} else {
+		h = sigHash.New()
+	}
+	siOpts := c14n.Options{Algorithm: c14n.Algorithm(opts.CanonicalizationAlgorithm), InclusiveNamespacePrefixes: opts.CanonicalizationPrefixes}
+	if err := checkNFC(true, h, "ds:SignedInfo", func(w hash.Hash) error {
+		_, err := c14n.DigestNodeSet(w, c14n.Subtree(si), siOpts)
+		return err
+	}); err != nil {
+		return nil, err
+	}
+	var value []byte
+	if mac {
+		value = macValue(h, opts.HMACOutputLength)
+	} else if value, err = signDigest(key.Signer, opts.SignatureAlgorithm, sigHash, h.Sum(nil)); err != nil {
+		return nil, err
+	}
+	xmltree.Text(sv, base64.StdEncoding.EncodeToString(value))
+	return sig, nil
+}
+
+// checkKey admits a KeyProvider for a public-key signature.
+func checkKey(key xmlsec.KeyProvider) error {
+	if key.Signer == nil || key.Certificate == nil {
+		return errors.New("dsig: KeyProvider needs Signer and Certificate")
+	}
+	if pub, ok := key.Signer.Public().(interface{ Equal(crypto.PublicKey) bool }); !ok || !pub.Equal(key.Certificate.PublicKey) {
+		return errors.New("dsig: Signer does not match Certificate")
+	}
+	// XML-DSig 6.4.2: implementations "MUST use at least 2048-bit keys for
+	// creating signatures".
+	if k, ok := key.Signer.Public().(*rsa.PublicKey); ok {
+		return checkRSASize(k)
+	}
+	return nil
+}
+
+// checkPrefixes admits SignOptions.CanonicalizationPrefixes: exclusive
+// canonicalization, computed in place, and prefixes that are NCNames or ""
+// for the default namespace.
+func checkPrefixes(opts SignOptions, inPlace bool) error {
+	if len(opts.CanonicalizationPrefixes) == 0 {
+		return nil
+	}
+	if !c14n.Algorithm(opts.CanonicalizationAlgorithm).Exclusive() || !inPlace {
+		return fmt.Errorf("%w: CanonicalizationPrefixes needs an exclusive CanonicalizationAlgorithm and SignOptions.Parent", xmlsec.ErrMalformed)
+	}
+	for _, p := range opts.CanonicalizationPrefixes {
+		if p != "" && !xdm.IsNCName(p) {
+			return fmt.Errorf("%w: CanonicalizationPrefixes entry %q is not a prefix", xmlsec.ErrMalformed, p)
+		}
+	}
+	return nil
+}
+
+// checkIDs refuses an Id Sign or BuildManifest would emit that is not an
+// NCName, or that another one of them repeats. named maps option names to
+// the Ids they set; others are Ids already checked to be NCNames.
+func checkIDs(named map[string]string, others []string) error {
+	seen := map[string]bool{}
+	for name, id := range named {
+		if id != "" && !xdm.IsNCName(id) {
+			return fmt.Errorf("%w: %s %q is not an NCName", xmlsec.ErrMalformed, name, id)
+		}
+		others = append(others, id)
+	}
+	for _, id := range others {
+		if id != "" && seen[id] {
+			return fmt.Errorf("%w: Id %q is emitted twice", xmlsec.ErrMalformed, id)
+		}
+		seen[id] = true
+	}
+	return nil
+}
+
+// signatureIDs are the Ids of opts.Objects and opts.Properties and of
+// refs, for checkIDs.
+func signatureIDs(opts SignOptions, refs []Reference) []string {
+	var ids []string
+	for _, r := range refs {
+		ids = append(ids, r.ID)
+	}
+	for _, o := range opts.Objects {
+		ids = append(ids, o.ID)
+	}
+	for _, p := range opts.Properties {
+		ids = append(ids, p.ID)
+	}
+	return ids
+}
+
+// checkReferences checks each reference, and the rules across them: at
+// most one omitted URI, which needs OmittedURIData, and without a document
+// no reference to the whole of it.
+func checkReferences(refs []Reference, opts SignOptions, noDoc bool) error {
+	if err := checkBaseURI(opts.BaseURI); err != nil {
+		return err
+	}
+	omitted := 0
+	for _, r := range refs {
+		if err := checkReference(r); err != nil {
+			return err
+		}
+		switch {
+		case r.OmitURI:
+			omitted++
+		case noDoc && (r.URI == "" || r.URI == "#xpointer(/)"):
+			return fmt.Errorf("%w: a reference to the whole document, and no document", xmlsec.ErrMalformed)
+		}
+	}
+	switch {
+	case omitted > 1:
+		return fmt.Errorf("%w: %d references with OmitURI; at most one is allowed", xmlsec.ErrMalformed, omitted)
+	case omitted == 1 && opts.OmittedURIData == nil:
+		return fmt.Errorf("%w: a reference with OmitURI needs SignOptions.OmittedURIData", xmlsec.ErrMalformed)
+	}
+	return nil
+}
+
+// addReferences appends a digested ds:Reference to parent, a ds:SignedInfo
+// or ds:Manifest, for each of refs. sig is what the enveloped-signature
+// transform removes, and whose own Ids "#id" resolves against.
+func addReferences(parent, doc, sig *xdm.Node, refs []Reference, opts SignOptions) error {
+	for _, r := range refs {
 		dh, ok := hashes.Digest(r.DigestAlgorithm)
 		if !ok {
-			return nil, fmt.Errorf("%w: digest %q", xmlsec.ErrUnsupportedAlgorithm, r.DigestAlgorithm)
+			return fmt.Errorf("%w: digest %q", xmlsec.ErrUnsupportedAlgorithm, r.DigestAlgorithm)
 		}
-		ref := xmltree.Element(si, "ds", xmlsec.NSDSig, "Reference")
-		if r.ID != "" {
-			xmltree.SetAttr(ref, "", "", "Id", r.ID)
+		ref := xmltree.Element(parent, "ds", xmlsec.NSDSig, "Reference")
+		setOptional(ref, "Id", r.ID)
+		setOptional(ref, "Type", r.Type)
+		if !r.OmitURI {
+			xmltree.SetAttr(ref, "", "", "URI", r.URI)
 		}
-		if r.Type != "" {
-			xmltree.SetAttr(ref, "", "", "Type", r.Type)
-		}
-		xmltree.SetAttr(ref, "", "", "URI", r.URI)
 		// The transforms are built before digesting: here() and an XSLT
 		// stylesheet are read from them where they stand.
 		transforms := slices.Clone(r.Transforms)
@@ -209,33 +430,27 @@ func sign(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions, parent *xdm.N
 			for i, t := range transforms {
 				tr := algElement(ts, "Transform", t.Algorithm)
 				if err := transformParams(tr, t); err != nil {
-					return nil, err
+					return err
 				}
 				transforms[i].el = tr
 			}
 		}
 		h := dh.New()
-		if _, err := digestReference(h, doc, sig, r.URI, transforms, opts.Attachments, false, opts.IDAttributes, opts.ResolveURI); err != nil {
-			return nil, err
+		sameDocument := !r.OmitURI && isSameDocument(r.URI)
+		if err := checkNFC(sameDocument, h, fmt.Sprintf("reference %q", r.URI), func(w hash.Hash) error {
+			if r.OmitURI {
+				d := data{octets: opts.OmittedURIData}
+				return d.digest(w, nil, "(omitted)", transforms, false)
+			}
+			_, err := digestReference(w, doc, sig, absoluteURI(opts.BaseURI, r.URI), transforms, opts.Attachments, false, opts.IDAttributes, opts.ResolveURI)
+			return err
+		}); err != nil {
+			return err
 		}
 		algElement(ref, "DigestMethod", r.DigestAlgorithm)
 		xmltree.Text(xmltree.Element(ref, "ds", xmlsec.NSDSig, "DigestValue"), base64.StdEncoding.EncodeToString(h.Sum(nil)))
 	}
-
-	h := sigHash.New()
-	if _, err := c14n.DigestNodeSet(h, c14n.Subtree(si), c14n.Options{Algorithm: c14n.Algorithm(opts.CanonicalizationAlgorithm)}); err != nil {
-		return nil, err
-	}
-	value, err := signDigest(key.Signer, opts.SignatureAlgorithm, sigHash, h.Sum(nil))
-	if err != nil {
-		return nil, err
-	}
-	xmltree.Text(xmltree.Element(sig, "ds", xmlsec.NSDSig, "SignatureValue"), base64.StdEncoding.EncodeToString(value))
-
-	if err := addKeyInfo(sig, doc, key, opts); err != nil {
-		return nil, err
-	}
-	return sig, nil
+	return nil
 }
 
 // checkReference refuses a Reference that would make the ds:Signature
@@ -248,10 +463,11 @@ func checkReference(r Reference) error {
 	if r.ID != "" && !xdm.IsNCName(r.ID) {
 		return fmt.Errorf("%w: Reference.ID %q is not an NCName", xmlsec.ErrMalformed, r.ID)
 	}
-	if r.Type != "" {
-		if _, err := url.Parse(r.Type); err != nil || strings.ContainsFunc(r.Type, unicode.IsSpace) {
-			return fmt.Errorf("%w: Reference.Type %q is not a URI", xmlsec.ErrMalformed, r.Type)
-		}
+	if r.Type != "" && !isURI(r.Type) {
+		return fmt.Errorf("%w: Reference.Type %q is not a URI", xmlsec.ErrMalformed, r.Type)
+	}
+	if r.OmitURI && r.URI != "" {
+		return fmt.Errorf("%w: Reference.OmitURI with URI %q", xmlsec.ErrMalformed, r.URI)
 	}
 	for _, t := range r.Transforms {
 		switch t.Algorithm {
@@ -270,7 +486,7 @@ func checkReference(r Reference) error {
 		first = r.Transforms[0].Algorithm
 	}
 	switch {
-	case (r.URI == "" || r.URI == "#xpointer(/)") && first != xmlsec.TransformEnvelopedSignature:
+	case !r.OmitURI && (r.URI == "" || r.URI == "#xpointer(/)") && first != xmlsec.TransformEnvelopedSignature:
 		return fmt.Errorf("%w: a reference to the whole document must begin with enveloped-signature", xmlsec.ErrMalformed)
 	case strings.HasPrefix(r.URI, "cid:") && first != xmlsec.TransformAttachmentContentSignature && first != xmlsec.TransformAttachmentCompleteSignature:
 		// SwA profile 5.3 and WS-I BSP R6101: an attachment is signed

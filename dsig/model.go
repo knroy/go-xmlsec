@@ -39,7 +39,19 @@ type Reference struct {
 	//                 4.4.3.3); any other XPointer is refused
 	//   "cid:..."     a MIME attachment, requiring an AttachmentSet; the
 	//                 first transform must be an SwA signature transform
+	//   "#id" of the signature's own ds:Object, ds:KeyInfo, or a
+	//                 ds:Manifest, ds:SignatureProperties or
+	//                 ds:SignatureProperty in its ds:Object: the unqualified
+	//                 Id of these counts for the signature's own references
+	//   an absolute URI, requiring SignOptions.ResolveURI; a relative one
+	//                 also requires SignOptions.BaseURI
 	URI string
+
+	// OmitURI emits the ds:Reference with no URI attribute (XML-DSig
+	// 4.4.3.1): the application at each end knows the data object, which is
+	// SignOptions.OmittedURIData. URI must be empty, and at most one
+	// Reference may set it.
+	OmitURI bool
 
 	// ID, if set, becomes the Id attribute of the ds:Reference element. It
 	// must be an NCName.

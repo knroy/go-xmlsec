@@ -12,7 +12,6 @@ import (
 	"github.com/knroy/go-xml/xdm"
 	"github.com/knroy/go-xmlsec"
 	"github.com/knroy/go-xmlsec/internal/swa"
-	"github.com/knroy/go-xmlsec/wss"
 )
 
 // impliesC14N reports whether a reference relies on the implicit Canonical
@@ -72,11 +71,37 @@ type dereferenced struct {
 }
 
 // isExternal reports whether uri is absolute, the only kind a URIResolver
-// is given: a relative reference would need a base URI this library does
-// not have.
+// is given: a relative reference is first resolved against the caller's
+// BaseURI (absoluteURI), or refused.
 func isExternal(uri string) bool {
 	u, err := url.Parse(uri)
 	return err == nil && u.IsAbs()
+}
+
+// checkBaseURI admits a SignOptions or VerifyOptions BaseURI: empty, or an
+// absolute URI.
+func checkBaseURI(base string) error {
+	if base == "" || isExternal(base) {
+		return nil
+	}
+	return fmt.Errorf("%w: BaseURI %q is not an absolute URI", xmlsec.ErrMalformed, base)
+}
+
+// absoluteURI resolves a relative reference URI against base (XML-DSig
+// 4.4.3.1, RFC 3986 section 5) when base is set. A same-document or
+// absolute URI is returned as it is, and so is one that does not parse, for
+// digestReference to refuse. base is always the caller's, never xml:base
+// or anything else from the document; checkBaseURI has admitted it.
+func absoluteURI(base, uri string) string {
+	if base == "" || isSameDocument(uri) || isExternal(uri) {
+		return uri
+	}
+	u, err := url.Parse(uri)
+	if err != nil {
+		return uri
+	}
+	b, _ := url.Parse(base)
+	return b.ResolveReference(u).String()
 }
 
 // digestReference dereferences uri, applies transforms in order and writes
@@ -109,7 +134,7 @@ func digestReference(h hash.Hash, doc, sig *xdm.Node, uri string, transforms []T
 			in.ns = c14n.Document(doc)
 			out.whole = true
 		} else {
-			el, err := wss.FindByID(doc, id, idAttrs...)
+			el, err := findID(doc, sig, id, idAttrs)
 			if err != nil {
 				return out, err
 			}
@@ -203,10 +228,15 @@ func (d *data) digest(h hash.Hash, sig *xdm.Node, uri string, transforms []Trans
 		switch alg := t.Algorithm; {
 		case alg == xmlsec.TransformEnvelopedSignature:
 			// XML-DSig 6.6.4: its input is a node set. Octets are not parsed
-			// for it: the parsed tree would hold no signature to remove.
+			// for it, and a node set parsed from octets is refused: "the
+			// enveloped signature transform [MUST] be applied only to node
+			// sets from the original document", and the parsed tree holds
+			// no signature to remove.
 			switch f, ok := d.ns.(filtered); {
 			case d.ns == nil:
 				return fmt.Errorf("%w: enveloped-signature needs a node set", xmlsec.ErrMalformed)
+			case d.reparsed:
+				return fmt.Errorf("%w: enveloped-signature over a node set parsed from octets", xmlsec.ErrMalformed)
 			case ok:
 				d.ns = f.without(sig)
 			default:
