@@ -532,6 +532,276 @@
   },
   "expect": "refuse",
   "error": "ErrUnsupportedKeyInfo",
-  "reason": "Key given only by dsig11:X509Digest, a certificate digest without the certificate, which go-xmlsec cannot use."
+  "reason": "Key given only by dsig11:X509Digest, a certificate digest without the certificate. go-xmlsec hands such a descriptor to VerifyOptions.ResolveX509, and the vectors do not publish the certificate, so this harness has none to supply."
+ },
+ {
+  "source": "w3c-xmldsig11-interop",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "path": "signature-enveloping-p256_sha224.xml",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-p256_sha224.xml",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha224",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2001/04/xmldsig-more#sha224"
+   ],
+   "transforms": []
+  },
+  "expect": "verify",
+  "allowed_signature": [
+   "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha224"
+  ],
+  "allowed_digest": [
+   "http://www.w3.org/2001/04/xmldsig-more#sha224"
+  ],
+  "coverage": {
+   "whole_document_signed": false,
+   "signed_element_ids": [
+    "DSig.Object_1"
+   ],
+   "key_info_form": "KeyValue"
+  },
+  "verify_options": "IDAttributes: dsig.IDAttrDSig (the ds:Object Id); AllowedSignatureAlgorithms and AllowedDigestAlgorithms naming exactly the algorithms of the vector, which are outside the default sets"
+ },
+ {
+  "source": "w3c-xmldsig11-interop",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "path": "signature-enveloping-p256_sha1.xml",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-p256_sha1.xml",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha1",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2000/09/xmldsig#sha1"
+   ],
+   "transforms": []
+  },
+  "expect": "verify",
+  "allowed_signature": [
+   "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha1"
+  ],
+  "allowed_digest": [
+   "http://www.w3.org/2000/09/xmldsig#sha1"
+  ],
+  "coverage": {
+   "whole_document_signed": false,
+   "signed_element_ids": [
+    "DSig.Object_1"
+   ],
+   "key_info_form": "KeyValue"
+  },
+  "verify_options": "IDAttributes: dsig.IDAttrDSig (the ds:Object Id); AllowedSignatureAlgorithms and AllowedDigestAlgorithms naming exactly the algorithms of the vector, which are outside the default sets"
+ },
+ {
+  "source": "w3c-xmldsig11-interop",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "path": "signature-enveloping-p384_sha224.xml",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-p384_sha224.xml",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha224",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2001/04/xmldsig-more#sha224"
+   ],
+   "transforms": []
+  },
+  "expect": "verify",
+  "allowed_signature": [
+   "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha224"
+  ],
+  "allowed_digest": [
+   "http://www.w3.org/2001/04/xmldsig-more#sha224"
+  ],
+  "coverage": {
+   "whole_document_signed": false,
+   "signed_element_ids": [
+    "DSig.Object_1"
+   ],
+   "key_info_form": "KeyValue"
+  },
+  "verify_options": "IDAttributes: dsig.IDAttrDSig (the ds:Object Id); AllowedSignatureAlgorithms and AllowedDigestAlgorithms naming exactly the algorithms of the vector, which are outside the default sets"
+ },
+ {
+  "source": "w3c-xmldsig11-interop",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "path": "signature-enveloping-p384_sha1.xml",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-p384_sha1.xml",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha1",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2000/09/xmldsig#sha1"
+   ],
+   "transforms": []
+  },
+  "expect": "verify",
+  "allowed_signature": [
+   "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha1"
+  ],
+  "allowed_digest": [
+   "http://www.w3.org/2000/09/xmldsig#sha1"
+  ],
+  "coverage": {
+   "whole_document_signed": false,
+   "signed_element_ids": [
+    "DSig.Object_1"
+   ],
+   "key_info_form": "KeyValue"
+  },
+  "verify_options": "IDAttributes: dsig.IDAttrDSig (the ds:Object Id); AllowedSignatureAlgorithms and AllowedDigestAlgorithms naming exactly the algorithms of the vector, which are outside the default sets"
+ },
+ {
+  "source": "w3c-xmldsig11-interop",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "path": "signature-enveloping-p521_sha224.xml",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-p521_sha224.xml",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha224",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2001/04/xmldsig-more#sha224"
+   ],
+   "transforms": []
+  },
+  "expect": "verify",
+  "allowed_signature": [
+   "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha224"
+  ],
+  "allowed_digest": [
+   "http://www.w3.org/2001/04/xmldsig-more#sha224"
+  ],
+  "coverage": {
+   "whole_document_signed": false,
+   "signed_element_ids": [
+    "DSig.Object_1"
+   ],
+   "key_info_form": "KeyValue"
+  },
+  "verify_options": "IDAttributes: dsig.IDAttrDSig (the ds:Object Id); AllowedSignatureAlgorithms and AllowedDigestAlgorithms naming exactly the algorithms of the vector, which are outside the default sets"
+ },
+ {
+  "source": "w3c-xmldsig11-interop",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "path": "signature-enveloping-p521_sha1.xml",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-p521_sha1.xml",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha1",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2000/09/xmldsig#sha1"
+   ],
+   "transforms": []
+  },
+  "expect": "verify",
+  "allowed_signature": [
+   "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha1"
+  ],
+  "allowed_digest": [
+   "http://www.w3.org/2000/09/xmldsig#sha1"
+  ],
+  "coverage": {
+   "whole_document_signed": false,
+   "signed_element_ids": [
+    "DSig.Object_1"
+   ],
+   "key_info_form": "KeyValue"
+  },
+  "verify_options": "IDAttributes: dsig.IDAttrDSig (the ds:Object Id); AllowedSignatureAlgorithms and AllowedDigestAlgorithms naming exactly the algorithms of the vector, which are outside the default sets"
+ },
+ {
+  "source": "w3c-xmldsig11-interop",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "path": "signature-enveloping-hmac-sha224.xml",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-hmac-sha224.xml",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#hmac-sha224",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2000/09/xmldsig#sha1"
+   ],
+   "transforms": []
+  },
+  "expect": "verify",
+  "allowed_signature": [
+   "http://www.w3.org/2001/04/xmldsig-more#hmac-sha224"
+  ],
+  "allowed_digest": [
+   "http://www.w3.org/2000/09/xmldsig#sha1"
+  ],
+  "hmac_key": "testkey",
+  "coverage": {
+   "whole_document_signed": false,
+   "signed_element_ids": [
+    "DSig.Object_UwWZILpbo3KStDoKohcN1g22"
+   ],
+   "key_info_form": "None"
+  },
+  "verify_options": "IDAttributes: dsig.IDAttrDSig (the ds:Object Id); AllowedSignatureAlgorithms and AllowedDigestAlgorithms naming exactly the algorithms of the vector, which are outside the default sets; HMACKey \"testkey\" (the README of the vectors)"
+ },
+ {
+  "source": "w3c-xmldsig11-interop",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "path": "signature-enveloping-rsa-sha224.xml",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-rsa-sha224.xml",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha224",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2000/09/xmldsig#sha1"
+   ],
+   "transforms": []
+  },
+  "expect": "refuse",
+  "allowed_signature": [
+   "http://www.w3.org/2001/04/xmldsig-more#rsa-sha224"
+  ],
+  "allowed_digest": [
+   "http://www.w3.org/2000/09/xmldsig#sha1"
+  ],
+  "error": "ErrUnsupportedKeyInfo",
+  "reason": "1024-bit RSA key in ds:KeyValue; go-xmlsec requires at least 2048 bits for a raw RSA key.",
+  "verify_options": "IDAttributes: dsig.IDAttrDSig (the ds:Object Id); AllowedSignatureAlgorithms and AllowedDigestAlgorithms naming exactly the algorithms of the vector, which are outside the default sets"
+ },
+ {
+  "source": "w3c-xmldsig11-interop",
+  "fetched": "2026-09-26",
+  "license": "W3C Document License (https://www.w3.org/copyright/document-license/); Copyright (c) 2012 W3C (MIT, ERCIM, Keio). XML Signature 1.1 Interop Test Report, Oracle test vectors.",
+  "signature": "root",
+  "path": "signature-enveloping-sha224-rsa_sha256.xml",
+  "origin": "https://www.w3.org/TR/2012/NOTE-xmldsig-core1-interop-20121113/interop/xmldsig11/oracle/signature-enveloping-sha224-rsa_sha256.xml",
+  "algorithms": {
+   "signature": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256",
+   "canonicalization": "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+   "digest": [
+    "http://www.w3.org/2001/04/xmldsig-more#sha224"
+   ],
+   "transforms": []
+  },
+  "expect": "refuse",
+  "allowed_signature": [
+   "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
+  ],
+  "allowed_digest": [
+   "http://www.w3.org/2001/04/xmldsig-more#sha224"
+  ],
+  "error": "ErrUnsupportedKeyInfo",
+  "reason": "1024-bit RSA key in ds:KeyValue; go-xmlsec requires at least 2048 bits for a raw RSA key.",
+  "verify_options": "IDAttributes: dsig.IDAttrDSig (the ds:Object Id); AllowedSignatureAlgorithms and AllowedDigestAlgorithms naming exactly the algorithms of the vector, which are outside the default sets"
  }
 ]

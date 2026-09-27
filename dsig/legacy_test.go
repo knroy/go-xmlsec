@@ -5,11 +5,14 @@ package dsig_test
 import (
 	"crypto"
 	"crypto/dsa"
+	"crypto/ecdsa"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha1"
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/asn1"
 	"encoding/base64"
 	"errors"
 	"math/big"
@@ -26,6 +29,18 @@ import (
 var dsaKey = sync.OnceValue(func() *dsa.PrivateKey {
 	k := new(dsa.PrivateKey)
 	if err := dsa.GenerateParameters(&k.Parameters, rand.Reader, dsa.L1024N160); err != nil {
+		panic(err)
+	}
+	if err := dsa.GenerateKey(k, rand.Reader); err != nil {
+		panic(err)
+	}
+	return k
+})
+
+// dsa2048Key is a (2048, 256) key, for dsa-sha256.
+var dsa2048Key = sync.OnceValue(func() *dsa.PrivateKey {
+	k := new(dsa.PrivateKey)
+	if err := dsa.GenerateParameters(&k.Parameters, rand.Reader, dsa.L2048N256); err != nil {
 		panic(err)
 	}
 	if err := dsa.GenerateKey(k, rand.Reader); err != nil {
@@ -59,8 +74,11 @@ func legacyDoc(t *testing.T, sm, digestAlg, keyInfo string, sign func(si []byte)
 	si := sig.ChildElements()[0]
 
 	dh := crypto.SHA256
-	if digestAlg == xmlsec.DigestSHA1 {
+	switch digestAlg {
+	case xmlsec.DigestSHA1:
 		dh = crypto.SHA1
+	case xmlsec.DigestSHA224:
+		dh = crypto.SHA224
 	}
 	h := dh.New()
 	if _, err := c14n.Digest(h, doc.ChildElements()[0].ChildElements()[0], c14n.Options{Algorithm: c14n.Exclusive10}); err != nil {
@@ -99,6 +117,53 @@ func dsaSigner(b []byte) []byte {
 	return out
 }
 
+// dsaSHA256Signer signs with dsa2048Key: r||s, each 32 octets.
+func dsaSHA256Signer(b []byte) []byte {
+	d := sha256.Sum256(b)
+	r, s, err := dsa.Sign(rand.Reader, dsa2048Key(), d[:])
+	if err != nil {
+		panic(err)
+	}
+	out := make([]byte, 64)
+	r.FillBytes(out[:32])
+	s.FillBytes(out[32:])
+	return out
+}
+
+// ecdsaSigner signs with covECKey in the XML-DSig r||s encoding.
+func ecdsaSigner(h crypto.Hash) func([]byte) []byte {
+	return func(b []byte) []byte {
+		d := h.New()
+		d.Write(b)
+		r, s, err := ecdsa.Sign(rand.Reader, covECKey, d.Sum(nil))
+		if err != nil {
+			panic(err)
+		}
+		out := make([]byte, 64)
+		r.FillBytes(out[:32])
+		s.FillBytes(out[32:])
+		return out
+	}
+}
+
+// dsaDER is the DER SubjectPublicKeyInfo of a DSA key (RFC 3279 2.3.2),
+// which x509.MarshalPKIXPublicKey does not produce.
+func dsaDER(k *dsa.PublicKey) string {
+	params, _ := asn1.Marshal(struct{ P, Q, G *big.Int }{k.P, k.Q, k.G})
+	y, _ := asn1.Marshal(k.Y)
+	der, _ := asn1.Marshal(struct {
+		Algorithm struct {
+			OID    asn1.ObjectIdentifier
+			Params asn1.RawValue
+		}
+		Key asn1.BitString
+	}{Algorithm: struct {
+		OID    asn1.ObjectIdentifier
+		Params asn1.RawValue
+	}{asn1.ObjectIdentifier{1, 2, 840, 10040, 4, 1}, asn1.RawValue{FullBytes: params}}, Key: asn1.BitString{Bytes: y, BitLength: 8 * len(y)}})
+	return `<dsig11:DEREncodedKeyValue xmlns:dsig11="` + xmlsec.NSDSig11 + `">` + b64(der) + `</dsig11:DEREncodedKeyValue>`
+}
+
 func hmacSigner(h crypto.Hash, key []byte, octets int) func([]byte) []byte {
 	return func(b []byte) []byte {
 		m := hmac.New(h.New, key)
@@ -132,6 +197,15 @@ func TestLegacyAlgorithmsOptIn(t *testing.T) {
 		{"hmac-sha256", xmlsec.SigHMACSHA256, xmlsec.DigestSHA256, "", hmacSigner(crypto.SHA256, hmacSecret, 32), dsig.VerifyOptions{HMACKey: hmacSecret}},
 		{"hmac-sha384", xmlsec.SigHMACSHA384, xmlsec.DigestSHA256, "", hmacSigner(crypto.SHA384, hmacSecret, 48), dsig.VerifyOptions{HMACKey: hmacSecret}},
 		{"hmac-sha512", xmlsec.SigHMACSHA512, xmlsec.DigestSHA256, "", hmacSigner(crypto.SHA512, hmacSecret, 64), dsig.VerifyOptions{HMACKey: hmacSecret}},
+		{"hmac-sha224", xmlsec.SigHMACSHA224, xmlsec.DigestSHA256, "", hmacSigner(crypto.SHA224, hmacSecret, 28), dsig.VerifyOptions{HMACKey: hmacSecret}},
+		{"dsa-sha256 with DSAKeyValue", xmlsec.SigDSASHA256, xmlsec.DigestSHA256, dsaKeyValue(&dsa2048Key().PublicKey, ""), dsaSHA256Signer, dsig.VerifyOptions{}},
+		{"dsa-sha256 with DEREncodedKeyValue", xmlsec.SigDSASHA256, xmlsec.DigestSHA256, dsaDER(&dsa2048Key().PublicKey), dsaSHA256Signer, dsig.VerifyOptions{}},
+		{"dsa-sha1 with DEREncodedKeyValue", xmlsec.SigDSASHA1, xmlsec.DigestSHA256, dsaDER(dsaPub), dsaSigner, dsig.VerifyOptions{}},
+		{"ecdsa-sha1", xmlsec.SigECDSASHA1, xmlsec.DigestSHA256, "", ecdsaSigner(crypto.SHA1), dsig.VerifyOptions{PublicKey: &covECKey.PublicKey}},
+		// Not legacy, only outside the default sets.
+		{"rsa-sha224", xmlsec.SigRSASHA224, xmlsec.DigestSHA256, "", rsaSigner(crypto.SHA224), dsig.VerifyOptions{Certificate: rsaCert}},
+		{"ecdsa-sha224", xmlsec.SigECDSASHA224, xmlsec.DigestSHA256, "", ecdsaSigner(crypto.SHA224), dsig.VerifyOptions{PublicKey: &covECKey.PublicKey}},
+		{"sha224 digest", xmlsec.SigRSASHA256, xmlsec.DigestSHA224, "", rsaSigner(crypto.SHA256), dsig.VerifyOptions{Certificate: rsaCert}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -261,8 +335,14 @@ func TestDSA(t *testing.T) {
 		composite.Add(composite, big.NewInt(2))
 	}
 	allow := dsig.VerifyOptions{AllowedSignatureAlgorithms: []string{xmlsec.SigDSASHA1}}
+	allow256 := dsig.VerifyOptions{AllowedSignatureAlgorithms: []string{xmlsec.SigDSASHA256}}
 	pinned := func(p crypto.PublicKey) dsig.VerifyOptions {
 		o := allow
+		o.PublicKey = p
+		return o
+	}
+	pinned256 := func(p crypto.PublicKey) dsig.VerifyOptions {
+		o := allow256
 		o.PublicKey = p
 		return o
 	}
@@ -299,6 +379,15 @@ func TestDSA(t *testing.T) {
 		{"Y = 1", xmlsec.SigDSASHA1, "", dsaSigner, pinned(with(func(p *dsa.PublicKey) { p.Y = one })), xmlsec.ErrMalformed},
 		{"Y = P-1", xmlsec.SigDSASHA1, "", dsaSigner, pinned(with(func(p *dsa.PublicKey) { p.Y = new(big.Int).Sub(pub.P, one) })), xmlsec.ErrMalformed},
 		{"Y = P", xmlsec.SigDSASHA1, "", dsaSigner, pinned(with(func(p *dsa.PublicKey) { p.Y = pub.P })), xmlsec.ErrMalformed},
+
+		// dsa-sha256 takes (2048, 256) and (3072, 256) keys, r||s of 32
+		// octets each; dsa-sha1 only (1024, 160).
+		{"dsa-sha256 with a (1024, 160) key", xmlsec.SigDSASHA256, "", dsaSigner, pinned256(pub), xmlsec.ErrUnsupportedKeyInfo},
+		{"dsa-sha1 with a (2048, 256) key", xmlsec.SigDSASHA1, "", dsaSHA256Signer, pinned(&dsa2048Key().PublicKey), xmlsec.ErrUnsupportedKeyInfo},
+		{"dsa-sha256 short value", xmlsec.SigDSASHA256, "", func(b []byte) []byte { return dsaSHA256Signer(b)[:63] }, pinned256(&dsa2048Key().PublicKey), xmlsec.ErrSignatureInvalid},
+		{"dsa-sha256 pinned", xmlsec.SigDSASHA256, "", dsaSHA256Signer, pinned256(&dsa2048Key().PublicKey), nil},
+		{"DSA DEREncodedKeyValue with an RSA method", xmlsec.SigRSASHA256, dsaDER(pub), rsaSigner(crypto.SHA256), dsig.VerifyOptions{}, xmlsec.ErrUnsupportedKeyInfo},
+		{"DEREncodedKeyValue of the wrong DSA size", xmlsec.SigDSASHA256, dsaDER(pub), dsaSHA256Signer, allow256, xmlsec.ErrUnsupportedKeyInfo},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

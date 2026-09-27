@@ -115,8 +115,9 @@ func TestVerifyStructure(t *testing.T) {
 		// ds:KeyInfo
 		{"empty KeyInfo", covKI(``), dsig.VerifyOptions{}, xmlsec.ErrUnsupportedKeyInfo},
 		{"KeyInfo with two children", covKI(`<ds:KeyName>a</ds:KeyName><ds:KeyName>b</ds:KeyName>`), dsig.VerifyOptions{}, xmlsec.ErrUnsupportedKeyInfo},
-		{"X509Data with two certificates", covKI(`<ds:X509Data><ds:X509Certificate>AAAA</ds:X509Certificate><ds:X509Certificate>AAAA</ds:X509Certificate></ds:X509Data>`), dsig.VerifyOptions{}, xmlsec.ErrUnsupportedKeyInfo},
-		{"X509Data with issuer serial", covKI(`<ds:X509Data><ds:X509IssuerSerial/></ds:X509Data>`), dsig.VerifyOptions{}, xmlsec.ErrUnsupportedKeyInfo},
+		{"X509Data with unparsable certificates", covKI(`<ds:X509Data><ds:X509Certificate>AAAA</ds:X509Certificate><ds:X509Certificate>AAAA</ds:X509Certificate></ds:X509Data>`), dsig.VerifyOptions{}, xmlsec.ErrMalformed},
+		{"X509Data with an empty issuer serial", covKI(`<ds:X509Data><ds:X509IssuerSerial/></ds:X509Data>`), dsig.VerifyOptions{}, xmlsec.ErrMalformed},
+		{"X509Data with issuer serial only", covKI(`<ds:X509Data><ds:X509IssuerSerial><ds:X509IssuerName>CN=x</ds:X509IssuerName><ds:X509SerialNumber>1</ds:X509SerialNumber></ds:X509IssuerSerial></ds:X509Data>`), dsig.VerifyOptions{}, xmlsec.ErrUnsupportedKeyInfo},
 		{"X509Certificate not base64", covKI(`<ds:X509Data><ds:X509Certificate>!!</ds:X509Certificate></ds:X509Data>`), dsig.VerifyOptions{}, xmlsec.ErrMalformed},
 		{"X509Certificate not DER", covKI(`<ds:X509Data><ds:X509Certificate>AAAA</ds:X509Certificate></ds:X509Data>`), dsig.VerifyOptions{}, nil},
 		{"STR to missing token", covKI(`<wsse:SecurityTokenReference><wsse:Reference URI="#missing"/></wsse:SecurityTokenReference>`), dsig.VerifyOptions{}, xmlsec.ErrIDNotFound},
@@ -311,8 +312,9 @@ func TestImplicitCanonicalization(t *testing.T) {
 	}
 }
 
-// ds:X509Data may carry the subject name, issuer-serial or SKI of its one
-// certificate, as most SMP software emits; they are ignored.
+// ds:X509Data may carry the subject name, issuer-serial or SKI of its
+// certificate, as most SMP software emits; they must describe it. A CRL and a
+// ds:KeyName beside are reported, not used.
 func TestX509DataDescriptiveElements(t *testing.T) {
 	add := func(parent *xdm.Node, local, text string) *xdm.Node {
 		e := xmltree.Element(parent, "ds", xmlsec.NSDSig, local)
@@ -337,15 +339,16 @@ func TestX509DataDescriptiveElements(t *testing.T) {
 			add(is, "X509IssuerName", "CN=test")
 			add(is, "X509SerialNumber", "1")
 		}, nil},
-		{"a second X509Data with an SKI", func(ki *xdm.Node) {
+		{"a second X509Data with another SKI", func(ki *xdm.Node) {
 			add(xmltree.Element(ki, "ds", xmlsec.NSDSig, "X509Data"), "X509SKI", "AAAA")
-		}, nil},
+		}, xmlsec.ErrUnsupportedKeyInfo},
+		{"another subject name", func(ki *xdm.Node) { add(ki.ChildElements()[0], "X509SubjectName", "CN=other") }, xmlsec.ErrUnsupportedKeyInfo},
 		{"two certificates", func(ki *xdm.Node) {
 			x := ki.ChildElements()[0]
 			add(x, "X509Certificate", x.ChildElements()[0].StringValue())
 		}, xmlsec.ErrUnsupportedKeyInfo},
-		{"a CRL", func(ki *xdm.Node) { add(ki.ChildElements()[0], "X509CRL", "AAAA") }, xmlsec.ErrUnsupportedKeyInfo},
-		{"a KeyName beside X509Data", func(ki *xdm.Node) { add(ki, "KeyName", "k") }, xmlsec.ErrUnsupportedKeyInfo},
+		{"a CRL", func(ki *xdm.Node) { add(ki.ChildElements()[0], "X509CRL", "AAAA") }, nil},
+		{"a KeyName beside X509Data", func(ki *xdm.Node) { add(ki, "KeyName", "k") }, nil},
 		{"no certificate", func(ki *xdm.Node) { ki.Children = nil }, xmlsec.ErrUnsupportedKeyInfo},
 	}
 	for _, c := range cases {

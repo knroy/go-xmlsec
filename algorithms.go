@@ -24,6 +24,19 @@ const (
 	DigestSHA384XMLEnc = "http://www.w3.org/2001/04/xmlenc#sha384"
 )
 
+// SHA-224 algorithms (XML Signature 1.1 section 6.1 and RFC 6931). They are
+// in no default set: dsig.Verify accepts one only when the matching
+// VerifyOptions allow-list names it. dsig.Sign produces DigestSHA224,
+// SigRSASHA224 and SigECDSASHA224 when explicitly asked to, and
+// SigHMACSHA224 with dsig.SignOptions.HMACKey; its verification key is only
+// ever dsig.VerifyOptions.HMACKey.
+const (
+	DigestSHA224   = "http://www.w3.org/2001/04/xmldsig-more#sha224"
+	SigRSASHA224   = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha224"
+	SigECDSASHA224 = "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha224"
+	SigHMACSHA224  = "http://www.w3.org/2001/04/xmldsig-more#hmac-sha224"
+)
+
 // Legacy XML Signature 1.1 algorithms (section 6.1), implemented for
 // VERIFICATION ONLY. Sign never produces them, the dsig package's hash tables
 // do not return them, and no default set includes them: dsig.Verify accepts
@@ -39,6 +52,13 @@ const (
 	// SigDSASHA1 is DSA with SHA-1 (section 6.4.1), REQUIRED for signature
 	// verification only, with (L, N) = (1024, 160) keys.
 	SigDSASHA1 = "http://www.w3.org/2000/09/xmldsig#dsa-sha1"
+
+	// SigDSASHA256 is DSA with SHA-256 (section 6.4.1), OPTIONAL, verified
+	// with (L, N) = (2048, 256) or (3072, 256) keys.
+	SigDSASHA256 = "http://www.w3.org/2009/xmldsig11#dsa-sha256"
+
+	// SigECDSASHA1 is ECDSA with SHA-1 (section 6.4.3, RFC 6931).
+	SigECDSASHA1 = "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha1"
 
 	// The HMAC MACs (section 6.3.1): SHA-1 and SHA-256 REQUIRED, SHA-384 and
 	// SHA-512 RECOMMENDED. The key is only ever dsig.VerifyOptions.HMACKey,

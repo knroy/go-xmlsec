@@ -80,7 +80,14 @@ Named `TestConformance_<ID>_<description>` for the requirement they prove.
 | `TestMarshalPKCS7IsDER`, `TestPKCS7OpenSSLFixtures` | the PKCS7 encoding is DER, byte-identical to OpenSSL's `crl2pkcs7` for the same certificates, and OpenSSL's output parses in either certificate order |
 | `TestNilInputs` (`wss`, `xenc`) | a nil or wrong-kind argument is an error, never a panic |
 | `TestImplicitCanonicalization` | a received reference ending in a node set verifies through Canonical XML 1.0, and the implied algorithm is refused when outside the allow-list |
-| `TestX509DataDescriptiveElements` | subject name, issuer-serial and SKI beside one certificate are accepted and ignored; a second certificate, a CRL, a `KeyName` or no certificate are refused |
+| `TestX509DataDescriptiveElements` | subject name and issuer-serial that describe the certificate are accepted, as are a CRL and a `KeyName` beside; another subject or SKI, the same certificate twice, or no certificate are refused |
+| `TestX509Chain`, `TestX509ChainOrderAndCRLs`, `TestX509Descriptors`, `TestSignX509Options` (`dsig/x509data_test.go`) | a chain signed with every descriptor and a `KeyName` verifies, the leaf found in any order across several `X509Data`, the rest reported as `Intermediates` and the CRLs in `CRLs`; each descriptor matching, SHA-1 `X509Digest` only when named, descriptors of each carried certificate (as xmlsec1 writes them); another serial, issuer, subject, SKI or digest, 17 certificates, two leaves, malformed descriptors and unknown children refused; Sign's option combinations refused |
+| `TestDNEqual` (`dsig/x509data_internal_test.go`) | RFC 4514 names as Go, Santuario and xmlsec1 write them: escapes, `#hex` values, OIDs, multi-valued RDNs, case, spacing and RDN order; unparsable names never match |
+| `TestResolveX509`, `TestResolveKeyName`, `TestSignKeyName`, `TestKeyInfoReferenceForms` | the resolvers receive what the message says, their errors and empty or mismatching answers are refused, `TrustKey` still applies, a disallowed algorithm and a pinned key call nothing; `KeyInfoKeyName`, `KeyInfoX509Descriptors` and same-document and external `KeyInfoReference` sign and verify |
+| `TestRetrievalMethod` (`dsig/retrieval_test.go`) | each allowed `Type` to a same-document element, a raw certificate through `ResolveKeyInfoURI`, `DSAKeyValue` only for a DSA signature; transforms, a mismatched or unknown `Type`, the whole document, another document of any other type and a `RetrievalMethod` reached by reference refused |
+| `TestLegacyAlgorithmsOptIn`, `TestDSA` (`dsig/legacy_test.go`) | every algorithm outside the default sets (legacy and SHA-224) refused until named; DSA-SHA256 with a (2048, 256) key in `DSAKeyValue` and `DEREncodedKeyValue`, DSA key sizes per algorithm, ECDSA-SHA1, HMAC-SHA224 |
+| `TestCertpathLeaf` (`internal/certpath`) | the leaf of an unordered set, shared by PKCS7 tokens and `X509Data`: none or two is no leaf |
+| `TestX509DescriptorMismatchRefused`, `TestKeyResolversNotCalledBeforeAllowLists` (`tests/security`) | a descriptor of another certificate and a chain with two leaves are refused under an authentic signature; no key resolver runs for a disallowed signature or digest algorithm, or a pinned key |
 | `TestDHRoundTrip`, `TestDHKeyValueForms`, `TestDecryptAgreedKeyDHErrors`, `TestGenerateDHKeyErrors` (`xenc/dh_test.go`) | finite-field `dh-es` and `dh` in the RFC 3526 group 14 and RFC 7919 ffdhe2048 groups; every `DHKeyValue` form; a group under 2048 or over 8192 bits, a composite P, a Q not dividing P-1, a generator outside the subgroup, and a public value of 0, 1, P-1, P or outside the subgroup refused |
 | `TestLegacyKDFKnownAnswers` | the Legacy KDF of section 5.6.2.2 on the specification's own Example 40 input, and on two-block outputs, against values computed independently with Python's `hashlib`. Example 41's printed result does not match Example 40's octets; see the test |
 | `TestPBKDF2KnownAnswers`, `TestUnwrapEncryptedKeyPasswordErrors`, `TestPBKDF2AsAgreementKDF` (`xenc/pbkdf2_test.go`) | PBKDF2-HMAC-SHA256 and the RFC 6070 PBKDF2-HMAC-SHA1 vector as the KEK of an `xenc11:DerivedKey`; every malformed or out-of-policy parameter; PBKDF2 as a key agreement's KDF against a KEK computed independently |
@@ -150,6 +157,11 @@ package, does not implement XML Encryption 1.1 `rsa-oaep`.
 | `TestReferenceImplementationsDecryptOurEncryptionProperties` | ours → both | an element whose `EncryptedData` carries `EncryptionProperties`, `MimeType` and `Encoding` |
 | `TestWeDecryptAndReplaceTheirDocumentElement` | both → ours | each encrypts the document element; `DecryptAndReplace` returns, octet for octet, the canonical form of each one's own decryption |
 | `TestCipherReferenceXPathDecryptedByAll` | all three | a hand-built Example 13 `CipherReference`, XPath then base64 over the ciphertext held elsewhere in the document: xmlsec1, Santuario and `DecryptAndReplace` produce the same canonical document |
+| `TestWeVerifySantuarioX509Chain`, `TestWeVerifyXmlsec1X509Chain` | each → ours | a leaf and intermediate with `KeyName`, `X509IssuerSerial`, `X509SKI`, `X509SubjectName` and `X509Digest` as each writes them (xmlsec1 describing every certificate); `Coverage` reports the leaf, the intermediate and the name, and a changed serial is refused |
+| `TestReferenceImplementationsVerifyOurX509Chain` | ours → each | `Chain`, every `X509Descriptor` and `KeyName`; Santuario resolves the leaf, and xmlsec1 builds the path to a trusted root through the intermediate we carry |
+| `TestWeVerifySantuarioRetrievalMethod` | Santuario → ours | a `RetrievalMethod` of `Type` `X509Data` to an `X509Data` in a `ds:Object`, found with `IDAttrDSig` |
+| `TestReferenceImplementationsVerifyOurSHA224`, `TestWeVerifySHA224FromReferenceImplementations` | both ways, both peers | RSA-SHA224 and ECDSA-SHA224 with SHA-224 digests; refused by default, verified when named, a tampered copy refused |
+| `TestWeVerifySantuarioDSASHA256AndECDSASHA1` | Santuario → ours | DSA-SHA256 with a (2048, 256) key in `DSAKeyValue`, and ECDSA-SHA1 |
 | `TestXmlsec1DecryptsOurEncryption`, `TestSantuarioDecryptsOurEncryption` | ours → each | AES-128-GCM element, RSA-OAEP with explicit SHA-256 MGF and digest |
 | `TestWeDecryptXmlsec1Encryption`, `TestWeDecryptSantuarioEncryption` | each → ours | the same |
 
@@ -260,16 +272,22 @@ regression seed.
 
 **W3C XML Signature 1.1 interop vectors.** `tests/w3c`, a nested module, so
 they are in this repository and CI but not in the library's module
-download: 25 vectors from the 2012 interop report (Oracle), ECDSA
-P-256/384/521 and RSA with SHA-256/384/512, copied unmodified under the W3C
+download: 34 vectors from the 2012 interop report (Oracle), ECDSA
+P-256/384/521 and RSA with SHA-1, SHA-224, SHA-256, SHA-384 and SHA-512, and
+HMAC-SHA224, copied unmodified under the W3C
 Document License (`tests/w3c/NOTICE`, `tests/w3c/LICENSE-W3C-DOCUMENT`).
 `testdata/MANIFEST.json` records the expected outcome of each; run with
-`cd tests/w3c && go test ./...`. **10 verify end to end**: the nine
-`ECKeyValue` vectors and the EC `DEREncodedKeyValue` one, each an enveloping
-signature over a `ds:Object` (identified with `IDAttrDSig`). The other 15
-are refused, each for a documented reason: 4 carry 1024-bit RSA keys, below
-the 2048-bit minimum; 9 use the legacy RFC 4050 `ECDSAKeyValue` form; one
-uses `KeyInfoReference` and one `X509Digest`. None references an external
+`cd tests/w3c && go test ./...`. **17 verify end to end**: the fifteen
+`ECKeyValue` vectors (SHA-1 to SHA-512), the EC `DEREncodedKeyValue` one and
+HMAC-SHA224 (key "testkey", from the vectors' README), each an enveloping
+signature over a `ds:Object` (identified with `IDAttrDSig`). A vector whose
+algorithms are outside the default sets names them in the manifest
+(`allowed_signature`, `allowed_digest`), and is first checked to be refused
+without them. The other 17 are refused, each for a documented reason: 6
+carry 1024-bit RSA keys, below the 2048-bit minimum (one of them behind a
+`KeyInfoReference`, which is followed); 9 use the legacy RFC 4050
+`ECDSAKeyValue` form; one gives the key only as an `X509Digest`, whose
+certificate the vectors do not publish for `ResolveX509`. None references an external
 URI, so none depends on `ResolveURI`.
 
 **W3C XML Encryption 1.1 interop vectors.** `tests/w3c/testdata/xmlenc11`, the

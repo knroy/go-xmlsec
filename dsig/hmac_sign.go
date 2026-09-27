@@ -6,7 +6,6 @@ import (
 	"hash"
 
 	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/hashes"
 )
 
 // signatureMethod checks opts.SignatureAlgorithm against the key model
@@ -24,7 +23,7 @@ func signatureMethod(opts SignOptions) (crypto.Hash, error) {
 		if err := refuseLegacy(alg); err != nil {
 			return 0, err
 		}
-		h, ok := hashes.Signature(alg)
+		h, ok := signingHash(alg)
 		if !ok {
 			return 0, fmt.Errorf("%w: signature %q", xmlsec.ErrUnsupportedAlgorithm, alg)
 		}

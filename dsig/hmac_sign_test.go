@@ -21,7 +21,7 @@ func hmacOpts(alg string) dsig.SignOptions {
 	}
 }
 
-// XML-DSig 6.3: Sign produces HMAC-SHA2 with a shared secret and no
+// XML-DSig 6.3: Sign produces HMAC-SHA2, SHA-224 included, with a shared secret and no
 // KeyProvider, full length or truncated, and Verify accepts it with the same
 // secret only.
 func TestSignHMAC(t *testing.T) {
@@ -34,6 +34,7 @@ func TestSignHMAC(t *testing.T) {
 	}{
 		{xmlsec.SigHMACSHA256, hmacSecret, 0, 32},
 		{xmlsec.SigHMACSHA256, hmacSecret, 128, 16},
+		{xmlsec.SigHMACSHA224, hmacSecret, 0, 28},
 		{xmlsec.SigHMACSHA384, long, 0, 48},
 		{xmlsec.SigHMACSHA512, long, 264, 33},
 	}

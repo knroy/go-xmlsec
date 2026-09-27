@@ -72,7 +72,8 @@ type Reference struct {
 	Transforms []TransformSpec
 
 	// DigestAlgorithm is a Digest* constant. Required. The legacy
-	// verification-only xmlsec.DigestSHA1 is refused.
+	// verification-only xmlsec.DigestSHA1 is refused. xmlsec.DigestSHA224
+	// is produced, though a verifier must name it in its allow-list.
 	DigestAlgorithm string
 }
 
@@ -128,7 +129,9 @@ const (
 	KeyInfoNone KeyInfoForm = iota
 
 	// KeyInfoX509Data emits ds:X509Data/ds:X509Certificate with the
-	// base64 DER of the signing certificate.
+	// base64 DER of the signing certificate, followed by SignOptions.Chain
+	// and preceded by any SignOptions.X509Descriptors. Verify also reports it
+	// for a ds:RetrievalMethod to ds:X509Data or to a raw certificate.
 	KeyInfoX509Data
 
 	// KeyInfoSecurityTokenReference emits a wsse:SecurityTokenReference
@@ -149,6 +152,24 @@ const (
 	// As with KeyInfoKeyValue, the key is RSA or ECDSA on P-256, P-384 or
 	// P-521.
 	KeyInfoDEREncodedKeyValue
+
+	// KeyInfoKeyName emits only ds:KeyName, holding SignOptions.KeyName: the
+	// verifier must map the name to a key, as VerifyOptions.ResolveKeyName
+	// does. Verify reports it when that resolver supplied the key.
+	KeyInfoKeyName
+
+	// KeyInfoX509Descriptors emits ds:X509Data holding only the
+	// SignOptions.X509Descriptors of the signing certificate, not the
+	// certificate itself: the verifier must already hold it, as
+	// VerifyOptions.ResolveX509 does. Verify reports it when that resolver
+	// supplied the certificate.
+	KeyInfoX509Descriptors
+
+	// KeyInfoReference emits a dsig11:KeyInfoReference to
+	// SignOptions.KeyInfoReferenceURI (XML-DSig 4.5.10): the ds:KeyInfo
+	// describing the key is elsewhere, placed by the caller. Verify never
+	// reports it: it reports the form of the ds:KeyInfo referenced.
+	KeyInfoReference
 )
 
 func isC14N(alg string) bool { return c14n.Algorithm(alg).Valid() }
@@ -166,4 +187,6 @@ var ecdsaAlgorithms = map[string]bool{
 	xmlsec.SigECDSASHA256: true,
 	xmlsec.SigECDSASHA384: true,
 	xmlsec.SigECDSASHA512: true,
+	xmlsec.SigECDSASHA224: true,
+	xmlsec.SigECDSASHA1:   true,
 }

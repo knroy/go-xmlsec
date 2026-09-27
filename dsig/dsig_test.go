@@ -363,6 +363,9 @@ func TestAlgorithms(t *testing.T) {
 		{p256, xmlsec.SigECDSASHA256, xmlsec.DigestSHA256},
 		{p384, xmlsec.SigECDSASHA384, xmlsec.DigestSHA384},
 		{p521, xmlsec.SigECDSASHA512, xmlsec.DigestSHA512},
+		// Outside the default sets, produced when asked for.
+		{rsaKey, xmlsec.SigRSASHA224, xmlsec.DigestSHA224},
+		{p256, xmlsec.SigECDSASHA224, xmlsec.DigestSHA224},
 	}
 	for _, c := range cases {
 		t.Run(c.sig, func(t *testing.T) {
@@ -445,12 +448,14 @@ func TestSignRefusals(t *testing.T) {
 		{"hmac-sha384", func(o *dsig.SignOptions) { o.SignatureAlgorithm = xmlsec.SigHMACSHA384 }, xmlsec.ErrUnsupportedAlgorithm},
 		{"hmac-sha512", func(o *dsig.SignOptions) { o.SignatureAlgorithm = xmlsec.SigHMACSHA512 }, xmlsec.ErrUnsupportedAlgorithm},
 		{"sha1 digest", func(o *dsig.SignOptions) { o.References[0].DigestAlgorithm = xmlsec.DigestSHA1 }, xmlsec.ErrUnsupportedAlgorithm},
+		{"dsa-sha256", func(o *dsig.SignOptions) { o.SignatureAlgorithm = xmlsec.SigDSASHA256 }, xmlsec.ErrUnsupportedAlgorithm},
+		{"ecdsa-sha1", func(o *dsig.SignOptions) { o.SignatureAlgorithm = xmlsec.SigECDSASHA1 }, xmlsec.ErrUnsupportedAlgorithm},
 		{"unknown signature", func(o *dsig.SignOptions) { o.SignatureAlgorithm = "urn:x" }, xmlsec.ErrUnsupportedAlgorithm},
 		{"inclusive SignedInfo on a detached signature", func(o *dsig.SignOptions) {
 			o.CanonicalizationAlgorithm = string(c14n.Inclusive10)
 		}, xmlsec.ErrUnsupportedAlgorithm},
 	}
-	legacy := map[string]bool{"rsa-sha1": true, "dsa-sha1": true, "hmac-sha1": true, "sha1 digest": true}
+	legacy := map[string]bool{"rsa-sha1": true, "dsa-sha1": true, "hmac-sha1": true, "sha1 digest": true, "dsa-sha256": true, "ecdsa-sha1": true}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			opts := base

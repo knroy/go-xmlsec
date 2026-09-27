@@ -23,6 +23,12 @@ type entry struct {
 	Reason    string `json:"reason"`
 	Bug       string `json:"bug"`
 
+	// Algorithms outside the default sets that the vector needs named, and
+	// the HMAC key of an HMAC vector.
+	AllowedSignature []string `json:"allowed_signature"`
+	AllowedDigest    []string `json:"allowed_digest"`
+	HMACKey          string   `json:"hmac_key"`
+
 	Coverage struct {
 		WholeDocumentSigned bool     `json:"whole_document_signed"`
 		SignedElementIDs    []string `json:"signed_element_ids"`
@@ -96,9 +102,19 @@ func check(t *testing.T, e entry) {
 
 	// The vectors are enveloping signatures over a ds:Object, identified by
 	// the unqualified Id of the XML Signature schema itself.
-	cov, err := dsig.Verify(tree.Root, sig, dsig.VerifyOptions{
+	opts := dsig.VerifyOptions{
 		IDAttributes: []xdm.QName{dsig.IDAttrDSig},
-	})
+		HMACKey:      []byte(e.HMACKey),
+	}
+	// A vector outside the default sets is refused until its algorithms
+	// are named.
+	if len(e.AllowedSignature) > 0 {
+		if _, err := dsig.Verify(tree.Root, sig, opts); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
+			t.Fatalf("default allow-lists: got %v, want ErrAlgorithmNotAllowed", err)
+		}
+		opts.AllowedSignatureAlgorithms, opts.AllowedDigestAlgorithms = e.AllowedSignature, e.AllowedDigest
+	}
+	cov, err := dsig.Verify(tree.Root, sig, opts)
 	switch e.Expect {
 	case "verify":
 		if err != nil {
@@ -107,7 +123,7 @@ func check(t *testing.T, e entry) {
 		want := e.Coverage
 		if cov.WholeDocumentSigned != want.WholeDocumentSigned ||
 			!slices.Equal(cov.SignedElementIDs, want.SignedElementIDs) && len(cov.SignedElementIDs)+len(want.SignedElementIDs) > 0 ||
-			cov.KeyInfoForm != keyInfoForms[want.KeyInfoForm] || cov.PublicKey == nil {
+			cov.KeyInfoForm != keyInfoForms[want.KeyInfoForm] || (cov.PublicKey == nil) != (e.HMACKey != "") {
 			t.Errorf("coverage: whole=%v ids=%v form=%v, want %+v",
 				cov.WholeDocumentSigned, cov.SignedElementIDs, cov.KeyInfoForm, want)
 		}

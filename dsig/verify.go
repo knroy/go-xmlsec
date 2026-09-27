@@ -43,7 +43,8 @@ type VerifyOptions struct {
 
 	// PublicKey, if set, is the only key accepted, as Certificate but for a
 	// sender known by a raw key: an *rsa.PublicKey or *ecdsa.PublicKey, or a
-	// (1024, 160) *dsa.PublicKey for an explicitly allowed xmlsec.SigDSASHA1.
+	// *dsa.PublicKey for an explicitly allowed xmlsec.SigDSASHA1 (1024, 160)
+	// or xmlsec.SigDSASHA256 ((2048, 256) or (3072, 256)).
 	// Setting both is an error. The 2048-bit RSA minimum applied to a raw key
 	// read from ds:KeyInfo does not apply to a pinned key, which crypto/rsa
 	// bounds at 1024 bits.
@@ -56,17 +57,21 @@ type VerifyOptions struct {
 	//
 	// For every allow-list, an algorithm implemented only for legacy
 	// interoperability is outside the default set, and accepted only when
-	// named in the list: xmlsec.SigRSASHA1, SigDSASHA1 and the SigHMAC*
-	// constants here, xmlsec.DigestSHA1 for digests. They are verified, and
-	// never produced by Sign, except HMAC-SHA256, 384 and 512, which Sign
-	// produces with SignOptions.HMACKey and which are not weak: they are
-	// outside the default set because their key is a shared secret only
-	// the caller can supply.
+	// named in the list: xmlsec.SigRSASHA1, SigDSASHA1, SigDSASHA256,
+	// SigECDSASHA1 and the SigHMAC* constants here, xmlsec.DigestSHA1 for
+	// digests. They are verified, and never produced by Sign, except
+	// HMAC-SHA224, 256, 384 and 512, which Sign produces with
+	// SignOptions.HMACKey and which are not weak: they are outside the
+	// default set because their key is a shared secret only the caller can
+	// supply. The SHA-224 algorithms (xmlsec.SigRSASHA224, SigECDSASHA224,
+	// DigestSHA224) are outside the default sets too, though Sign produces
+	// them on request.
 	AllowedSignatureAlgorithms []string
 
 	// AllowedDigestAlgorithms restricts ds:DigestMethod values. Empty means
-	// the default set, today every Digest* constant; xmlsec.DigestSHA1 is
-	// accepted only when named.
+	// the default set, today every Digest* constant but xmlsec.DigestSHA1
+	// and DigestSHA224, each accepted only when named. It also bounds the
+	// algorithm of a dsig11:X509Digest in ds:KeyInfo.
 	AllowedDigestAlgorithms []string
 
 	// HMACKey is the shared secret of an HMAC ds:SignatureMethod
@@ -195,6 +200,41 @@ type VerifyOptions struct {
 	// are not in Unicode Normalization Form C (XML-DSig 8.1.3), as Sign
 	// never produces. Off by default: other signers need not normalize.
 	RequireNFC bool
+	// ResolveKeyName maps a ds:KeyName that ds:KeyInfo holds alone
+	// (XML-DSig 4.5.1) to the signer's key: a certificate, or a raw key with
+	// a nil certificate, never both. Beside any other key form a ds:KeyName
+	// is only reported, in Coverage.KeyName. It runs before any
+	// cryptographic work, on a name the unauthenticated message chose, so
+	// it must look the name up among keys the caller already holds, and
+	// never fetch. TrustKey still judges what it returns. An error it
+	// returns is wrapped with xmlsec.ErrUnsupportedKeyInfo. When nil, a lone
+	// ds:KeyName is refused. It is not called when a key is pinned.
+	ResolveKeyName func(name string) (*x509.Certificate, crypto.PublicKey, error)
+
+	// ResolveX509 supplies the certificate that ds:X509Data identifies
+	// without carrying it (XML-DSig 4.5.4): by issuer and serial number,
+	// SKI, subject name or dsig11:X509Digest, whose algorithm the digest
+	// allow-list has already accepted. The certificate returned must match
+	// every identifier given, or verification fails with
+	// xmlsec.ErrUnsupportedKeyInfo, as does an error it returns. It runs
+	// before any cryptographic work, like ResolveKeyName, with the same
+	// cautions; TrustKey still applies. When nil, ds:X509Data without a
+	// certificate is refused. It is not called when a key is pinned.
+	ResolveX509 func(id X509Identifier) (*x509.Certificate, error)
+
+	// ResolveKeyInfoURI supplies the octets of an absolute URI that
+	// ds:KeyInfo points at: a dsig11:KeyInfoReference to a ds:KeyInfo in
+	// another document (XML-DSig 4.5.10), parsed with xmlsec.Parse, or a
+	// ds:RetrievalMethod of Type rawX509Certificate (4.5.3), a DER
+	// certificate. Unlike ResolveURI it runs BEFORE the signature is
+	// verified, on a URI the unauthenticated message chose: every algorithm
+	// has passed the allow-lists, but anyone can make it fetch. A safe one
+	// serves only a fixed set of URIs (see xmlsec.URIResolver). What it
+	// returns is only ever a key description, which TrustKey then judges,
+	// and a reference found there is not followed. An error it returns is
+	// wrapped with xmlsec.ErrDereference. When nil, such a reference is
+	// refused. It is not called when a key is pinned.
+	ResolveKeyInfoURI xmlsec.URIResolver
 }
 
 // Coverage describes exactly what a verified signature covered. A
@@ -243,6 +283,23 @@ type Coverage struct {
 	// it. When a key was pinned, that description was read but not used, and
 	// a form this library does not accept is reported as KeyInfoNone.
 	KeyInfoForm KeyInfoForm
+
+	// KeyName is the ds:KeyName in ds:KeyInfo or, failing that, in the
+	// ds:KeyInfo a dsig11:KeyInfoReference names, as received; "" when
+	// there is none. KeyName, Intermediates and CRLs are reported only when
+	// the key came from ds:KeyInfo, not when one was pinned.
+	// It is not authenticated: the signature covers what KeyInfo describes
+	// only when a Reference signs ds:KeyInfo.
+	KeyName string
+
+	// Intermediates are the ds:X509Certificate elements beside the signing
+	// certificate in ds:X509Data, in document order: the path a caller may
+	// build to its trust anchors. They are not verified in any way.
+	Intermediates []*x509.Certificate
+
+	// CRLs are the DER octets of each ds:X509CRL in ds:X509Data, not parsed
+	// and not checked: revocation is the caller's decision.
+	CRLs [][]byte
 
 	// References are the verified references in order, retained because
 	// some receipts must echo them.
@@ -380,9 +437,18 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 		}
 	}
 
-	cert, pub, form, err := resolveKeyInfo(doc, p.keyInfo, opts.IDAttributes, opts.StrictSecurityTokenReference, p.sigAlg == xmlsec.SigDSASHA1)
 	// An HMAC key is pinned by definition: VerifyOptions.HMACKey.
 	pinned := opts.Certificate != nil || opts.PublicKey != nil || mac
+	kc := keyContext{doc: doc, opts: opts}
+	if _, ok := dsaKeySizes[p.sigAlg]; ok {
+		kc.dsaAlg = p.sigAlg
+	}
+	if pinned {
+		// Nothing is looked up or fetched for a key that will not be used.
+		kc.opts.ResolveKeyName, kc.opts.ResolveX509, kc.opts.ResolveKeyInfoURI = nil, nil, nil
+	}
+	key, err := kc.resolve(p.keyInfo, false)
+	cert, pub, form := key.cert, key.pub, key.form
 	switch {
 	case pinned && errors.Is(err, xmlsec.ErrUnsupportedKeyInfo):
 		// XML-DSig 3.2.2: the key comes "from KeyInfo or from an external
@@ -434,6 +500,9 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 	}
 
 	cov := &Coverage{Certificate: cert, PublicKey: pub, KeyInfoForm: form}
+	if !pinned {
+		cov.KeyName, cov.Intermediates, cov.CRLs = key.keyName, key.intermediates, key.crls
+	}
 	if err := digestReferences(cov, doc, sig, p.refs, raw, opts); err != nil {
 		return nil, err
 	}
@@ -592,8 +661,8 @@ func allowed(kind, v string, list []string, isDefault func(string) bool) error {
 
 // verifyDigest checks a public-key SignatureValue. An HMAC never reaches it.
 func verifyDigest(pub crypto.PublicKey, alg string, h crypto.Hash, digest, sig []byte) error {
-	if alg == xmlsec.SigDSASHA1 {
-		return verifyDSA(pub, digest, sig)
+	if _, ok := dsaKeySizes[alg]; ok {
+		return verifyDSA(pub, alg, digest, sig)
 	}
 	isEC := ecdsaAlgorithms[alg]
 	switch k := pub.(type) {

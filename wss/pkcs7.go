@@ -1,13 +1,12 @@
 package wss
 
 import (
-	"bytes"
 	"crypto/x509"
 	"encoding/asn1"
 	"fmt"
-	"slices"
 
 	"github.com/knroy/go-xmlsec"
+	"github.com/knroy/go-xmlsec/internal/certpath"
 )
 
 // PKCS#7 content types (RFC 2315 section 14).
@@ -136,17 +135,7 @@ func parsePKCS7(der []byte) (*x509.Certificate, error) {
 		return nil, fmt.Errorf("%w: BST PKCS7 carries no certificate", xmlsec.ErrMalformed)
 	}
 
-	var leaf *x509.Certificate
-	for _, c := range certs {
-		if slices.ContainsFunc(certs, func(d *x509.Certificate) bool { return d != c && issued(c, d) }) {
-			continue
-		}
-		if leaf != nil {
-			leaf = nil
-			break
-		}
-		leaf = c
-	}
+	leaf := certpath.Leaf(certs)
 	if leaf == nil {
 		return nil, fmt.Errorf("%w: BST PKCS7 has no single leaf certificate", xmlsec.ErrUnsupportedKeyInfo)
 	}
@@ -157,10 +146,4 @@ func parsePKCS7(der []byte) (*x509.Certificate, error) {
 // tag.
 func isTag(v asn1.RawValue, class, tag int) bool {
 	return v.Class == class && v.Tag == tag && v.IsCompound
-}
-
-// issued reports whether the certificate issuer names issued subject.
-func issued(issuer, subject *x509.Certificate) bool {
-	return bytes.Equal(subject.RawIssuer, issuer.RawSubject) &&
-		(len(subject.AuthorityKeyId) == 0 || len(issuer.SubjectKeyId) == 0 || bytes.Equal(subject.AuthorityKeyId, issuer.SubjectKeyId))
 }

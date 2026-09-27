@@ -20,7 +20,6 @@ import (
 	"github.com/knroy/go-xml/c14n"
 	"github.com/knroy/go-xml/xdm"
 	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/hashes"
 	"github.com/knroy/go-xmlsec/internal/xmltree"
 	"github.com/knroy/go-xmlsec/wss"
 )
@@ -28,9 +27,12 @@ import (
 // SignOptions configures signature generation.
 type SignOptions struct {
 	// SignatureAlgorithm is a Sig* constant. Required. The legacy
-	// verification-only algorithms (SigRSASHA1, SigDSASHA1, SigHMACSHA1) are
-	// refused with xmlsec.ErrUnsupportedAlgorithm. SigHMACSHA256, 384 and
-	// 512 need HMACKey, and are the only ones accepted with it.
+	// verification-only algorithms (SigRSASHA1, SigDSASHA1, SigDSASHA256,
+	// SigECDSASHA1, SigHMACSHA1) are refused with
+	// xmlsec.ErrUnsupportedAlgorithm. SigRSASHA224 and SigECDSASHA224 are
+	// produced, though a verifier must name them in its allow-list.
+	// SigHMACSHA224, 256, 384 and 512 need HMACKey, and are the only ones
+	// accepted with it.
 	SignatureAlgorithm string
 
 	// CanonicalizationAlgorithm canonicalizes ds:SignedInfo itself,
@@ -46,8 +48,9 @@ type SignOptions struct {
 	CanonicalizationPrefixes []string
 
 	// HMACKey, if set, makes the signature an HMAC keyed with this shared
-	// secret (XML-DSig 6.3): SignatureAlgorithm must then be SigHMACSHA256,
-	// SigHMACSHA384 or SigHMACSHA512 (SigHMACSHA1 is verification-only), the
+	// secret (XML-DSig 6.3): SignatureAlgorithm must then be SigHMACSHA224,
+	// SigHMACSHA256, SigHMACSHA384 or SigHMACSHA512 (SigHMACSHA1 is
+	// verification-only), the
 	// key must be at least as long as the hash output (RFC 2104 section 3),
 	// the KeyProvider is not used and KeyInfo must be KeyInfoNone: the
 	// verifier already holds the secret, and nothing about it travels.
@@ -71,6 +74,28 @@ type SignOptions struct {
 	// in doc, that a KeyInfoSecurityTokenReference points at. Required for
 	// that form, ignored otherwise.
 	SecurityTokenID string
+
+	// KeyName, if set, is emitted as ds:KeyName first in ds:KeyInfo
+	// (XML-DSig 4.5.1), beside the form KeyInfo selects; it is required for
+	// KeyInfoKeyName, which emits it alone, and refused with KeyInfoNone.
+	KeyName string
+
+	// Chain are certificates emitted after the signing certificate in
+	// ds:X509Data, for KeyInfoX509Data only: the path from it towards a
+	// trust anchor (XML-DSig 4.5.4). The signing certificate must be the one
+	// leaf of itself and Chain, and there may be at most 15 of them.
+	Chain []*x509.Certificate
+
+	// X509Descriptors are emitted in ds:X509Data, in the order given and
+	// before the certificate: beside it for KeyInfoX509Data, instead of it
+	// for KeyInfoX509Descriptors. Each may appear once.
+	X509Descriptors []X509Descriptor
+
+	// KeyInfoReferenceURI is the URI of the dsig11:KeyInfoReference that
+	// KeyInfoReference emits: "#id" for a ds:KeyInfo the caller places in
+	// the same document, or an absolute URI. Required for that form,
+	// refused with any other.
+	KeyInfoReferenceURI string
 
 	// SignatureID, if set, becomes the Id attribute of ds:Signature. It must
 	// be an NCName.
@@ -412,7 +437,7 @@ func checkReferences(refs []Reference, opts SignOptions, noDoc bool) error {
 // transform removes, and whose own Ids "#id" resolves against.
 func addReferences(parent, doc, sig *xdm.Node, refs []Reference, opts SignOptions) error {
 	for _, r := range refs {
-		dh, ok := hashes.Digest(r.DigestAlgorithm)
+		dh, ok := signingDigest(r.DigestAlgorithm)
 		if !ok {
 			return fmt.Errorf("%w: digest %q", xmlsec.ErrUnsupportedAlgorithm, r.DigestAlgorithm)
 		}
@@ -526,13 +551,45 @@ func transformParams(tr *xdm.Node, t TransformSpec) error {
 }
 
 func addKeyInfo(sig, doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions) error {
+	switch {
+	case opts.KeyInfo == KeyInfoNone && opts.KeyName != "":
+		return errors.New("dsig: SignOptions.KeyName needs a KeyInfo form")
+	case opts.KeyInfo == KeyInfoKeyName && opts.KeyName == "":
+		return errors.New("dsig: KeyInfoKeyName needs SignOptions.KeyName")
+	case (opts.KeyInfo == KeyInfoReference) != (opts.KeyInfoReferenceURI != ""):
+		return errors.New("dsig: SignOptions.KeyInfoReferenceURI goes with KeyInfoReference, and only with it")
+	case len(opts.Chain) > 0 && opts.KeyInfo != KeyInfoX509Data:
+		return errors.New("dsig: SignOptions.Chain needs KeyInfoX509Data")
+	case len(opts.X509Descriptors) > 0 && opts.KeyInfo != KeyInfoX509Data && opts.KeyInfo != KeyInfoX509Descriptors:
+		return errors.New("dsig: SignOptions.X509Descriptors needs KeyInfoX509Data or KeyInfoX509Descriptors")
+	}
+	var ki *xdm.Node
+	keyInfo := func() *xdm.Node {
+		if ki == nil {
+			ki = xmltree.Element(sig, "ds", xmlsec.NSDSig, "KeyInfo")
+			if opts.KeyName != "" {
+				xmltree.Text(xmltree.Element(ki, "ds", xmlsec.NSDSig, "KeyName"), opts.KeyName)
+			}
+		}
+		return ki
+	}
 	switch opts.KeyInfo {
 	case KeyInfoNone:
 		return nil
-	case KeyInfoX509Data:
-		ki := xmltree.Element(sig, "ds", xmlsec.NSDSig, "KeyInfo")
-		xd := xmltree.Element(ki, "ds", xmlsec.NSDSig, "X509Data")
-		xmltree.Text(xmltree.Element(xd, "ds", xmlsec.NSDSig, "X509Certificate"), base64.StdEncoding.EncodeToString(key.Certificate.Raw))
+	case KeyInfoKeyName:
+		keyInfo()
+		return nil
+	case KeyInfoX509Data, KeyInfoX509Descriptors:
+		return addX509Data(keyInfo(), key.Certificate, opts, opts.KeyInfo == KeyInfoX509Descriptors)
+	case KeyInfoReference:
+		if !strings.HasPrefix(opts.KeyInfoReferenceURI, "#") && !isExternal(opts.KeyInfoReferenceURI) {
+			return fmt.Errorf("%w: KeyInfoReferenceURI %q is neither \"#id\" nor absolute", xmlsec.ErrMalformed, opts.KeyInfoReferenceURI)
+		}
+		e, err := dsig11Element(keyInfo(), "KeyInfoReference")
+		if err != nil {
+			return err
+		}
+		xmltree.SetAttr(e, "", "", "URI", opts.KeyInfoReferenceURI)
 		return nil
 	case KeyInfoSecurityTokenReference:
 		tok, err := wss.FindByID(doc, opts.SecurityTokenID)
@@ -550,22 +607,21 @@ func addKeyInfo(sig, doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions) er
 		if err != nil {
 			return err
 		}
-		xmltree.Element(sig, "ds", xmlsec.NSDSig, "KeyInfo").AppendChild(str)
+		keyInfo().AppendChild(str)
 		return nil
 	case KeyInfoKeyValue, KeyInfoDEREncodedKeyValue:
-		return addRawKey(sig, key.Certificate, opts.KeyInfo)
+		if err := checkRawKey(key.Certificate.PublicKey); err != nil {
+			return err
+		}
+		return addRawKey(keyInfo(), key.Certificate, opts.KeyInfo)
 	}
 	return fmt.Errorf("dsig: unknown KeyInfoForm %d", opts.KeyInfo)
 }
 
 // addRawKey emits the certificate's key, which sign has checked is the
-// signer's, as ds:KeyValue or dsig11:DEREncodedKeyValue. A key the verifier
-// would refuse as a raw key is refused here.
-func addRawKey(sig *xdm.Node, cert *x509.Certificate, form KeyInfoForm) error {
-	if err := checkRawKey(cert.PublicKey); err != nil {
-		return err
-	}
-	ki := xmltree.Element(sig, "ds", xmlsec.NSDSig, "KeyInfo")
+// signer's, into ki as ds:KeyValue or dsig11:DEREncodedKeyValue. addKeyInfo
+// has refused a key the verifier would refuse as a raw key.
+func addRawKey(ki *xdm.Node, cert *x509.Certificate, form KeyInfoForm) error {
 	b64 := base64.StdEncoding.EncodeToString
 	if form == KeyInfoDEREncodedKeyValue {
 		e, err := dsig11Element(ki, "DEREncodedKeyValue")

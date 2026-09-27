@@ -31,118 +31,185 @@ var namedCurves = map[elliptic.Curve]string{
 	elliptic.P521(): "urn:oid:1.3.132.0.35",
 }
 
-// resolveKeyInfo reads ds:KeyInfo, returning the key it describes, the
-// certificate carrying it when there is one, and its form. Accepted: a
-// direct-reference wsse:SecurityTokenReference; ds:X509Data elements carrying
-// exactly one ds:X509Certificate between them, optionally beside the subject
-// name, issuer-serial or SKI that describe it; a lone ds:KeyValue or
-// dsig11:DEREncodedKeyValue holding a raw key; or a lone
-// dsig11:KeyInfoReference to a ds:KeyInfo in the same document holding one
-// of those. idAttrs are the ID attributes the reference resolves against
-// beyond wsu:Id and xml:id. dsaKeyValue admits a ds:DSAKeyValue, which Verify
-// sets only for a dsa-sha1 signature, itself only ever explicitly allowed.
-func resolveKeyInfo(doc, ki *xdm.Node, idAttrs []xdm.QName, strict, dsaKeyValue bool) (*x509.Certificate, crypto.PublicKey, KeyInfoForm, error) {
+// keyContext is what resolving a ds:KeyInfo needs: the document its
+// same-document references resolve in, the verification options (with the
+// key resolvers cleared when a key is pinned), and dsaAlg, the signature's
+// DSA algorithm when it is one, which alone admits a DSA key.
+type keyContext struct {
+	doc    *xdm.Node
+	opts   VerifyOptions
+	dsaAlg string
+}
+
+// resolvedKey is the key a ds:KeyInfo describes, with what it said beside.
+type resolvedKey struct {
+	cert          *x509.Certificate
+	pub           crypto.PublicKey
+	form          KeyInfoForm
+	keyName       string
+	crls          [][]byte
+	intermediates []*x509.Certificate
+}
+
+// resolve reads ds:KeyInfo, returning the key it describes. Accepted, with
+// at most one ds:KeyName beside, which is reported and otherwise ignored:
+// a direct-reference wsse:SecurityTokenReference; ds:X509Data elements
+// (x509Key); a ds:KeyValue or dsig11:DEREncodedKeyValue holding a raw key; a
+// dsig11:KeyInfoReference to a ds:KeyInfo holding one of those, in the same
+// document or, through VerifyOptions.ResolveKeyInfoURI, another; a
+// ds:RetrievalMethod (retrievalMethod). A ds:KeyName alone goes to
+// VerifyOptions.ResolveKeyName. hopped is set inside a ds:KeyInfo reached
+// by reference, where no further reference is followed.
+func (c *keyContext) resolve(ki *xdm.Node, hopped bool) (resolvedKey, error) {
 	if ki == nil {
-		return nil, nil, KeyInfoNone, nil
+		return resolvedKey{form: KeyInfoNone}, nil
 	}
-	kids := ki.ChildElements()
-	if len(kids) == 1 && kids[0].IsElement(xmlsec.NSDSig11, "KeyInfoReference") {
-		target, err := keyInfoReference(doc, kids[0], idAttrs)
-		if err != nil {
-			return nil, nil, KeyInfoNone, err
+	var name *xdm.Node
+	var forms []*xdm.Node
+	for _, k := range ki.ChildElements() {
+		switch {
+		case !k.IsElement(xmlsec.NSDSig, "KeyName"):
+			forms = append(forms, k)
+		case name != nil:
+			return resolvedKey{}, fmt.Errorf("%w: more than one ds:KeyName", xmlsec.ErrUnsupportedKeyInfo)
+		default:
+			name = k
 		}
-		return resolveKeyInfo(doc, target, idAttrs, strict, dsaKeyValue)
 	}
-	if len(kids) == 1 {
-		switch k := kids[0]; {
+	keyName := ""
+	if name != nil {
+		keyName = strings.TrimSpace(name.StringValue())
+	}
+	r, err := c.resolveForms(forms, keyName, hopped)
+	if r.keyName == "" {
+		r.keyName = keyName
+	}
+	return r, err
+}
+
+func (c *keyContext) resolveForms(forms []*xdm.Node, keyName string, hopped bool) (resolvedKey, error) {
+	if len(forms) == 0 {
+		if keyName == "" || c.opts.ResolveKeyName == nil {
+			return resolvedKey{}, fmt.Errorf("%w: no key in ds:KeyInfo", xmlsec.ErrUnsupportedKeyInfo)
+		}
+		cert, pub, err := c.opts.ResolveKeyName(keyName)
+		switch {
+		case err != nil:
+			return resolvedKey{}, fmt.Errorf("%w: ResolveKeyName: %w", xmlsec.ErrUnsupportedKeyInfo, err)
+		case (cert == nil) == (pub == nil):
+			return resolvedKey{}, fmt.Errorf("%w: ResolveKeyName must return a certificate or a key", xmlsec.ErrUnsupportedKeyInfo)
+		case cert != nil:
+			pub = cert.PublicKey
+		}
+		return resolvedKey{cert: cert, pub: pub, form: KeyInfoKeyName}, nil
+	}
+	if len(forms) == 1 {
+		switch k := forms[0]; {
 		case k.IsElement(xmlsec.NSWSSE, "SecurityTokenReference"):
 			resolve := wss.ResolveSecurityTokenReference
-			if strict {
+			if c.opts.StrictSecurityTokenReference {
 				resolve = wss.ResolveSecurityTokenReferenceStrict
 			}
-			cert, err := resolve(doc, k)
+			cert, err := resolve(c.doc, k)
 			return withKey(cert, KeyInfoSecurityTokenReference, err)
 		case k.IsElement(xmlsec.NSDSig, "KeyValue"):
-			pub, err := parseKeyValue(k, dsaKeyValue)
-			return nil, pub, KeyInfoKeyValue, err
+			pub, err := parseKeyValue(k, c.dsaAlg != "")
+			return resolvedKey{pub: pub, form: KeyInfoKeyValue}, err
 		case k.IsElement(xmlsec.NSDSig11, "DEREncodedKeyValue"):
-			pub, err := parseDEREncodedKeyValue(k)
-			return nil, pub, KeyInfoDEREncodedKeyValue, err
-		}
-	}
-
-	// One or more ds:X509Data carrying exactly one certificate between them.
-	// Subject name, issuer-serial and SKI beside it only describe that
-	// certificate; they are ignored, and never used to select a key.
-	var certEl *xdm.Node
-	for _, k := range kids {
-		if !k.IsElement(xmlsec.NSDSig, "X509Data") {
-			return nil, nil, 0, fmt.Errorf("%w: %s", xmlsec.ErrUnsupportedKeyInfo, k.Name.Local)
-		}
-		for _, d := range k.ChildElements() {
-			switch {
-			case d.IsElement(xmlsec.NSDSig, "X509Certificate"):
-				if certEl != nil {
-					return nil, nil, 0, fmt.Errorf("%w: more than one ds:X509Certificate", xmlsec.ErrUnsupportedKeyInfo)
-				}
-				certEl = d
-			case d.IsElement(xmlsec.NSDSig, "X509SubjectName"), d.IsElement(xmlsec.NSDSig, "X509IssuerSerial"), d.IsElement(xmlsec.NSDSig, "X509SKI"):
-			default:
-				return nil, nil, 0, fmt.Errorf("%w: %s in ds:X509Data", xmlsec.ErrUnsupportedKeyInfo, d.Name.Local)
+			pub, err := parseDEREncodedKeyValue(k, c.dsaAlg)
+			return resolvedKey{pub: pub, form: KeyInfoDEREncodedKeyValue}, err
+		case hopped && (k.IsElement(xmlsec.NSDSig11, "KeyInfoReference") || k.IsElement(xmlsec.NSDSig, "RetrievalMethod")):
+			return resolvedKey{}, fmt.Errorf("%w: %s in a ds:KeyInfo reached by reference", xmlsec.ErrUnsupportedKeyInfo, k.Name.Local)
+		case k.IsElement(xmlsec.NSDSig11, "KeyInfoReference"):
+			tc, target, err := c.keyInfoReference(k)
+			if err != nil {
+				return resolvedKey{}, err
 			}
+			return tc.resolve(target, true)
+		case k.IsElement(xmlsec.NSDSig, "RetrievalMethod"):
+			return c.retrievalMethod(k)
 		}
 	}
-	if certEl == nil {
-		return nil, nil, 0, fmt.Errorf("%w: no ds:X509Certificate", xmlsec.ErrUnsupportedKeyInfo)
+	for _, k := range forms {
+		if !k.IsElement(xmlsec.NSDSig, "X509Data") {
+			return resolvedKey{}, fmt.Errorf("%w: %s", xmlsec.ErrUnsupportedKeyInfo, k.Name.Local)
+		}
 	}
-	der, err := xmltree.Base64(certEl)
-	if err != nil {
-		return nil, nil, 0, fmt.Errorf("%w: ds:X509Certificate: %v", xmlsec.ErrMalformed, err)
-	}
-	cert, err := x509.ParseCertificate(der)
-	return withKey(cert, KeyInfoX509Data, err)
+	return c.x509Key(forms)
 }
 
 // keyInfoReference resolves a dsig11:KeyInfoReference (XML-DSig 4.5.10) to
-// the ds:KeyInfo it names. Only a same-document reference to an element by
-// ID is followed, refusing duplicate IDs as a ds:Reference does, and the
-// target may not itself hold a KeyInfoReference, so references never chain.
-func keyInfoReference(doc, ref *xdm.Node, idAttrs []xdm.QName) (*xdm.Node, error) {
+// the ds:KeyInfo it names, and the context to resolve that in. A
+// same-document reference names an element by ID, refusing duplicate IDs as
+// a ds:Reference does. Any other goes to VerifyOptions.ResolveKeyInfoURI,
+// and must be absolute; the octets are parsed with xmlsec.Parse, and their
+// document element must be ds:KeyInfo. Either way the target may not hold
+// another reference: references never chain.
+func (c *keyContext) keyInfoReference(ref *xdm.Node) (*keyContext, *xdm.Node, error) {
 	uri := ref.Attr("", "URI")
 	if uri == nil || len(ref.ChildElements()) > 0 {
-		return nil, malformed("dsig11:KeyInfoReference must have a URI and no children")
+		return nil, nil, malformed("dsig11:KeyInfoReference must have a URI and no children")
 	}
 	if !strings.HasPrefix(uri.Value, "#") {
-		return nil, fmt.Errorf("%w: dsig11:KeyInfoReference to %q; only a same-document ID is followed", xmlsec.ErrUnsupportedKeyInfo, uri.Value)
+		b, err := c.fetch("dsig11:KeyInfoReference", uri.Value)
+		if err != nil {
+			return nil, nil, err
+		}
+		tree, err := xmlsec.Parse(b)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%w: dsig11:KeyInfoReference %q: %w", xmlsec.ErrMalformed, uri.Value, err)
+		}
+		target := xmltree.DocumentElement(tree.Root)
+		if !target.IsElement(xmlsec.NSDSig, "KeyInfo") {
+			return nil, nil, malformed("dsig11:KeyInfoReference %q is %s, not ds:KeyInfo", uri.Value, target.Name.Local)
+		}
+		tc := *c
+		tc.doc = tree.Root
+		return &tc, target, nil
 	}
-	id, whole, _, err := sameDocumentTarget(uri.Value)
+	target, err := c.sameDocument("dsig11:KeyInfoReference", uri.Value)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !target.IsElement(xmlsec.NSDSig, "KeyInfo") {
+		return nil, nil, malformed("dsig11:KeyInfoReference %q names %s, not ds:KeyInfo", uri.Value, target.Name.Local)
+	}
+	return c, target, nil
+}
+
+// sameDocument returns the element a same-document "#id" or
+// "#xpointer(id('id'))" URI names, for the element named what.
+func (c *keyContext) sameDocument(what, uri string) (*xdm.Node, error) {
+	id, whole, _, err := sameDocumentTarget(uri)
 	if err != nil {
 		return nil, err
 	}
 	if whole {
-		return nil, fmt.Errorf("%w: dsig11:KeyInfoReference to the whole document", xmlsec.ErrUnsupportedKeyInfo)
+		return nil, fmt.Errorf("%w: %s to the whole document", xmlsec.ErrUnsupportedKeyInfo, what)
 	}
-	target, err := wss.FindByID(doc, id, idAttrs...)
+	return wss.FindByID(c.doc, id, c.opts.IDAttributes...)
+}
+
+// fetch returns the octets of an absolute URI through
+// VerifyOptions.ResolveKeyInfoURI, for the element named what.
+func (c *keyContext) fetch(what, uri string) ([]byte, error) {
+	if c.opts.ResolveKeyInfoURI == nil || !isExternal(uri) {
+		return nil, fmt.Errorf("%w: %s to %q; only a same-document ID is followed without VerifyOptions.ResolveKeyInfoURI, and a relative URI never is",
+			xmlsec.ErrUnsupportedKeyInfo, what, uri)
+	}
+	b, err := c.opts.ResolveKeyInfoURI(uri)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %q: %w", xmlsec.ErrDereference, uri, err)
 	}
-	if !target.IsElement(xmlsec.NSDSig, "KeyInfo") {
-		return nil, malformed("dsig11:KeyInfoReference %q names %s, not ds:KeyInfo", uri.Value, target.Name.Local)
-	}
-	for _, k := range target.ChildElements() {
-		if k.IsElement(xmlsec.NSDSig11, "KeyInfoReference") {
-			return nil, fmt.Errorf("%w: dsig11:KeyInfoReference to a ds:KeyInfo holding another", xmlsec.ErrUnsupportedKeyInfo)
-		}
-	}
-	return target, nil
+	return b, nil
 }
 
 // withKey returns a resolved certificate with its key.
-func withKey(cert *x509.Certificate, form KeyInfoForm, err error) (*x509.Certificate, crypto.PublicKey, KeyInfoForm, error) {
+func withKey(cert *x509.Certificate, form KeyInfoForm, err error) (resolvedKey, error) {
 	if err != nil {
-		return nil, nil, form, err
+		return resolvedKey{form: form}, err
 	}
-	return cert, cert.PublicKey, form, nil
+	return resolvedKey{cert: cert, pub: cert.PublicKey, form: form}, nil
 }
 
 // parseKeyValue reads ds:KeyValue holding ds:RSAKeyValue or
@@ -228,8 +295,8 @@ func parseECKeyValue(e *xdm.Node) (crypto.PublicKey, error) {
 }
 
 // parseDEREncodedKeyValue reads dsig11:DEREncodedKeyValue: base64 of a DER
-// SubjectPublicKeyInfo.
-func parseDEREncodedKeyValue(e *xdm.Node) (crypto.PublicKey, error) {
+// SubjectPublicKeyInfo. dsaAlg admits a DSA key, checked for it.
+func parseDEREncodedKeyValue(e *xdm.Node, dsaAlg string) (crypto.PublicKey, error) {
 	der, err := xmltree.Base64(e)
 	if err != nil {
 		return nil, malformed("dsig11:DEREncodedKeyValue: %v", err)
@@ -239,7 +306,7 @@ func parseDEREncodedKeyValue(e *xdm.Node) (crypto.PublicKey, error) {
 	if err != nil {
 		return nil, malformed("dsig11:DEREncodedKeyValue: %v", err)
 	}
-	return pub, checkRawKey(pub)
+	return pub, checkReceivedKey(pub, dsaAlg)
 }
 
 // checkRSASize refuses an RSA key under minRSABits: as a raw key from

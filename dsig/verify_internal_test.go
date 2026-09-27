@@ -53,7 +53,18 @@ func TestAllowedDefaultSet(t *testing.T) {
 			t.Errorf("legacy %s: in the default set, or not implemented", alg)
 		}
 	}
-	if len(legacySignatures) != 6 || len(legacyDigests) != 1 {
+	if len(legacySignatures) != 9 || len(legacyDigests) != 1 {
 		t.Error("legacy algorithm set changed")
+	}
+	// The SHA-224 algorithms are outside the default sets, and signable.
+	for alg := range optInSignatures {
+		if _, ok := signingHash(alg); defaultSignature(alg) || !ok {
+			t.Errorf("opt-in %s: in the default set, or not signable", alg)
+		}
+	}
+	for alg := range optInDigests {
+		if _, ok := signingDigest(alg); defaultDigest(alg) || !ok {
+			t.Errorf("opt-in %s: in the default set, or not signable", alg)
+		}
 	}
 }

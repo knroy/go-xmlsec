@@ -176,7 +176,7 @@ over `SignOptions.OmittedURIData`; the verifier supplies the same octets with
 ### HMAC
 
 With `SignOptions.HMACKey`, `Sign` produces an HMAC (§6.3):
-`SigHMACSHA256`, `SigHMACSHA384` or `SigHMACSHA512`, keyed with your shared
+`SigHMACSHA224`, `SigHMACSHA256`, `SigHMACSHA384` or `SigHMACSHA512`, keyed with your shared
 secret, which must be at least as long as the hash output. The `KeyProvider`
 is not used, and `KeyInfo` must be `KeyInfoNone`: nothing about the secret
 travels. `HMACOutputLength` truncates the MAC to that many bits, a multiple
@@ -419,9 +419,14 @@ kept only for legacy interoperability is outside that set and is accepted
 only when named explicitly.
 
 Legacy algorithms verify only when listed: `SigRSASHA1`, `SigDSASHA1`,
+`SigDSASHA256` (with (2048, 256) or (3072, 256) DSA keys), `SigECDSASHA1`,
 `SigHMACSHA1` and `DigestSHA1`. `Sign` never produces them. The HMAC-SHA2
-constants are also outside the default set, and verify only when listed and
-keyed with `HMACKey`; `Sign` produces them with `SignOptions.HMACKey`.
+constants, `SigHMACSHA224` included, are also outside the default set, and
+verify only when listed and keyed with `HMACKey`; `Sign` produces them with
+`SignOptions.HMACKey`. The SHA-224 algorithms, `SigRSASHA224`,
+`SigECDSASHA224` and `DigestSHA224`, are outside the default sets too, but not
+weak: `Sign` produces them when asked, and a verifier accepts them when it
+names them.
 
 To pin a sender known by a raw key rather than a certificate, set
 `VerifyOptions.PublicKey` instead of `Certificate`; setting both is an
@@ -431,6 +436,61 @@ still refused. When signing, `KeyInfoKeyValue` and
 `KeyInfoDEREncodedKeyValue` emit the signer's key without a certificate. A
 `dsig11:KeyInfoReference` is followed to a `ds:KeyInfo` in the same document,
 never further.
+
+### KeyInfo forms
+
+What `Sign` emits, by `SignOptions.KeyInfo`:
+
+| Form | Emits | Options |
+|---|---|---|
+| `KeyInfoX509Data` | `ds:X509Data` with the signing certificate | `Chain` adds certificates after it, towards a trust anchor; `X509Descriptors` adds `X509IssuerSerial`, `X509SKI`, `X509SubjectName` and `X509Digest` (SHA-256) of the signing certificate before it |
+| `KeyInfoX509Descriptors` | `ds:X509Data` with only the `X509Descriptors` | the verifier must hold the certificate |
+| `KeyInfoKeyValue`, `KeyInfoDEREncodedKeyValue` | the raw public key | |
+| `KeyInfoKeyName` | `ds:KeyName` alone | `KeyName` is required |
+| `KeyInfoReference` | `dsig11:KeyInfoReference` | `KeyInfoReferenceURI`: `"#id"` of a `ds:KeyInfo` you place in the document, or an absolute URI |
+| `KeyInfoSecurityTokenReference` | a `wsse:SecurityTokenReference` | `SecurityTokenID` |
+
+`KeyName`, when set, is emitted first beside any form but `KeyInfoNone`.
+The signing certificate must be the one leaf of itself and `Chain`.
+
+What `Verify` accepts, with at most one `ds:KeyName` beside, reported in
+`Coverage.KeyName`:
+
+* `ds:X509Data`, in one or several elements: up to 16 certificates, of which
+  exactly one issued none of the others. That leaf is the signing
+  certificate; the rest are `Coverage.Intermediates`, and each `ds:X509CRL`
+  is in `Coverage.CRLs`, none of them checked. Every `X509IssuerSerial`,
+  `X509SKI`, `X509SubjectName` and `dsig11:X509Digest` must describe one of
+  the certificates, or verification fails with `ErrUnsupportedKeyInfo`;
+  names compare as RFC 4514 distinguished names, and an `X509Digest`
+  algorithm must pass `AllowedDigestAlgorithms`. Children in other
+  namespaces are ignored.
+* A raw key: `ds:KeyValue` or `dsig11:DEREncodedKeyValue`, DSA only for an
+  allowed DSA signature.
+* A `ds:RetrievalMethod` to `"#id"`, without transforms, whose `Type` is
+  `X509Data`, `RSAKeyValue`, `DSAKeyValue`, `ECKeyValue` or
+  `DEREncodedKeyValue` and names an element of that type; or, through
+  `ResolveKeyInfoURI`, to an absolute URI of `Type` `rawX509Certificate`.
+* A `dsig11:KeyInfoReference` to a `ds:KeyInfo` in the same document or,
+  through `ResolveKeyInfoURI`, in another.
+* A `wsse:SecurityTokenReference`.
+
+A reference is followed one hop: a `RetrievalMethod` or `KeyInfoReference`
+in what one reaches is refused. Three opt-in resolvers cover what the
+message only names:
+
+| Option | Called for |
+|---|---|
+| `ResolveKeyName func(name string) (*x509.Certificate, crypto.PublicKey, error)` | a `ds:KeyName` alone; return a certificate or a raw key. `KeyInfoForm` is then `KeyInfoKeyName` |
+| `ResolveX509 func(dsig.X509Identifier) (*x509.Certificate, error)` | `ds:X509Data` without a certificate; the identifier carries the issuer and serial, SKI, subject name and digest, and the certificate returned must match them. `KeyInfoForm` is then `KeyInfoX509Descriptors` |
+| `ResolveKeyInfoURI xmlsec.URIResolver` | a `KeyInfoReference`, or a `RetrievalMethod` of `Type` `rawX509Certificate`, to an absolute URI; an error is `ErrDereference` |
+
+All three run before the signature is verified, on names and URIs the
+unauthenticated message chose, though only after every algorithm has passed
+the allow-lists; `TrustKey` then judges what they return. Look names up among
+keys you already hold, and serve URIs from a fixed set: see
+[security.md](security.md#key-resolvers-run-before-authentication). None is
+called when a key is pinned.
 
 More options:
 
@@ -445,6 +505,7 @@ More options:
 | `ResolveURI xmlsec.URIResolver` | Supplies the octets of a reference to an absolute URI such as `http:`; see External references below. Without it, such a reference is refused. |
 | `BaseURI string` | The absolute URI a relative reference URI is resolved against before `ResolveURI` sees it; never taken from the document. Without it, a relative URI is refused. |
 | `RequireNFC` | Refuse with `ErrNotNFC` a `ds:SignedInfo`, or the canonical octets of a same-document reference, that is not in Unicode Normalization Form C. Off by default. |
+| `ResolveKeyName`, `ResolveX509`, `ResolveKeyInfoURI` | Resolve a key the message names without carrying it; see [KeyInfo forms](#keyinfo-forms). |
 
 Then check `Coverage`, every time:
 
@@ -457,6 +518,8 @@ Then check `Coverage`, every time:
 | `KeyInfoForm` | the key was described the way your profile requires |
 | `Certificate` | **you** establish that it is trusted |
 | `PublicKey` | the key the signature was verified with; `Certificate` is nil when it was a raw key |
+| `Intermediates`, `CRLs` | the other certificates and the CRLs of `ds:X509Data`, unverified, for **your** path building and revocation checks |
+| `KeyName` | the `ds:KeyName` received; unauthenticated unless a reference signs `ds:KeyInfo` |
 | `References` | the digests, for receipts that echo them; `Raw` is each `ds:Reference` in the SignedInfo's canonical form |
 
 Errors worth distinguishing, all matchable with `errors.Is`:
@@ -469,7 +532,8 @@ Errors worth distinguishing, all matchable with `errors.Is`:
 | `ErrDigestMismatch` / `ErrSignatureInvalid` | the content or the signature value does not match |
 | `ErrTransformRefused` | an XPath, XPath Filter 2.0 or XSLT transform whose program you did not allow |
 | `ErrUntrusted` | your `TrustKey` refused the signer |
-| `ErrDereference` | your `ResolveURI` failed; wraps its error |
+| `ErrDereference` | your `ResolveURI` or `ResolveKeyInfoURI` failed; wraps its error |
+| `ErrUnsupportedKeyInfo` | no usable key in `ds:KeyInfo`: a form this library does not accept, an `X509Data` descriptor that describes none of its certificates, or a key resolver's refusal, which it wraps |
 
 ### External references
 

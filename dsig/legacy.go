@@ -1,13 +1,14 @@
-//lint:file-ignore SA1019 crypto/dsa is deprecated; DSA-SHA1 is a verification-only legacy algorithm, opt-in, never in the default set (XML-DSig 1.1 section 6.4.1), confined to this file.
+//lint:file-ignore SA1019 crypto/dsa is deprecated; DSA-SHA1 and DSA-SHA256 are verification-only legacy algorithms, opt-in, never in the default set (XML-DSig 1.1 section 6.4.1), confined to this file.
 
 package dsig
 
 import (
 	"crypto"
 	"crypto/dsa"
-	_ "crypto/sha1" // #nosec G505 -- SHA-1 backs verification-only legacy algorithms (sha1, rsa-sha1, dsa-sha1, hmac-sha1), opt-in, never in the default set, never produced by Sign.
+	_ "crypto/sha1" // #nosec G505 -- SHA-1 backs verification-only legacy algorithms (sha1, rsa-sha1, dsa-sha1, ecdsa-sha1, hmac-sha1), opt-in, never in the default set, never produced by Sign.
 	"fmt"
 	"math/big"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -16,15 +17,20 @@ import (
 	"github.com/knroy/go-xmlsec/internal/hashes"
 )
 
-// The legacy algorithms of XML-DSig 1.1 section 6.1, implemented for
-// verification only. They are outside the default sets (defaultSignature
-// and defaultDigest consult only hashes.Signature and hashes.Digest),
-// so Verify accepts one only when an allow-list names it, and Sign refuses
-// every one of them.
+// The algorithms of XML-DSig 1.1 section 6.1 outside the default sets
+// (defaultSignature and defaultDigest consult only hashes.Signature and
+// hashes.Digest), so Verify accepts one only when an allow-list names it.
+// Sign refuses the weak ones (refuseLegacy): SHA-1 in every form, DSA and
+// ECDSA-SHA1. The HMACs other than HMAC-SHA1 are here because their key is
+// a caller's shared secret, not because they are weak; Sign produces them
+// with SignOptions.HMACKey (hmac_sign.go).
 var (
 	legacySignatures = map[string]crypto.Hash{
 		xmlsec.SigRSASHA1:    crypto.SHA1,
 		xmlsec.SigDSASHA1:    crypto.SHA1,
+		xmlsec.SigDSASHA256:  crypto.SHA256,
+		xmlsec.SigECDSASHA1:  crypto.SHA1,
+		xmlsec.SigHMACSHA224: crypto.SHA224,
 		xmlsec.SigHMACSHA1:   crypto.SHA1,
 		xmlsec.SigHMACSHA256: crypto.SHA256,
 		xmlsec.SigHMACSHA384: crypto.SHA384,
@@ -35,16 +41,55 @@ var (
 	}
 	hmacAlgorithms = map[string]bool{
 		xmlsec.SigHMACSHA1:   true,
+		xmlsec.SigHMACSHA224: true,
 		xmlsec.SigHMACSHA256: true,
 		xmlsec.SigHMACSHA384: true,
 		xmlsec.SigHMACSHA512: true,
 	}
 )
 
+// The SHA-224 algorithms are not weak, only outside the default sets:
+// Verify accepts one when an allow-list names it, and Sign produces one when
+// asked to.
+var (
+	optInSignatures = map[string]crypto.Hash{
+		xmlsec.SigRSASHA224:   crypto.SHA224,
+		xmlsec.SigECDSASHA224: crypto.SHA224,
+	}
+	optInDigests = map[string]crypto.Hash{
+		xmlsec.DigestSHA224: crypto.SHA224,
+	}
+)
+
+// dsaKeySizes are the (L, N) sizes each DSA signature algorithm accepts
+// (XML-DSig 6.4.1).
+var dsaKeySizes = map[string][][2]int{
+	xmlsec.SigDSASHA1:   {{1024, 160}},
+	xmlsec.SigDSASHA256: {{2048, 256}, {3072, 256}},
+}
+
+// signingHash returns the hash of a signature algorithm Sign produces.
+func signingHash(alg string) (crypto.Hash, bool) {
+	if h, ok := hashes.Signature(alg); ok {
+		return h, true
+	}
+	h, ok := optInSignatures[alg]
+	return h, ok
+}
+
+// signingDigest returns the hash of a digest algorithm Sign produces.
+func signingDigest(alg string) (crypto.Hash, bool) {
+	if h, ok := hashes.Digest(alg); ok {
+		return h, true
+	}
+	h, ok := optInDigests[alg]
+	return h, ok
+}
+
 // signatureHash returns the hash of any signature algorithm Verify
 // implements, the legacy ones included.
 func signatureHash(alg string) (crypto.Hash, bool) {
-	if h, ok := hashes.Signature(alg); ok {
+	if h, ok := signingHash(alg); ok {
 		return h, true
 	}
 	h, ok := legacySignatures[alg]
@@ -53,7 +98,7 @@ func signatureHash(alg string) (crypto.Hash, bool) {
 
 // digestHash returns the hash of any digest algorithm Verify implements.
 func digestHash(alg string) (crypto.Hash, bool) {
-	if h, ok := hashes.Digest(alg); ok {
+	if h, ok := signingDigest(alg); ok {
 		return h, true
 	}
 	h, ok := legacyDigests[alg]
@@ -132,15 +177,15 @@ func parseDSAKeyValue(e *xdm.Node) (crypto.PublicKey, error) {
 	return &dsa.PublicKey{Parameters: dsa.Parameters{P: v["P"], Q: v["Q"], G: v["G"]}, Y: v["Y"]}, nil
 }
 
-// checkDSAKey accepts only the (L, N) = (1024, 160) keys of dsa-sha1
-// (XML-DSig 6.4.1), with prime P and Q, Q dividing P-1, and G and Y in the
-// order-Q subgroup. It applies to a DSA key from any source.
-func checkDSAKey(k *dsa.PublicKey) error {
+// checkDSAKey accepts only the (L, N) sizes alg takes (dsaKeySizes), with
+// prime P and Q, Q dividing P-1, and G and Y in the order-Q subgroup. It
+// applies to a DSA key from any source.
+func checkDSAKey(k *dsa.PublicKey, alg string) error {
 	if k.P == nil || k.Q == nil || k.G == nil || k.Y == nil {
 		return malformed("DSA key with missing parameters")
 	}
-	if k.P.BitLen() != 1024 || k.Q.BitLen() != 160 {
-		return fmt.Errorf("%w: DSA (L, N) = (%d, %d); dsa-sha1 takes (1024, 160)", xmlsec.ErrUnsupportedKeyInfo, k.P.BitLen(), k.Q.BitLen())
+	if !slices.Contains(dsaKeySizes[alg], [2]int{k.P.BitLen(), k.Q.BitLen()}) {
+		return fmt.Errorf("%w: DSA (L, N) = (%d, %d); %s takes %v", xmlsec.ErrUnsupportedKeyInfo, k.P.BitLen(), k.Q.BitLen(), alg, dsaKeySizes[alg])
 	}
 	one := big.NewInt(1)
 	inSubgroup := func(x *big.Int) bool {
@@ -157,20 +202,32 @@ func checkDSAKey(k *dsa.PublicKey) error {
 	return nil
 }
 
-// verifyDSA verifies a dsa-sha1 SignatureValue: r||s, each 20 octets
-// (XML-DSig 6.4.1, I2OSP with l = 20).
-func verifyDSA(pub crypto.PublicKey, digest, sig []byte) error {
+// checkReceivedKey is the policy for a raw key read from ds:KeyInfo: a DSA
+// key when dsaAlg, the signature's DSA algorithm, is set, checked for it;
+// otherwise checkRawKey.
+func checkReceivedKey(pub crypto.PublicKey, dsaAlg string) error {
+	if k, ok := pub.(*dsa.PublicKey); ok && dsaAlg != "" {
+		return checkDSAKey(k, dsaAlg)
+	}
+	return checkRawKey(pub)
+}
+
+// verifyDSA verifies a DSA SignatureValue: r||s, each N/8 octets (XML-DSig
+// 6.4.1: 20 for dsa-sha1, 32 for dsa-sha256). The hash is never longer than
+// N bits for the sizes checkDSAKey admits, so it needs no truncation.
+func verifyDSA(pub crypto.PublicKey, alg string, digest, sig []byte) error {
 	k, ok := pub.(*dsa.PublicKey)
 	if !ok {
-		return fmt.Errorf("%w: %s with a %T key", xmlsec.ErrUnsupportedAlgorithm, xmlsec.SigDSASHA1, pub)
+		return fmt.Errorf("%w: %s with a %T key", xmlsec.ErrUnsupportedAlgorithm, alg, pub)
 	}
-	if err := checkDSAKey(k); err != nil {
+	if err := checkDSAKey(k, alg); err != nil {
 		return err
 	}
-	if len(sig) != 40 {
+	n := k.Q.BitLen() / 8
+	if len(sig) != 2*n {
 		return xmlsec.ErrSignatureInvalid
 	}
-	if !dsa.Verify(k, digest, new(big.Int).SetBytes(sig[:20]), new(big.Int).SetBytes(sig[20:])) {
+	if !dsa.Verify(k, digest, new(big.Int).SetBytes(sig[:n]), new(big.Int).SetBytes(sig[n:])) {
 		return xmlsec.ErrSignatureInvalid
 	}
 	return nil

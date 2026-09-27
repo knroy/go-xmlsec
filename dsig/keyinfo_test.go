@@ -423,3 +423,179 @@ func TestSecurityTokenReferencePKCS7(t *testing.T) {
 		t.Fatalf("form %v, certificate %v", cov.KeyInfoForm, cov.Certificate)
 	}
 }
+
+// XML-DSig 4.5.1: a ds:KeyName alone is mapped to a key by ResolveKeyName,
+// before any cryptographic work; beside another form it is only reported.
+func TestResolveKeyName(t *testing.T) {
+	p := newPKI(t)
+	calls := 0
+	resolver := func(cert *x509.Certificate, pub crypto.PublicKey, err error) func(string) (*x509.Certificate, crypto.PublicKey, error) {
+		return func(name string) (*x509.Certificate, crypto.PublicKey, error) {
+			calls++
+			if name != "signer" {
+				t.Errorf("name %q", name)
+			}
+			return cert, pub, err
+		}
+	}
+	errUnknown := errors.New("unknown name")
+	cases := []struct {
+		name  string
+		ki    string
+		opts  dsig.VerifyOptions
+		want  error
+		form  dsig.KeyInfoForm
+		cert  bool
+		calls int
+	}{
+		{"certificate", `<ds:KeyName> signer </ds:KeyName>`, dsig.VerifyOptions{ResolveKeyName: resolver(p.leaf, nil, nil)}, nil, dsig.KeyInfoKeyName, true, 1},
+		{"raw key", `<ds:KeyName>signer</ds:KeyName>`, dsig.VerifyOptions{ResolveKeyName: resolver(nil, &rsaKey.PublicKey, nil)}, nil, dsig.KeyInfoKeyName, false, 1},
+		{"both", `<ds:KeyName>signer</ds:KeyName>`, dsig.VerifyOptions{ResolveKeyName: resolver(p.leaf, &rsaKey.PublicKey, nil)}, xmlsec.ErrUnsupportedKeyInfo, 0, false, 1},
+		{"neither", `<ds:KeyName>signer</ds:KeyName>`, dsig.VerifyOptions{ResolveKeyName: resolver(nil, nil, nil)}, xmlsec.ErrUnsupportedKeyInfo, 0, false, 1},
+		{"error", `<ds:KeyName>signer</ds:KeyName>`, dsig.VerifyOptions{ResolveKeyName: resolver(nil, nil, errUnknown)}, errUnknown, 0, false, 1},
+		{"no resolver", `<ds:KeyName>signer</ds:KeyName>`, dsig.VerifyOptions{}, xmlsec.ErrUnsupportedKeyInfo, 0, false, 0},
+		{"empty name", `<ds:KeyName/>`, dsig.VerifyOptions{ResolveKeyName: resolver(p.leaf, nil, nil)}, xmlsec.ErrUnsupportedKeyInfo, 0, false, 0},
+		{"two names", `<ds:KeyName>signer</ds:KeyName><ds:KeyName>signer</ds:KeyName>`, dsig.VerifyOptions{ResolveKeyName: resolver(p.leaf, nil, nil)}, xmlsec.ErrUnsupportedKeyInfo, 0, false, 0},
+		{"beside X509Data", `<ds:KeyName>signer</ds:KeyName><ds:X509Data>` + x509Cert(p.leaf) + `</ds:X509Data>`, dsig.VerifyOptions{ResolveKeyName: resolver(nil, nil, errUnknown)}, nil, dsig.KeyInfoX509Data, true, 0},
+		{"untrusted", `<ds:KeyName>signer</ds:KeyName>`, dsig.VerifyOptions{ResolveKeyName: resolver(p.leaf, nil, nil),
+			TrustKey: func(*x509.Certificate, crypto.PublicKey) error { return errUnknown }}, xmlsec.ErrUntrusted, 0, false, 1},
+		{"disallowed algorithm", `<ds:KeyName>signer</ds:KeyName>`, dsig.VerifyOptions{ResolveKeyName: resolver(p.leaf, nil, nil),
+			AllowedSignatureAlgorithms: []string{xmlsec.SigECDSASHA256}}, xmlsec.ErrAlgorithmNotAllowed, 0, false, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			calls = 0
+			doc, sig := signedCovDoc(t, covKI(c.ki))
+			cov, err := dsig.Verify(doc, sig, c.opts)
+			if !errors.Is(err, c.want) || calls != c.calls {
+				t.Fatalf("got %v after %d calls, want %v", err, calls, c.want)
+			}
+			if err == nil && (cov.KeyInfoForm != c.form || cov.KeyName != "signer" || (cov.Certificate != nil) != c.cert || !equalKey(cov.PublicKey, &rsaKey.PublicKey)) {
+				t.Fatalf("coverage %+v", cov)
+			}
+		})
+	}
+	// Nothing is resolved for a pinned key.
+	doc, sig := signedCovDoc(t, covKI(`<ds:KeyName>signer</ds:KeyName>`))
+	calls = 0
+	if _, err := dsig.Verify(doc, sig, dsig.VerifyOptions{PublicKey: &rsaKey.PublicKey, ResolveKeyName: resolver(p.leaf, nil, nil)}); err != nil || calls != 0 {
+		t.Fatalf("pinned: %v after %d calls", err, calls)
+	}
+}
+
+// Sign emits ds:KeyName first, alone for KeyInfoKeyName; it verifies
+// through ResolveKeyName.
+func TestSignKeyName(t *testing.T) {
+	p := newPKI(t)
+	for _, form := range []dsig.KeyInfoForm{dsig.KeyInfoKeyName, dsig.KeyInfoKeyValue, dsig.KeyInfoDEREncodedKeyValue} {
+		signed, err := signPKI(t, p.key, func(o *dsig.SignOptions) { o.KeyInfo, o.KeyName = form, "signer" })
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(signed), `<ds:KeyInfo><ds:KeyName>signer</ds:KeyName>`) {
+			t.Fatalf("form %d:\n%s", form, signed)
+		}
+		doc := parse(t, signed)
+		cov, err := dsig.Verify(doc, findSignature(doc), dsig.VerifyOptions{
+			ResolveKeyName: func(string) (*x509.Certificate, crypto.PublicKey, error) { return p.leaf, nil, nil }})
+		if err != nil || cov.KeyInfoForm != form || cov.KeyName != "signer" {
+			t.Fatalf("form %d: %v, %+v", form, err, cov)
+		}
+	}
+	for name, set := range map[string]func(o *dsig.SignOptions){
+		"KeyName with KeyInfoNone":    func(o *dsig.SignOptions) { o.KeyInfo, o.KeyName = dsig.KeyInfoNone, "signer" },
+		"KeyInfoKeyName without name": func(o *dsig.SignOptions) { o.KeyInfo = dsig.KeyInfoKeyName },
+	} {
+		if _, err := signPKI(t, p.key, set); err == nil {
+			t.Errorf("%s: signed", name)
+		}
+	}
+}
+
+// XML-DSig 4.5.10: Sign emits a dsig11:KeyInfoReference, and Verify follows
+// one to a ds:KeyInfo in the same document or, through ResolveKeyInfoURI,
+// in another; the referenced ds:KeyInfo may not refer on.
+func TestKeyInfoReferenceForms(t *testing.T) {
+	p := newPKI(t)
+	keyInfo := `<ds:KeyInfo xmlns:ds="` + xmlsec.NSDSig + `" Id="ki"><ds:KeyName>signer</ds:KeyName><ds:X509Data>` + x509Cert(p.leaf) + `</ds:X509Data></ds:KeyInfo>`
+	doc := `<smp:SignedServiceMetadata xmlns:smp="urn:example:smp">` + keyInfo + `</smp:SignedServiceMetadata>`
+	signed, err := signPKIDoc(t, doc, p.key, func(o *dsig.SignOptions) { o.KeyInfo, o.KeyInfoReferenceURI = dsig.KeyInfoReference, "#ki" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := parse(t, signed)
+	cov, err := dsig.Verify(d, findSignature(d), dsig.VerifyOptions{IDAttributes: []xdm.QName{dsig.IDAttrDSig}})
+	if err != nil || cov.KeyInfoForm != dsig.KeyInfoX509Data || cov.KeyName != "signer" || !cov.Certificate.Equal(p.leaf) {
+		t.Fatalf("same document: %v, %+v", err, cov)
+	}
+
+	const uri = "https://keys.example.com/signer.xml"
+	signed, err = signPKI(t, p.key, func(o *dsig.SignOptions) {
+		o.KeyInfo, o.KeyInfoReferenceURI, o.KeyName = dsig.KeyInfoReference, uri, "outer"
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(signed), `<dsig11:KeyInfoReference xmlns:dsig11="`+xmlsec.NSDSig11+`" URI="`+uri+`"></dsig11:KeyInfoReference>`) {
+		t.Fatalf("%s", signed)
+	}
+	var fetched []string
+	serve := func(b string, err error) xmlsec.URIResolver {
+		return func(u string) ([]byte, error) {
+			fetched = append(fetched, u)
+			return []byte(b), err
+		}
+	}
+	errGone := errors.New("gone")
+	kir := `<dsig11:KeyInfoReference xmlns:dsig11="` + xmlsec.NSDSig11 + `" URI="#x"/>`
+	cases := []struct {
+		name    string
+		resolve xmlsec.URIResolver
+		want    error
+		fetches int
+	}{
+		{"fetched", serve(keyInfo, nil), nil, 1},
+		{"no resolver", nil, xmlsec.ErrUnsupportedKeyInfo, 0},
+		{"resolver error", serve("", errGone), xmlsec.ErrDereference, 1},
+		{"not XML", serve("<", nil), xmlsec.ErrMalformed, 1},
+		{"not ds:KeyInfo", serve(`<x/>`, nil), xmlsec.ErrMalformed, 1},
+		{"refers on", serve(`<ds:KeyInfo xmlns:ds="`+xmlsec.NSDSig+`">`+kir+`</ds:KeyInfo>`, nil), xmlsec.ErrUnsupportedKeyInfo, 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fetched = nil
+			d := parse(t, signed)
+			cov, err := dsig.Verify(d, findSignature(d), dsig.VerifyOptions{ResolveKeyInfoURI: c.resolve})
+			if !errors.Is(err, c.want) || len(fetched) != c.fetches {
+				t.Fatalf("got %v after %v, want %v", err, fetched, c.want)
+			}
+			if err == nil && (fetched[0] != uri || cov.KeyName != "signer" || !cov.Certificate.Equal(p.leaf)) {
+				t.Fatalf("coverage %+v", cov)
+			}
+			// Nothing is fetched for a pinned key.
+			fetched = nil
+			if _, err := dsig.Verify(d, findSignature(d), dsig.VerifyOptions{ResolveKeyInfoURI: c.resolve, Certificate: p.leaf}); err != nil || fetched != nil {
+				t.Fatalf("pinned: %v after %v", err, fetched)
+			}
+		})
+	}
+
+	for name, set := range map[string]func(o *dsig.SignOptions){
+		"no URI":          func(o *dsig.SignOptions) { o.KeyInfo = dsig.KeyInfoReference },
+		"URI, other form": func(o *dsig.SignOptions) { o.KeyInfoReferenceURI = "#ki" },
+		"relative URI":    func(o *dsig.SignOptions) { o.KeyInfo, o.KeyInfoReferenceURI = dsig.KeyInfoReference, "keys/ki.xml" },
+	} {
+		if _, err := signPKI(t, p.key, set); err == nil {
+			t.Errorf("%s: signed", name)
+		}
+	}
+	// The dsig11 prefix bound to another namespace cannot be declared.
+	for name, set := range map[string]func(o *dsig.SignOptions){
+		"KeyInfoReference": func(o *dsig.SignOptions) { o.KeyInfo, o.KeyInfoReferenceURI = dsig.KeyInfoReference, "#ki" },
+		"X509Digest":       func(o *dsig.SignOptions) { o.X509Descriptors = []dsig.X509Descriptor{dsig.X509Digest} },
+	} {
+		if _, err := signPKIDoc(t, `<r xmlns:dsig11="urn:other"/>`, p.key, set); err == nil {
+			t.Errorf("%s: signed", name)
+		}
+	}
+}

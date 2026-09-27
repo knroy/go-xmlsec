@@ -120,8 +120,9 @@ default produces a signature that looks valid and that no peer accepts.
 
 | Purpose | Supported |
 |---|---|
-| Signature | RSA PKCS#1 v1.5 and ECDSA, each with SHA-256, SHA-384, SHA-512; HMAC-SHA256, 384, 512 with a caller's shared secret (opt-in on verification) |
-| Digest | SHA-256, SHA-384, SHA-512 |
+| Signature | RSA PKCS#1 v1.5 and ECDSA, each with SHA-256, SHA-384, SHA-512; HMAC-SHA256, 384, 512 with a caller's shared secret (opt-in on verification); opt-in: RSA, ECDSA and HMAC with SHA-224 |
+| Digest | SHA-256, SHA-384, SHA-512; opt-in: SHA-224 |
+| Key information | X.509 certificates and chains with issuer-serial, SKI, subject name and `X509Digest`; raw RSA and EC keys; `KeyName`; same-document `RetrievalMethod` and `KeyInfoReference`; WS-Security token references. Names, identifiers and external references are resolved only by caller-supplied resolvers |
 | Canonicalization | Canonical XML 1.0 and 1.1, Exclusive Canonical XML 1.0, with or without comments, from `go-xml/c14n` |
 | Transforms | enveloped signature, base64, SwA `Attachment-Content-Signature` and `Attachment-Complete-Signature`; XPath, XPath Filter 2.0 and XSLT, verified only for allowed expressions and stylesheets |
 | Key transport | RSA-OAEP (XML Encryption 1.1), MGF1 with SHA-256, SHA-384, SHA-512; opt-in: MGF1 with SHA-224 |
@@ -131,7 +132,7 @@ default produces a signature that looks valid and that no peer accepts.
 | Data encryption | AES-128-GCM, AES-192-GCM, AES-256-GCM; attachments as SwA `Attachment-Content-Only` or `Attachment-Complete` |
 
 Never produced, and accepted only when a caller names each one: SHA-1,
-DSA, HMAC-SHA1, `rsa-oaep-mgf1p`, `rsa-1_5`, AES-CBC, 3DES and `kw-tripledes`, which
+DSA with SHA-1 or SHA-256, ECDSA with SHA-1, HMAC-SHA1, `rsa-oaep-mgf1p`, `rsa-1_5`, AES-CBC, 3DES and `kw-tripledes`, which
 the specifications require but which are weak. The XPath, XPath Filter 2.0
 and XSLT transforms are produced on request and verified only for
 expressions and stylesheets the caller allows by exact text. Refused

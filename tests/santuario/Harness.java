@@ -84,6 +84,10 @@ public final class Harness {
                 case "verify-hmac" -> verifyHMAC(a[1], a[2]);
                 case "sign-enveloping" -> signEnveloping(a[1], a[2], a[3]);
                 case "sign-manifest" -> signManifest(a[1], a[2], a[3], a[4]);
+                case "sign-keyinfo" -> signKeyInfo(a[1], a[2], a[3], a[4], java.util.Arrays.copyOfRange(a, 5, a.length));
+                case "verify-keyinfo" -> verifyKeyInfo(a[1], a[2]);
+                case "sign-retrieval" -> signRetrieval(a[1], a[2], a[3], a[4]);
+                case "sign-alg" -> signAlg(a[1], a[2], a[3], a[4], a[5], a[6]);
                 default -> throw new IllegalArgumentException("unknown command " + a[0]);
             }
         } catch (Exception e) {
@@ -521,6 +525,122 @@ public final class Harness {
             l.add(cert(p));
         }
         Files.write(Path.of(out), cf.generateCertPath(l).getEncoded("PKCS7"));
+    }
+
+    /** An enveloped, exclusive-C14N signature over "", appended to the document element, KeyInfo left to the caller. */
+    static XMLSignature envelopedSig(Document doc, String sigAlg, String digestAlg) throws Exception {
+        String exc = Transforms.TRANSFORM_C14N_EXCL_OMIT_COMMENTS;
+        XMLSignature sig = new XMLSignature(doc, "", sigAlg, exc);
+        doc.getDocumentElement().appendChild(sig.getElement());
+        Transforms t = new Transforms(doc);
+        t.addTransform(Transforms.TRANSFORM_ENVELOPED_SIGNATURE);
+        t.addTransform(exc);
+        sig.addDocument("", t, digestAlg);
+        return sig;
+    }
+
+    /**
+     * sign-keyinfo in.xml key.pem out.xml keyName leaf.pem [chain.pem...]:
+     * an RSA-SHA256 enveloped signature whose ds:KeyInfo holds ds:KeyName
+     * and one ds:X509Data with Santuario's own X509IssuerSerial, X509SKI,
+     * X509SubjectName and dsig11:X509Digest (SHA-256) of the leaf, then the
+     * leaf and each chain certificate.
+     */
+    static void signKeyInfo(String in, String keyPath, String out, String keyName, String[] certs) throws Exception {
+        Document doc = parse(in);
+        XMLSignature sig = envelopedSig(doc, XMLSignature.ALGO_ID_SIGNATURE_RSA_SHA256, SHA256);
+        X509Certificate leaf = cert(certs[0]);
+        org.apache.xml.security.keys.content.X509Data xd = new org.apache.xml.security.keys.content.X509Data(doc);
+        xd.add(new org.apache.xml.security.keys.content.x509.XMLX509IssuerSerial(doc, leaf));
+        xd.addSKI(leaf);
+        xd.addSubjectName(leaf);
+        xd.addDigest(leaf, SHA256);
+        for (String c : certs) {
+            xd.addCertificate(cert(c));
+        }
+        sig.getKeyInfo().addKeyName(keyName);
+        sig.getKeyInfo().add(xd);
+        sig.sign(key(keyPath));
+        write(doc, out);
+    }
+
+    /**
+     * verify-keyinfo doc.xml leaf.pem: the first ds:Signature, with the
+     * certificate Santuario resolves from its ds:KeyInfo, which must be the
+     * leaf. Prints "OK" and the ds:KeyName values.
+     */
+    static void verifyKeyInfo(String docPath, String leafPath) throws Exception {
+        Document doc = parse(docPath);
+        XMLSignature sig = new XMLSignature(first(doc, Constants.SignatureSpecNS, "Signature"), "", true);
+        X509Certificate c = sig.getKeyInfo().getX509Certificate();
+        if (c == null || !c.equals(cert(leafPath))) {
+            throw new IllegalStateException("ds:KeyInfo resolves to " + (c == null ? "nothing" : c.getSubjectX500Principal()));
+        }
+        if (!sig.checkSignatureValue(c)) {
+            throw new IllegalStateException("signature does not verify");
+        }
+        System.out.println("OK");
+        for (int i = 0; i < sig.getKeyInfo().lengthKeyName(); i++) {
+            System.out.println("keyname " + sig.getKeyInfo().itemKeyName(i).getKeyName());
+        }
+    }
+
+    /**
+     * sign-retrieval in.xml key.pem cert.pem out.xml: an RSA-SHA256
+     * enveloped signature whose ds:KeyInfo holds only a ds:RetrievalMethod
+     * of Type X509Data to "#x509", a ds:X509Data carrying the certificate
+     * with Id="x509" in a ds:Object of the signature.
+     */
+    static void signRetrieval(String in, String keyPath, String certPath, String out) throws Exception {
+        Document doc = parse(in);
+        XMLSignature sig = envelopedSig(doc, XMLSignature.ALGO_ID_SIGNATURE_RSA_SHA256, SHA256);
+        org.apache.xml.security.keys.content.X509Data xd = new org.apache.xml.security.keys.content.X509Data(doc);
+        xd.addCertificate(cert(certPath));
+        xd.getElement().setAttributeNS(null, "Id", "x509");
+        xd.getElement().setIdAttributeNS(null, "Id", true);
+        org.apache.xml.security.signature.ObjectContainer obj = new org.apache.xml.security.signature.ObjectContainer(doc);
+        obj.appendChild(xd.getElement());
+        sig.appendObject(obj);
+        sig.getKeyInfo().add(new org.apache.xml.security.keys.content.RetrievalMethod(
+            doc, "#x509", null, org.apache.xml.security.keys.content.RetrievalMethod.TYPE_X509));
+        sig.sign(key(keyPath));
+        write(doc, out);
+    }
+
+    /**
+     * sign-alg in.xml key.pem cert.pem|- sigAlg digestAlg out.xml: an
+     * enveloped exclusive-C14N signature with the given algorithms. The key
+     * is RSA, EC or DSA (PKCS#8). ds:KeyInfo carries the certificate, or
+     * with "-" the ds:KeyValue of the key's public half.
+     */
+    static void signAlg(String in, String keyPath, String certPath, String sigAlg, String digestAlg, String out) throws Exception {
+        Document doc = parse(in);
+        XMLSignature sig = envelopedSig(doc, sigAlg, digestAlg);
+        PrivateKey k = anyKey(keyPath);
+        if (certPath.equals("-")) {
+            java.security.interfaces.DSAPrivateKey d = (java.security.interfaces.DSAPrivateKey) k;
+            java.security.interfaces.DSAParams p = d.getParams();
+            sig.addKeyInfo(KeyFactory.getInstance("DSA").generatePublic(new java.security.spec.DSAPublicKeySpec(
+                p.getG().modPow(d.getX(), p.getP()), p.getP(), p.getQ(), p.getG())));
+        } else {
+            sig.addKeyInfo(cert(certPath));
+        }
+        sig.sign(k);
+        write(doc, out);
+    }
+
+    /** A PKCS#8 RSA, EC or DSA private key. */
+    static PrivateKey anyKey(String path) throws Exception {
+        String pem = Files.readString(Path.of(path)).replaceAll("-----[A-Z ]+-----", "").replaceAll("\\s", "");
+        PKCS8EncodedKeySpec spec = new PKCS8EncodedKeySpec(Base64.getDecoder().decode(pem));
+        for (String alg : new String[] {"RSA", "EC", "DSA"}) {
+            try {
+                return KeyFactory.getInstance(alg).generatePrivate(spec);
+            } catch (Exception e) {
+                // try the next
+            }
+        }
+        throw new IllegalArgumentException("not an RSA, EC or DSA PKCS#8 key: " + path);
     }
 
     static final char[] PASS = "changeit".toCharArray();
