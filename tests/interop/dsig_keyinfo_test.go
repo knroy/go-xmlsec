@@ -118,8 +118,10 @@ func checkChainCoverage(t *testing.T, c chain, cov *dsig.Coverage, keyName strin
 
 // verifyWrongSerial replaces the leaf's serial in ds:X509IssuerSerial,
 // which the signature does not cover: the descriptor then no longer
-// describes the signing certificate, and Verify must refuse it. The control
-// that the descriptors the peer wrote were really compared.
+// describes the signing certificate, and Verify under StrictX509Data must
+// refuse it. The control that the descriptors the peer wrote were really
+// compared. By default a stale descriptor is ignored, as it selects
+// nothing.
 func verifyWrongSerial(t *testing.T, signed []byte) {
 	t.Helper()
 	serial := big.NewInt(leafSerial).String()
@@ -127,8 +129,12 @@ func verifyWrongSerial(t *testing.T, signed []byte) {
 		t.Fatalf("no X509SerialNumber %s in\n%s", serial, signed)
 	}
 	doc := parse(t, bytes.Replace(signed, []byte(">"+serial+"<"), []byte(">4242424243<"), 1))
-	if _, err := dsig.Verify(doc, find(doc, xmlsec.NSDSig, "Signature"), dsig.VerifyOptions{}); !errors.Is(err, xmlsec.ErrUnsupportedKeyInfo) {
+	sig := find(doc, xmlsec.NSDSig, "Signature")
+	if _, err := dsig.Verify(doc, sig, dsig.VerifyOptions{StrictX509Data: true}); !errors.Is(err, xmlsec.ErrUnsupportedKeyInfo) {
 		t.Fatalf("wrong X509SerialNumber: got %v, want ErrUnsupportedKeyInfo", err)
+	}
+	if _, err := dsig.Verify(doc, sig, dsig.VerifyOptions{}); err != nil {
+		t.Fatalf("wrong X509SerialNumber, not strict: %v", err)
 	}
 }
 
