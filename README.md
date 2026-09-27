@@ -23,8 +23,9 @@ because a signature is only as correct as the canonical octets it covers.
   `wsu:Id`, and timestamps checked on receipt.
 - **XML Encryption**: RSA-OAEP key transport with an explicit MGF, AES key
   wrap, ECDH-ES key agreement, and AES-GCM for elements, element content,
-  SOAP header blocks (`wsse11:EncryptedHeader`) and attachments; as
-  opt-ins, finite-field Diffie-Hellman (`dh-es`, `dh`) and PBKDF2.
+  SOAP header blocks (`wsse11:EncryptedHeader`), attachments and arbitrary
+  octets; decryption in place; as opt-ins, finite-field Diffie-Hellman
+  (`dh-es`, `dh`), PBKDF2, and an allow-listed XPath on a `CipherReference`.
 - **Hardened by default**: no DOCTYPE, no network or file access, no SHA-1,
   algorithm allow-lists checked before any cryptography. The XPath, XPath
   Filter 2.0 and XSLT transforms verify only for the exact expressions or

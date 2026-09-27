@@ -1,7 +1,7 @@
 // Package xenc implements XML Encryption 1.1: RSA-OAEP key transport with
 // an explicit MGF, AES key wrap, ECDH-ES key agreement with ConcatKDF, and
-// AES-GCM data encryption of elements, element content and attachments,
-// inline or by CipherReference.
+// AES-GCM data encryption of elements, element content, attachments and
+// arbitrary octets, inline or by CipherReference, and decryption in place.
 //
 // # Optional key agreement and derivation
 //

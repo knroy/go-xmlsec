@@ -400,7 +400,31 @@ with timeouts and a size cap, as above, and give the client a
 `CheckRedirect` that refuses what the allow-list would.
 `xenc.DecryptOptions.ResolveURI` does the same for an external
 `xenc:CipherReference` in `DecryptData`: its octets are the ciphertext, or,
-with the base64 transform, its encoding.
+with the base64 transform, its encoding. A relative `CipherReference` URI is
+resolved against `DecryptOptions.BaseURI`, which you set to where the
+message came from; the document's `xml:base` is never used, and without
+`BaseURI` a relative URI is refused.
+
+A `CipherReference` may also select the ciphertext's base64 text inside an
+XML document with an XPath transform, as XML Encryption's Example 13 does.
+That transform is refused unless its expression is one you allow, matched
+as `dsig.VerifyOptions.AllowedXPathExpressions` matches (the same text, each
+prefix bound to the same namespace), before anything is fetched:
+
+```go
+pt, err := xenc.DecryptData(ed, key, xenc.DecryptOptions{
+    BaseURI:    "https://repository.example/msgs/1.xml",
+    ResolveURI: resolve, // an allow-list, as above
+    AllowedXPathExpressions: []dsig.XPathExpression{{
+        Expr:       `self::text()[parent::rep:CipherValue[@Id="example1"]]`,
+        Namespaces: map[string]string{"rep": "http://www.example.org/repository"},
+    }},
+})
+```
+
+The resolved octets are parsed with `xmlsec.Parse`; the text nodes the
+expression keeps are concatenated and decoded. XSLT and XPath Filter 2.0 on a
+`CipherReference` are always refused.
 
 ## Encryption
 
@@ -440,6 +464,7 @@ What to encrypt:
 | `xenc.EncryptContent(doc, el, key, opts)` | an element's content, such as the SOAP Body's | `xenc#Content` |
 | `xenc.EncryptHeader(doc, block, security, key, opts)` | a SOAP header block, as a `wsse11:EncryptedHeader` carrying the Security header's `mustUnderstand` and `actor`/`role` | `xenc#Element` |
 | `xenc.EncryptAttachment(att, key, transform, opts)` | a MIME part, by `CipherReference` | the SwA Type |
+| `xenc.EncryptOctets(octets, key, opts)` | arbitrary octets, inline or by `CipherReference` | `opts.Type`, or none |
 
 `EncryptElement` refuses the SOAP Envelope, Header and Body and any header
 block: a header block must become an `EncryptedHeader` (Basic Security
@@ -463,7 +488,31 @@ encrypted, err := xenc.EncryptElement(doc, payload, ek.SessionKey, opts)
 ```
 
 `EncryptOptions.CarriedKeyName` and `RecipientHint` emit the `EncryptedKey`'s
-`CarriedKeyName` and `Recipient`.
+`CarriedKeyName` and `Recipient`. `SetKeyInfo` and `AddDataReference` place
+what they add in schema order, whatever order they are called in.
+
+Arbitrary octets, such as an image or a PDF, are encrypted with
+`EncryptOctets`. `Type`, `MimeType` and `Encoding` tell the recipient what
+they are; all three are optional, and `MimeType` and `Encoding` are advisory.
+With `CipherReferenceURI` the ciphertext is returned for you to store at
+that URI, and the `EncryptedData` points at it:
+
+```go
+ciphertext, ed, err := xenc.EncryptOctets(pdf, ek.SessionKey, xenc.EncryptOptions{
+    DataAlgorithm:      xmlsec.EncAES128GCM,
+    MimeType:           "application/pdf",
+    CipherReferenceURI: "https://repository.example/ct/1.bin", // omit for an inline CipherValue
+})
+// Store ciphertext at the URI; ciphertext is nil without CipherReferenceURI.
+```
+
+`MimeType`, `Encoding` and `EncryptionProperties` apply to `EncryptElement`,
+`EncryptContent` and `EncryptHeader` too; `EncryptAttachment` takes the
+`MimeType` from the part's Content-Type. `EncryptionProperties` are
+`xenc:EncryptionProperty` elements, such as a timestamp, copied after the
+`CipherData` (section 3.7) with the namespaces in scope where they stand.
+`Type` is set by each function itself, and `CipherReferenceURI` is only for
+`EncryptOctets`: any other value is refused.
 
 Key agreement and key wrap:
 
@@ -493,10 +542,21 @@ att, err := xenc.DecryptAttachment(edElement, mimeBody, key, allow)
 // with att.MIMEHeaders.
 ```
 
-`xenc.DecryptData` returns the plaintext octets. For `Element`, they parse on
-their own, because the plaintext declares every namespace in scope; for
-`Content`, parse them as the content of an element declaring the namespaces
-in scope at the target, and put the nodes in place of the `EncryptedData`.
+`xenc.DecryptData` returns the plaintext octets. To put them back in the
+document, as a decryptor does (sections 4.1 and 4.5), use `DecryptAndReplace`:
+
+```go
+doc, err := xenc.DecryptAndReplace(received, edElement, key, allow)
+// doc is the canonical document with the element, or the content, in place
+// of the EncryptedData; received is left unmodified.
+```
+
+It parses the plaintext with `xmlsec.Parse` as the content of an element
+declaring the namespaces in scope at the `EncryptedData`'s parent, so an
+element without a prefix takes its parent's default namespace unless it
+carries `xmlns=""`. `Element` must decrypt to one element, and so must an
+`EncryptedData` that is the document element; anything else, or another
+`Type`, is refused.
 `DecryptData` also follows a same-document `CipherReference` with the base64
 transform. `EncryptionMethod` is read strictly: a child the algorithm does not
 permit, or a `KeySize` inconsistent with it, is refused.

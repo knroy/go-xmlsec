@@ -212,9 +212,8 @@ func EncryptElement(doc *xdm.Node, target *xdm.Node, sessionKey []byte, opts Enc
 // would leave the envelope invalid (WS-I BSP R5607, R3228). The content of
 // a SOAP Body is what WS-Security usually encrypts.
 //
-// DecryptData returns the content's octets. To restore them, parse them as
-// the content of an element declaring the namespaces in scope at target,
-// and put the resulting nodes in place of the EncryptedData.
+// DecryptData returns the content's octets, and DecryptAndReplace puts
+// them back in place of the EncryptedData.
 func EncryptContent(doc *xdm.Node, target *xdm.Node, sessionKey []byte, opts EncryptOptions) ([]byte, error) {
 	if err := checkTarget(doc, target); err != nil {
 		return nil, err

@@ -15,7 +15,7 @@ golden-file key.
 
 | Layer | Where | Runs |
 |---|---|---|
-| Unit and conformance | `*_test.go` beside each package, named after the source file they test; `internal/swa` holds the SwA MIME header and content canonicalization | every push, Linux, macOS and Windows, under `-race` |
+| Unit and conformance | `*_test.go` beside each package, named after the source file they test; `internal/swa` holds the SwA MIME header and content canonicalization, and `internal/xpathfilter` the XPath allow-list matching and compilation `dsig` and `xenc` share | every push, Linux, macOS and Windows, under `-race` |
 | Differential against `xmlsec1`, Apache Santuario and WSS4J | `tests/interop`, build tag `interop`, run by `tests/interop.sh` | every push, Linux |
 | Security regressions | `tests/security`: XXE, external fetches, key substitution, algorithm confusion, comment truncation, encryption downgrade, transform programs outside the allow-list and prefix rebinding, Diffie-Hellman small-subgroup and weak-group attacks, PBKDF2 iteration bounds | every push, all three systems; a local HTTP listener proves nothing is fetched |
 | Fuzzing | `FuzzVerify`, `FuzzDecryptEncryptedKey`, `FuzzDecryptData` | nightly, one hour per target |
@@ -58,6 +58,12 @@ Named `TestConformance_<ID>_<description>` for the requirement they prove.
 | `TestParseRefusesXXE`, `TestParseFetchesNothing`, `TestVerifyDereferencesNothingExternal` | every XXE and external-reference route in the [assessment](security.md#assessment) is refused or inert, with zero requests reaching a local listener |
 | `TestExternalReferences`, `TestExternalCipherReference` | an absolute-URI reference signs and verifies through `ResolveURI`, raw and through a canonicalization that parses the octets, and is reported in `Coverage.ExternalURIs`; no resolver, a relative or unparsable URI and `cid:` are refused without calling it; resolver errors wrap `ErrDereference`; an external `CipherReference` decrypts raw or base64, and refused transforms never reach the resolver |
 | `TestResolverCalledOnlyForAuthenticSignatures`, `TestCipherReferenceResolverAfterAllowList` | the resolver is never called for an untrusted key, a different pinned key, a disallowed signature or digest algorithm, a URI rewritten after signing, or a disallowed data algorithm |
+| `TestCipherReferenceXPath`, `TestCipherReferenceXPathRefused`, `TestCipherReferenceXPathContent` (`xenc/cipherxpath_test.go`) | Example 13's XPath then base64 on an external, a whole-document and a `#id` `CipherReference`, with the ciphertext split by a comment and a decoy value beside it; `here()` in the same document; an expression not allowed or with its prefix rebound, XSLT, Filter 2.0 and an XPath transform not a `ds:Transform` are `ErrTransformRefused`, a malformed transform or allow-list entry `ErrMalformed`, and any other chain `ErrUnsupportedAlgorithm`, each before the resolver is called and before decryption; resolved octets that are not XML or carry a DOCTYPE, `here()` against a resolved document, and selected text that is not base64 are `ErrMalformed` |
+| `TestCipherReferenceBaseURI` | a relative `CipherReference` URI resolves against `DecryptOptions.BaseURI` (RFC 3986), not the document's `xml:base`, and is refused with no base, no resolver, or a base that is relative or unparsable |
+| `TestEncryptOctets` (`xenc/octets_test.go`) | arbitrary octets with `Type`, `MimeType`, `Encoding` and `Id`, inline and by a relative `CipherReference` decrypted through `BaseURI`; no `Type`; a same-document or unparsable reference URI, a bad `DataID` and CBC refused |
+| `TestEncryptionProperties`, `TestEncryptionPropertiesRefused`, `TestEncryptedKeySchemaOrder` (`xenc/properties_test.go`) | `EncryptionProperties` after `CipherData` on element, content and attachment encryption, copied with the namespaces in scope and never moved; `MimeType` and `Encoding`; a property that is not an `xenc:EncryptionProperty`, cannot be canonicalized or declares no prefix, a conflicting `Type`, a `CipherReferenceURI` outside `EncryptOctets` and an attachment `MimeType` refused; `EncryptedKey` children placed by name in schema order whatever order they are added in |
+| `TestDecryptAndReplaceRoundTrip`, `TestDecryptAndReplaceRefused` (`xenc/replace_test.go`) | encrypt then decrypt and replace restores the canonical document, for an element, an element undeclaring the default namespace, mixed content, empty content, the document element and content without a default namespace; two elements or text for Type Element, a document element's content that is not one element, octets that do not parse, close the wrapper, carry a DOCTYPE or an undeclared prefix, another or no Type, a disallowed algorithm and the wrong key are refused |
+| `TestCipherReferenceXPathRefusedBeforeFetch`, `TestCipherReferenceBaseURINeverFromXMLBase` (`tests/security`) | on a `CipherReference`, an XPath with no allow-list, one not listed and the allowed text with its prefix rebound are `ErrTransformRefused` with a key that would fail decryption and no resolver call; a relative URI under an `xml:base` naming a metadata address is refused without `BaseURI` and resolved against `BaseURI` alone with it |
 | `TestAttackerProgramRefusedBeforeEvaluation`, `TestXPathPrefixRebindingRefused`, `TestAllowedXSLTFetchesNothing` (`tests/security`) | an attacker's XPath, Filter 2.0 expression or stylesheet outside the allow-list is `ErrTransformRefused` ahead of the wrong-key failure, so before anything is evaluated; the allowed expression text with its prefix bound elsewhere is refused; an allowed stylesheet reaching for `file:` or `http:` through `document()`, `xsl:include` or `xsl:import` fails, with zero requests reaching a local listener |
 | `TestRawKeyRoundTrip`, `TestRawKeyInfoStructure`, `TestCoveragePublicKey` | each raw-key form with RSA and P-256/384/521, self-described and pinned; a different pinned key refused; malformed and refused raw keys (short RSA, even modulus or exponent, off-curve and compressed points, explicit parameters, unknown curves) |
 | `TestPinnedCertificateIgnoresEmbeddedKey`, `TestAlgorithmConfusion` | an attacker's own key is refused against a pinned certificate; HMAC, SHA-1 and key-type confusion are refused |
@@ -121,6 +127,10 @@ package, does not implement XML Encryption 1.1 `rsa-oaep`.
 | `TestWeDecryptXmlsec1AgreementWithPBKDF2` | xmlsec1 → ours | PBKDF2 as the KDF of ECDH-ES and of `dh-es`, the shared secret as the password |
 | `TestReferenceImplementationsDecryptOurKeyWrap`, `TestWeDecryptTheirKeyWrap` | both ways | AES key wrap |
 | `TestDecryptReplaceKeepsNoNamespace` | ours → both | a decrypted element that undeclares a default namespace stays in no namespace |
+| `TestReferenceImplementationsDecryptOurOctets` | ours → both | `EncryptOctets` binary octets with a `MimeType` and no XML `Type`, the `EncryptedData` the document element; Santuario through the harness's `decrypt-octets-kw` |
+| `TestReferenceImplementationsDecryptOurEncryptionProperties` | ours → both | an element whose `EncryptedData` carries `EncryptionProperties`, `MimeType` and `Encoding` |
+| `TestWeDecryptAndReplaceTheirDocumentElement` | both → ours | each encrypts the document element; `DecryptAndReplace` returns, octet for octet, the canonical form of each one's own decryption |
+| `TestCipherReferenceXPathDecryptedByAll` | all three | a hand-built Example 13 `CipherReference`, XPath then base64 over the ciphertext held elsewhere in the document: xmlsec1, Santuario and `DecryptAndReplace` produce the same canonical document |
 | `TestXmlsec1DecryptsOurEncryption`, `TestSantuarioDecryptsOurEncryption` | ours → each | AES-128-GCM element, RSA-OAEP with explicit SHA-256 MGF and digest |
 | `TestWeDecryptXmlsec1Encryption`, `TestWeDecryptSantuarioEncryption` | each → ours | the same |
 
@@ -239,7 +249,9 @@ URI, so none depends on `ResolveURI`.
 2012 Oracle vectors under the same license, with their keys (the `.p12` files
 unmodified, and their private keys extracted to PEM, since Go cannot read
 PKCS#12). The three ECDH-ES with ConcatKDF vectors, on P-256, P-384 and
-P-521, decrypt to the published plaintext. The others are refused for stated
+P-521, decrypt to the published plaintext, and, each `EncryptedData` being
+its document's element, `DecryptAndReplace` turns each into the canonical
+plaintext document. The others are refused for stated
 reasons: PBKDF2 and finite-field `dh-es` are not in the default set, and
 named, the two `dh-es` vectors' 1024-bit group is under the 2048-bit
 floor; `rsa-oaep-mgf1p` and a SHA-1 MGF are not allowed. The ECDH-ES with
