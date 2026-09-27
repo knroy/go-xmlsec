@@ -339,10 +339,12 @@ func TestX509DataDescriptiveElements(t *testing.T) {
 			add(is, "X509IssuerName", "CN=test")
 			add(is, "X509SerialNumber", "1")
 		}, nil},
+		// A stale descriptor beside the certificate selects nothing and is
+		// ignored unless VerifyOptions.StrictX509Data (TestX509Descriptors).
 		{"a second X509Data with another SKI", func(ki *xdm.Node) {
 			add(xmltree.Element(ki, "ds", xmlsec.NSDSig, "X509Data"), "X509SKI", "AAAA")
-		}, xmlsec.ErrUnsupportedKeyInfo},
-		{"another subject name", func(ki *xdm.Node) { add(ki.ChildElements()[0], "X509SubjectName", "CN=other") }, xmlsec.ErrUnsupportedKeyInfo},
+		}, nil},
+		{"another subject name", func(ki *xdm.Node) { add(ki.ChildElements()[0], "X509SubjectName", "CN=other") }, nil},
 		{"two certificates", func(ki *xdm.Node) {
 			x := ki.ChildElements()[0]
 			add(x, "X509Certificate", x.ChildElements()[0].StringValue())

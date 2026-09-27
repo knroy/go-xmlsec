@@ -6,7 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"io"
+	"hash"
 	"slices"
 
 	"github.com/knroy/go-xml/c14n"
@@ -114,7 +114,7 @@ func strOctets(token *xdm.Node, prefixes []string) ([]byte, error) {
 // digestSTR applies the STR Dereference Transform to d, which must be the
 // node set of a wsse:SecurityTokenReference; only is whether it is the
 // reference's only transform. It writes the output into w.
-func (d *data) digestSTR(w io.Writer, t TransformSpec, only bool) error {
+func (d *data) digestSTR(w hash.Hash, t TransformSpec, only bool) error {
 	if !only || d.ns == nil || d.strDeref == nil || !d.ns.Root().IsElement(xmlsec.NSWSSE, "SecurityTokenReference") {
 		return malformed("the STR Dereference Transform must be the only transform of a same-document reference to a wsse:SecurityTokenReference")
 	}

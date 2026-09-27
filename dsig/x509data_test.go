@@ -130,9 +130,10 @@ func x509Digest(alg string, b []byte) string {
 	return `<dsig11:X509Digest xmlns:dsig11="` + xmlsec.NSDSig11 + `" Algorithm="` + alg + `">` + b64(b) + `</dsig11:X509Digest>`
 }
 
-// Every descriptor beside a certificate must describe it: XML-DSig 4.5.4
-// says they "MUST refer to the certificate or certificates containing the
-// validation key".
+// Under StrictX509Data every descriptor beside a certificate must describe
+// it: XML-DSig 4.5.4 says they "MUST refer to the certificate or
+// certificates containing the validation key". By default a stale one is
+// ignored, as it selects nothing.
 func TestX509Descriptors(t *testing.T) {
 	p := newPKI(t)
 	leaf := x509Cert(p.leaf)
@@ -140,7 +141,8 @@ func TestX509Descriptors(t *testing.T) {
 	sum1 := sha1.Sum(p.leaf.Raw)
 	issuer := p.leaf.Issuer.String()
 	other := newPKI(t)
-	sha1Allowed := dsig.VerifyOptions{AllowedDigestAlgorithms: []string{xmlsec.DigestSHA256, xmlsec.DigestSHA1}}
+	sha1Allowed := dsig.VerifyOptions{AllowedDigestAlgorithms: []string{xmlsec.DigestSHA256, xmlsec.DigestSHA1}, StrictX509Data: true}
+	strict := dsig.VerifyOptions{StrictX509Data: true}
 	var many strings.Builder
 	for range 17 {
 		many.WriteString(leaf)
@@ -158,18 +160,25 @@ func TestX509Descriptors(t *testing.T) {
 		{"X509Digest SHA-1, named", leaf + x509Digest(xmlsec.DigestSHA1, sum1[:]), sha1Allowed, nil},
 		{"foreign child ignored", leaf + `<x:Hint xmlns:x="urn:x"/>`, dsig.VerifyOptions{}, nil},
 
-		{"another serial", leaf + issuerSerial(issuer, "1"), dsig.VerifyOptions{}, xmlsec.ErrUnsupportedKeyInfo},
-		{"another issuer", leaf + issuerSerial("CN=Root", "1234567890123"), dsig.VerifyOptions{}, xmlsec.ErrUnsupportedKeyInfo},
-		{"another subject", leaf + `<ds:X509SubjectName>CN=Leaf</ds:X509SubjectName>`, dsig.VerifyOptions{}, xmlsec.ErrUnsupportedKeyInfo},
-		{"another SKI", leaf + `<ds:X509SKI>AwM=</ds:X509SKI>`, dsig.VerifyOptions{}, xmlsec.ErrUnsupportedKeyInfo},
-		{"another certificate's digest", leaf + x509Digest(xmlsec.DigestSHA256, other.leaf.Raw[:32]), dsig.VerifyOptions{}, xmlsec.ErrUnsupportedKeyInfo},
-		{"X509Digest SHA-1, not named", leaf + x509Digest(xmlsec.DigestSHA1, sum1[:]), dsig.VerifyOptions{}, xmlsec.ErrAlgorithmNotAllowed},
-		{"X509Digest, unimplemented", leaf + x509Digest("urn:x", sum1[:]), dsig.VerifyOptions{AllowedDigestAlgorithms: []string{xmlsec.DigestSHA256, "urn:x"}}, xmlsec.ErrUnsupportedAlgorithm},
+		{"another serial", leaf + issuerSerial(issuer, "1"), strict, xmlsec.ErrUnsupportedKeyInfo},
+		{"another serial, not strict", leaf + issuerSerial(issuer, "1"), dsig.VerifyOptions{}, nil},
+		{"another issuer", leaf + issuerSerial("CN=Root", "1234567890123"), strict, xmlsec.ErrUnsupportedKeyInfo},
+		{"another issuer, not strict", leaf + issuerSerial("CN=Root", "1234567890123"), dsig.VerifyOptions{}, nil},
+		{"another subject", leaf + `<ds:X509SubjectName>CN=Leaf</ds:X509SubjectName>`, strict, xmlsec.ErrUnsupportedKeyInfo},
+		{"another subject, not strict", leaf + `<ds:X509SubjectName>CN=Leaf</ds:X509SubjectName>`, dsig.VerifyOptions{}, nil},
+		{"another SKI", leaf + `<ds:X509SKI>AwM=</ds:X509SKI>`, strict, xmlsec.ErrUnsupportedKeyInfo},
+		{"another SKI, not strict", leaf + `<ds:X509SKI>AwM=</ds:X509SKI>`, dsig.VerifyOptions{}, nil},
+		{"another certificate's digest", leaf + x509Digest(xmlsec.DigestSHA256, other.leaf.Raw[:32]), strict, xmlsec.ErrUnsupportedKeyInfo},
+		{"another certificate's digest, not strict", leaf + x509Digest(xmlsec.DigestSHA256, other.leaf.Raw[:32]), dsig.VerifyOptions{}, nil},
+		{"X509Digest SHA-1, not named", leaf + x509Digest(xmlsec.DigestSHA1, sum1[:]), strict, xmlsec.ErrAlgorithmNotAllowed},
+		{"X509Digest SHA-1, not named, not strict", leaf + x509Digest(xmlsec.DigestSHA1, sum1[:]), dsig.VerifyOptions{}, nil},
+		{"X509Digest, unimplemented", leaf + x509Digest("urn:x", sum1[:]), dsig.VerifyOptions{AllowedDigestAlgorithms: []string{xmlsec.DigestSHA256, "urn:x"}, StrictX509Data: true}, xmlsec.ErrUnsupportedAlgorithm},
 
 		// xmlsec1 describes every certificate it carries.
 		{"descriptors of each certificate", leaf + x509Cert(p.inter) + `<ds:X509SKI>AwMD</ds:X509SKI><ds:X509SKI>Ag==</ds:X509SKI>` +
 			issuerSerial(issuer, "1234567890123") + issuerSerial("CN=Root", "2") + `<ds:X509SubjectName>CN=Intermediate</ds:X509SubjectName>`, dsig.VerifyOptions{}, nil},
-		{"a descriptor of a certificate not carried", leaf + `<ds:X509SKI>AwMD</ds:X509SKI><ds:X509SKI>Ag==</ds:X509SKI>`, dsig.VerifyOptions{}, xmlsec.ErrUnsupportedKeyInfo},
+		{"a descriptor of a certificate not carried", leaf + `<ds:X509SKI>AwMD</ds:X509SKI><ds:X509SKI>Ag==</ds:X509SKI>`, strict, xmlsec.ErrUnsupportedKeyInfo},
+		{"a descriptor of a certificate not carried, not strict", leaf + `<ds:X509SKI>AwMD</ds:X509SKI><ds:X509SKI>Ag==</ds:X509SKI>`, dsig.VerifyOptions{}, nil},
 		{"SKI not base64", leaf + `<ds:X509SKI>!!</ds:X509SKI>`, dsig.VerifyOptions{}, xmlsec.ErrMalformed},
 		{"empty subject name", leaf + `<ds:X509SubjectName> </ds:X509SubjectName>`, dsig.VerifyOptions{}, xmlsec.ErrMalformed},
 		{"serial not an integer", leaf + issuerSerial(issuer, "0x1"), dsig.VerifyOptions{}, xmlsec.ErrMalformed},

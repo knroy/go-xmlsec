@@ -65,9 +65,10 @@ func certElement(c *x509.Certificate) string {
 }
 
 // XML-DSig 4.5.4: an X509IssuerSerial, X509SKI, X509SubjectName or
-// dsig11:X509Digest beside the certificate "MUST refer to" it. One that
-// describes another certificate is refused, even under an authentic
-// signature; so is a chain with two leaves, where the signer is ambiguous.
+// dsig11:X509Digest beside the certificate "MUST refer to" it. Under
+// StrictX509Data one that describes another certificate is refused, even
+// under an authentic signature; a chain with two leaves, where the signer
+// is ambiguous, is refused always.
 func TestX509DescriptorMismatchRefused(t *testing.T) {
 	caKey, victimKey, otherKey := rsaKey(t), rsaKey(t), rsaKey(t)
 	ca := issued(t, caKey, "CA", nil, nil)
@@ -88,7 +89,7 @@ func TestX509DescriptorMismatchRefused(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			doc := signEnveloped(t, `<r><a>signed</a></r>`, kp, xmlsec.SigRSASHA256)
 			sig := setKeyInfo(t, doc, `<ds:X509Data>`+certElement(victim)+extra+`</ds:X509Data>`)
-			if _, err := dsig.Verify(doc, sig, dsig.VerifyOptions{}); !errors.Is(err, xmlsec.ErrUnsupportedKeyInfo) {
+			if _, err := dsig.Verify(doc, sig, dsig.VerifyOptions{StrictX509Data: true}); !errors.Is(err, xmlsec.ErrUnsupportedKeyInfo) {
 				t.Fatalf("got %v", err)
 			}
 		})

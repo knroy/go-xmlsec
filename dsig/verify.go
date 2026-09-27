@@ -273,6 +273,16 @@ type VerifyOptions struct {
 	// certificate is refused. It is not called when a key is pinned.
 	ResolveX509 func(id X509Identifier) (*x509.Certificate, error)
 
+	// StrictX509Data refuses, with xmlsec.ErrUnsupportedKeyInfo, a
+	// ds:X509IssuerSerial, X509SKI, X509SubjectName or dsig11:X509Digest
+	// beside carried certificates that describes none of them. XML-DSig
+	// 4.5.4 requires the signer to keep them consistent, but real signers
+	// renew a certificate and leave a stale descriptor, and a descriptor
+	// selects nothing when the certificate is carried: by default they are
+	// ignored, as Santuario ignores them, and TrustKey judges the
+	// certificate.
+	StrictX509Data bool
+
 	// ResolveKeyInfoURI supplies the octets of an absolute URI that
 	// ds:KeyInfo points at: a dsig11:KeyInfoReference to a ds:KeyInfo in
 	// another document (XML-DSig 4.5.10), parsed with xmlsec.Parse, or a

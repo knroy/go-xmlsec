@@ -2,6 +2,7 @@ package dsig
 
 import (
 	"bytes"
+	"cmp"
 	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -76,14 +77,21 @@ type x509Data struct {
 	certs []*x509.Certificate
 	descs []X509Identifier
 	crls  [][]byte
+
+	// descErr is why a descriptor could not be read, such as an
+	// X509Digest under an algorithm outside the allow-list. It matters only
+	// where the descriptors are consulted.
+	descErr error
 }
 
 // x509Key resolves the ds:X509Data elements of one ds:KeyInfo (XML-DSig
 // 4.5.4). Their certificates, at most maxX509Certificates, must hold
 // exactly one leaf, the one that issued none of the others: it is the
 // signing certificate, and the others are reported as intermediates. Every
-// descriptor must describe one of the certificates: xmlsec1 describes each
-// certificate it carries. Without a certificate the descriptors, each kind
+// descriptor beside them is ignored, as it selects nothing, unless
+// VerifyOptions.StrictX509Data requires each to describe one of the
+// certificates (xmlsec1 describes each certificate it carries). Without a
+// certificate the descriptors, each kind
 // at most once, go to VerifyOptions.ResolveX509, and must all describe what
 // it returns. ds:X509CRL is reported, not checked, and children in other
 // namespaces are ignored.
@@ -99,11 +107,19 @@ func (c *keyContext) x509Key(els []*xdm.Node) (resolvedKey, error) {
 		if cert = certpath.Leaf(d.certs); cert == nil {
 			return resolvedKey{}, fmt.Errorf("%w: ds:X509Data holds no single leaf certificate", xmlsec.ErrUnsupportedKeyInfo)
 		}
+		if !c.opts.StrictX509Data {
+			break
+		}
+		if d.descErr != nil {
+			return resolvedKey{}, d.descErr
+		}
 		for _, id := range d.descs {
 			if !slices.ContainsFunc(d.certs, func(c *x509.Certificate) bool { return matchX509(c, id) == nil }) {
 				return resolvedKey{}, matchX509(cert, id)
 			}
 		}
+	case d.descErr != nil:
+		return resolvedKey{}, d.descErr
 	case len(d.descs) > 0 && c.opts.ResolveX509 != nil:
 		id, err := identifier(d.descs)
 		if err != nil {
@@ -189,10 +205,12 @@ func (c *keyContext) readX509Data(els []*xdm.Node) (x509Data, error) {
 			case e.IsElement(xmlsec.NSDSig11, "X509Digest"):
 				alg := xmltree.AttrValue(e, "", "Algorithm")
 				if err := allowed("X509Digest", alg, c.opts.AllowedDigestAlgorithms, defaultDigest); err != nil {
-					return d, fmt.Errorf("%w: %w", xmlsec.ErrUnsupportedKeyInfo, err)
+					d.descErr = cmp.Or(d.descErr, fmt.Errorf("%w: %w", xmlsec.ErrUnsupportedKeyInfo, err))
+					continue
 				}
 				if _, ok := digestHash(alg); !ok {
-					return d, fmt.Errorf("%w: %w: X509Digest %q", xmlsec.ErrUnsupportedKeyInfo, xmlsec.ErrUnsupportedAlgorithm, alg)
+					d.descErr = cmp.Or(d.descErr, fmt.Errorf("%w: %w: X509Digest %q", xmlsec.ErrUnsupportedKeyInfo, xmlsec.ErrUnsupportedAlgorithm, alg))
+					continue
 				}
 				id.Digest, id.DigestAlgorithm = b, alg
 			case e.IsElement(xmlsec.NSDSig, "X509SubjectName"):

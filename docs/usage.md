@@ -597,12 +597,14 @@ What `Verify` accepts, with at most one `ds:KeyName` beside, reported in
 * `ds:X509Data`, in one or several elements: up to 16 certificates, of which
   exactly one issued none of the others. That leaf is the signing
   certificate; the rest are `Coverage.Intermediates`, and each `ds:X509CRL`
-  is in `Coverage.CRLs`, none of them checked. Every `X509IssuerSerial`,
-  `X509SKI`, `X509SubjectName` and `dsig11:X509Digest` must describe one of
-  the certificates, or verification fails with `ErrUnsupportedKeyInfo`;
-  names compare as RFC 4514 distinguished names, and an `X509Digest`
-  algorithm must pass `AllowedDigestAlgorithms`. Children in other
-  namespaces are ignored.
+  is in `Coverage.CRLs`, none of them checked. An `X509IssuerSerial`,
+  `X509SKI`, `X509SubjectName` or `dsig11:X509Digest` beside the
+  certificates selects nothing and is ignored: real signers renew a
+  certificate and leave a stale one. With `StrictX509Data` each must
+  describe one of the certificates, or verification fails with
+  `ErrUnsupportedKeyInfo`; names compare as RFC 4514 distinguished names,
+  and an `X509Digest` algorithm must pass `AllowedDigestAlgorithms`.
+  Children in other namespaces are ignored.
 * A raw key: `ds:KeyValue` or `dsig11:DEREncodedKeyValue`, DSA only for an
   allowed DSA signature.
 * A `ds:RetrievalMethod` to `"#id"`, without transforms, whose `Type` is
@@ -643,6 +645,7 @@ More options:
 | `ResolveURI xmlsec.URIResolver` | Supplies the octets of a reference to an absolute URI such as `http:`; see External references below. Without it, such a reference is refused. |
 | `BaseURI string` | The absolute URI a relative reference URI is resolved against before `ResolveURI` sees it; never taken from the document. Without it, a relative URI is refused. |
 | `RequireNFC` | Refuse with `ErrNotNFC` a `ds:SignedInfo`, or the canonical octets of a same-document reference, that is not in Unicode Normalization Form C. Off by default. |
+| `StrictX509Data` | Refuse an `X509IssuerSerial`, `X509SKI`, `X509SubjectName` or `dsig11:X509Digest` beside the carried certificates that describes none of them (XML Signature §4.5.4). Off by default: a descriptor beside a certificate selects nothing, and real signers leave stale ones after renewing. |
 | `ResolveKeyName`, `ResolveX509`, `ResolveKeyInfoURI` | Resolve a key the message names without carrying it; see [KeyInfo forms](#keyinfo-forms). |
 
 Then check `Coverage`, every time:
@@ -671,7 +674,7 @@ Errors worth distinguishing, all matchable with `errors.Is`:
 | `ErrTransformRefused` | an XPath, XPath Filter 2.0 or XSLT transform whose program you did not allow |
 | `ErrUntrusted` | your `TrustKey` refused the signer |
 | `ErrDereference` | your `ResolveURI` or `ResolveKeyInfoURI` failed; wraps its error |
-| `ErrUnsupportedKeyInfo` | no usable key in `ds:KeyInfo`: a form this library does not accept, an `X509Data` descriptor that describes none of its certificates, or a key resolver's refusal, which it wraps |
+| `ErrUnsupportedKeyInfo` | no usable key in `ds:KeyInfo`: a form this library does not accept, an `X509Data` descriptor that describes none of its certificates (under `StrictX509Data`), or a key resolver's refusal, which it wraps |
 
 ### External references
 
