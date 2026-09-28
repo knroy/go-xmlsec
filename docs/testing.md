@@ -405,8 +405,53 @@ which fails only for a key length out of range, never passed, or in FIPS
 unwrap. `xenc/export_test.go` exposes the unexported Legacy KDF to its
 known-answer test.
 
+## Canonicalization
+
+Every digest and signature this library computes is over octets from
+`go-xml/c14n`, pinned at v1.4.0. It is tested in go-xml, not here, and its
+figures are published only in that module's
+[docs/c14n.md](https://github.com/knroy/go-xml/blob/v1.4.0/docs/c14n.md#conformance-and-verification),
+not in the conformance table of its README, where its sibling packages
+report theirs. At v1.4.0:
+
+| Check | Result |
+|---|---|
+| Worked examples of the three Recommendations (C14N 1.0 §3, 1.1 §3 with erratum E11-01, Exclusive §2) | 28 / 28 |
+| C14N 1.1 §2.4 URI-joining examples and the Appendix A dot-segment table | 69 / 69 |
+| W3C C14N 1.1 interop cases, digests checked against all five implementations | 20 / 20 |
+| Differential against `xmllint`, whole documents, three algorithms | 129 / 129 |
+| Differential against `xmlsec1`, node sets through signature references, six algorithms | 870 compared: 790 identical, 80 documented differences |
+
+The W3C publishes no pass/fail conformance suite for Canonical XML beyond the
+Recommendations' examples and the C14N 1.1 interop cases, so there is no
+single figure to report beside the XPath and XML Schema suites. Not measured
+in go-xml: a differential against Santuario, and a corpus of real signed
+messages.
+
+This module exercises `c14n` independently, through whole signatures rather
+than canonical octets:
+
+* `SignatureValue` byte-identical to Santuario's, under inclusive and
+  exclusive C14N 1.0 (`TestSignatureValueMatchesSantuarioEnveloped`), and
+  the interop tests above, both ways, against xmlsec1, Santuario and WSS4J,
+  which use Canonical XML 1.0 and Exclusive C14N, with and without comments.
+* The W3C XML Signature 1.1 interop vectors in `tests/w3c`, all under
+  Canonical XML 1.0.
+* 122 real Peppol SMP responses, inclusive C14N 1.0, all verifying (the
+  private corpus above).
+
+Canonical XML 1.1 is not compared against another implementation here: its
+only outside evidence is go-xml's 20 W3C C14N 1.1 interop cases.
+
+A `c14n` change that alters output by one byte breaks every signature made
+before it; [RELEASE.md](../RELEASE.md#before-bumping-go-xml) says what to
+check before bumping the pin.
+
 ## Not tested yet
 
+* **Canonical XML 1.1 against a reference implementation.** Signing and
+  verifying under it are tested only against this library itself; see
+  [Canonicalization](#canonicalization).
 * **A one-hour fuzz run on the current code.** The nightly workflow runs one
   hour per target; the last local runs were shorter and predate the
   conformance work.
