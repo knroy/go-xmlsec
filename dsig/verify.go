@@ -396,6 +396,15 @@ type VerifiedReference struct {
 }
 
 // Covers reports whether every given element ID appears in SignedElementIDs.
+//
+// SECURITY: this is an ID check, and it is not enough to decide that the
+// element an application is about to process was signed. In the XML
+// Signature Wrapping shape, the signed element is moved elsewhere in the
+// document, still carrying its ID, and an unsigned one without the ID takes
+// its place: the signature verifies, Covers is true, and the element the
+// application finds by position is the forgery. When you hold the element,
+// use CoversNodes. Use Covers only when you will then locate the element by
+// the same ID, with wss.FindByID, which refuses a duplicated ID.
 func (c *Coverage) Covers(elementIDs ...string) bool {
 	for _, id := range elementIDs {
 		if !slices.Contains(c.SignedElementIDs, id) {
@@ -405,8 +414,31 @@ func (c *Coverage) Covers(elementIDs ...string) bool {
 	return true
 }
 
+// CoversNodes reports whether every element given was covered by a
+// same-document reference, compared by node identity, not by ID.
+//
+// Prefer it to Covers: it answers "was this element signed", which is
+// almost always the question, where Covers answers "was an element with
+// this ID signed", which a wrapped document satisfies while the element the
+// application reads is another one. The elements must come from the
+// document that was verified.
+func (c *Coverage) CoversNodes(elements ...*xdm.Node) bool {
+	for _, want := range elements {
+		if want == nil || !slices.ContainsFunc(c.SignedElements, want.Is) {
+			return false
+		}
+	}
+	return true
+}
+
 // CoversAttachments reports whether every given attachment ID appears in
 // SignedAttachmentIDs.
+//
+// An attachment has no node identity, but it does not share Covers' hazard
+// as long as the application reads the part from the same AttachmentSet it
+// passed to Verify: NewAttachmentSet refuses two parts with one Content-ID,
+// so an ID names exactly the part that was digested. Parsing the MIME
+// message a second time, and taking the first part with an ID, reopens it.
 func (c *Coverage) CoversAttachments(attachmentIDs ...string) bool {
 	for _, id := range attachmentIDs {
 		if !slices.Contains(c.SignedAttachmentIDs, id) {

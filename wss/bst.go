@@ -27,6 +27,21 @@ import (
 // or the call fails with xmlsec.ErrUnsupportedKeyInfo. The returned id is
 // the token's wsu:Id, for use in a SecurityTokenReference.
 func (h *Header) AddBinarySecurityToken(cert *x509.Certificate, chain []*x509.Certificate, valueType string) (string, error) {
+	return h.addBinarySecurityToken(cert, chain, valueType, "")
+}
+
+// AddBinarySecurityTokenWithID is AddBinarySecurityToken with the token's
+// wsu:Id supplied by the caller, as AssignIDWith supplies one: for a
+// byte-reproducible header. id must be an NCName not already in use in the
+// document.
+func (h *Header) AddBinarySecurityTokenWithID(cert *x509.Certificate, chain []*x509.Certificate, valueType, id string) (string, error) {
+	if id == "" {
+		return "", fmt.Errorf("%w: AddBinarySecurityTokenWithID needs an ID", xmlsec.ErrMalformed)
+	}
+	return h.addBinarySecurityToken(cert, chain, valueType, id)
+}
+
+func (h *Header) addBinarySecurityToken(cert *x509.Certificate, chain []*x509.Certificate, valueType, id string) (string, error) {
 	var der []byte
 	switch valueType {
 	case xmlsec.BSTValueTypeX509v3:
@@ -54,7 +69,7 @@ func (h *Header) AddBinarySecurityToken(cert *x509.Certificate, chain []*x509.Ce
 		return "", fmt.Errorf("%w: BST ValueType %q", xmlsec.ErrUnsupportedAlgorithm, valueType)
 	}
 
-	id, err := newID(h.doc)
+	id, err := idFor(h.doc, id)
 	if err != nil {
 		return "", err
 	}

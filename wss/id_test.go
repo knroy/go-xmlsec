@@ -132,3 +132,63 @@ func TestAssignIDKeepsXMLID(t *testing.T) {
 		t.Fatalf("AssignID: %q, %v, attributes %v", id, err, b.Attrs)
 	}
 }
+
+// The explicit-ID variants take the caller's ID, check it, and keep an ID
+// an element already has, exactly as the minting functions do.
+func TestExplicitIDs(t *testing.T) {
+	doc := parseDoc(t, env11)
+	body := xmltree.DocumentElement(doc).ChildElements()[0]
+	a, b := body.ChildElements()[0], body.ChildElements()[1]
+	for _, c := range []struct {
+		name string
+		el   *xdm.Node
+		id   string
+		want error
+	}{
+		{"empty", body, "", xmlsec.ErrMalformed},
+		{"not an NCName", body, "1st", xmlsec.ErrMalformed},
+		{"in use as a wsu:Id", body, "x", xmlsec.ErrAmbiguousID},
+		{"in use as an xml:id", body, "y", xmlsec.ErrAmbiguousID},
+	} {
+		if _, err := AssignIDWith(doc, c.el, c.id); !errors.Is(err, c.want) {
+			t.Errorf("AssignIDWith %s: got %v, want %v", c.name, err, c.want)
+		}
+	}
+	if id, err := AssignIDWith(doc, a, "other"); err != nil || id != "x" {
+		t.Fatalf("existing wsu:Id: %q, %v", id, err)
+	}
+	if id, err := AssignIDWith(doc, b, "other"); err != nil || id != "y" {
+		t.Fatalf("existing xml:id: %q, %v", id, err)
+	}
+	if id, err := AssignIDWith(doc, body, "body-1"); err != nil || id != "body-1" || body.Attr(xmlsec.NSWSU, "Id") == nil || body.Attr(xmlsec.NSWSU, "Id").Value != "body-1" {
+		t.Fatalf("AssignIDWith: %q, %v", id, err)
+	}
+
+	h, err := NewHeader(doc, xmlsec.NSSOAP11, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert := testCert(t, "c")
+	adders := map[string]func(id string) (string, error){
+		"AddBinarySecurityTokenWithID": func(id string) (string, error) {
+			return h.AddBinarySecurityTokenWithID(cert, nil, xmlsec.BSTValueTypeX509v3, id)
+		},
+		"AddTimestampWithID": func(id string) (string, error) {
+			return h.AddTimestampWithID(time.Unix(0, 0), time.Minute, id)
+		},
+		"AddSignatureConfirmationWithID": func(id string) (string, error) { return h.AddSignatureConfirmationWithID(nil, id) },
+	}
+	for name, add := range adders {
+		for id, want := range map[string]error{"": xmlsec.ErrMalformed, "1st": xmlsec.ErrMalformed, "body-1": xmlsec.ErrAmbiguousID} {
+			if _, err := add(id); !errors.Is(err, want) {
+				t.Errorf("%s(%q): got %v, want %v", name, id, err, want)
+			}
+		}
+		if got, err := add(name); err != nil || got != name {
+			t.Errorf("%s: %q, %v", name, got, err)
+		}
+		if _, err := FindByID(doc, name); err != nil {
+			t.Errorf("%s: the element does not carry its ID: %v", name, err)
+		}
+	}
+}

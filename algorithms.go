@@ -130,6 +130,11 @@ const (
 // Key transport algorithm URIs. The legacy rsa-oaep-mgf1p and rsa-1_5 are
 // with the decryption-only algorithms below.
 const (
+	// KeyTransportRSAOAEP is XML Encryption 1.1 RSA-OAEP (section 5.5.2),
+	// with an explicit digest and MGF: the one to use for new work, and the
+	// one WS-Security profiles such as Peppol AS4 require. Not to be confused
+	// with KeyTransportRSAOAEPMGF1P, the XML Encryption 1.0 algorithm with
+	// SHA-1 fixed, which is decryption-only.
 	KeyTransportRSAOAEP = "http://www.w3.org/2009/xmlenc11#rsa-oaep"
 )
 
@@ -209,7 +214,9 @@ const (
 	EncAES256CBC    = "http://www.w3.org/2001/04/xmlenc#aes256-cbc"
 
 	// KeyTransportRSAOAEPMGF1P is RSA-OAEP with MGF1-SHA1 fixed, section
-	// 5.5.2; its digest defaults to SHA-1 too.
+	// 5.5.2; its digest defaults to SHA-1 too. It is the XML Encryption 1.0
+	// algorithm, decryption-only here: for new work use KeyTransportRSAOAEP,
+	// despite the shorter name.
 	KeyTransportRSAOAEPMGF1P = "http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p"
 
 	// KeyTransportRSA15 is RSAES-PKCS1-v1_5, section 5.5.1, open to

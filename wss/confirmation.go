@@ -23,7 +23,22 @@ import (
 // was none (section 8.5.1), and MUST include each in the response signature:
 // sign it by its returned ID.
 func (h *Header) AddSignatureConfirmation(value []byte) (string, error) {
-	id, err := newID(h.doc)
+	return h.addSignatureConfirmation(value, "")
+}
+
+// AddSignatureConfirmationWithID is AddSignatureConfirmation with the
+// confirmation's wsu:Id supplied by the caller, as AssignIDWith supplies
+// one: for a byte-reproducible header. id must be an NCName not already in
+// use in the document.
+func (h *Header) AddSignatureConfirmationWithID(value []byte, id string) (string, error) {
+	if id == "" {
+		return "", fmt.Errorf("%w: AddSignatureConfirmationWithID needs an ID", xmlsec.ErrMalformed)
+	}
+	return h.addSignatureConfirmation(value, id)
+}
+
+func (h *Header) addSignatureConfirmation(value []byte, id string) (string, error) {
+	id, err := idFor(h.doc, id)
 	if err != nil {
 		return "", err
 	}

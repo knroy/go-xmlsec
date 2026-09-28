@@ -34,7 +34,7 @@ Named `TestConformance_<ID>_<description>` for the requirement they prove.
 | AP-7 | rsa-oaep with explicit mgf1sha256 and sha256 | `TestConformance_AP_07_RSAOAEPExplicitMGF` | ✅ |
 | AP-8 | BST X509v3, certificate embedded | `TestConformance_AP_08_BinarySecurityToken` | ✅ |
 | AP-9 | Signing attachments via cid | `TestConformance_AP_09_SwAAttachmentSigning` | ✅ |
-| AP-10 | Coverage reported, not just validity | `TestConformance_AP_10_SignatureCoverage` | ✅ |
+| AP-10 | Coverage reported, not just validity; on a wrapped document `Covers` passes and `CoversNodes` refuses the forged body | `TestConformance_AP_10_SignatureCoverage` | ✅ |
 | S-3 | Inclusive C14N, enveloped | `TestConformance_S_03_SMPEnvelopedSignature` | ✅ |
 | S-4 | X509Certificate in KeyInfo | `TestConformance_S_04_KeyInfoX509Data` | ✅ |
 
@@ -82,6 +82,7 @@ Named `TestConformance_<ID>_<description>` for the requirement they prove.
 | `TestKeyInfoElement` | key identifier and issuer-serial references in `ds:KeyInfo`: resolved, strict, pinned, pinned to another certificate (refused only when strict), and the resolver not called under a pinned key |
 | `TestReferencedToken`, `TestCheckSecurityTokenReference` (`wss`) | tokens of any kind by direct reference and `wsse:Embedded`; R3057, R3064, R3211, R3060, R3056 and every syntax rule of `CheckSecurityTokenReference` |
 | `TestFindHeader`, `TestFindTimestamp`, `TestCheckUniqueIDs`, `TestAssignIDKeepsXMLID` | one header per recipient including SOAP 1.2's ultimateReceiver, one timestamp, unique IDs across `wsu:Id`, `xml:id` and named attributes, and no `wsu:Id` beside an `xml:id` |
+| `TestExplicitIDs`, `TestReproducibleAS4Signature` | `AssignIDWith` and the `…WithID` header methods refuse an empty, non-NCName or duplicated ID and keep an existing one; the AS4 shape (token, timestamp, messaging header, body, attachment) signed 25 times with every ID supplied is byte-identical, with no test hook, and verifies |
 | `TestSignatureConfirmationRoundTrip`, `TestSignatureConfirmationErrors`, `TestEncryptedKeyReferences`, `TestFaultCode` | the section 8.5.2 rules; `EncryptedKey` references by ID and SHA-1, checked against the profile; each error class's fault code |
 | `TestSTRTransformRetargetRefused`, `TestDuplicateIDsRefused`, `TestSignatureConfirmationMismatch`, `TestStrictBSPRefusesBeforeCrypto` (`tests/security`) | an STR-transform reference retargeted at a reference, an `Embedded` or a `ds:KeyInfo`; a planted duplicate `wsu:Id` or `xml:id`; a replayed or missing confirmation; `StrictBSP` refusing before `TrustKey` is called |
 | `TestSymmetricBinding` (`xenc/str_test.go`) | WSS4J's symmetric-binding shape end to end: an RSA-OAEP `EncryptedKey` without a `ReferenceList`, a header `ReferenceList` from `wss.NewReferenceList`, Body content and an `EncryptedHeader` each naming the key by `EncryptOptions.DataKeyInfo`; received with `ReferencedData`, `FindEncryptedKey`, `DecryptData` and `DecryptHeader` under `StrictBSP` |
@@ -449,6 +450,11 @@ check before bumping the pin.
 
 ## Not tested yet
 
+* **Real messages signed with Exclusive C14N.** The corpus is Peppol SMP
+  responses, inclusive C14N; AS4, which signs with Exclusive C14N, has only
+  the interop tests. The one defect real messages have found, the Canonical
+  XML 1.0 implied at the end of a reference, which refused most SMP
+  providers, was missed by every synthetic test.
 * **Canonical XML 1.1 against a reference implementation.** Signing and
   verifying under it are tested only against this library itself; see
   [Canonicalization](#canonicalization).

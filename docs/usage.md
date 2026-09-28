@@ -472,6 +472,36 @@ missing confirmation, a value that confirms no request signature, a request
 signature left unconfirmed, and a `Value` present or absent against whether
 the request was signed, with `ErrSignatureInvalid`.
 
+### Reproducible output
+
+An ID is inside the signed octets, so a minted one makes every run
+different. For a golden file, or a differential against another
+implementation, supply every ID and the clock, and the output is
+byte-identical from run to run with RSA (PKCS#1 v1.5 is deterministic;
+ECDSA is not):
+
+```go
+msgID, err := wss.AssignIDWith(doc, messaging, "msg-1")
+bodyID, err := wss.AssignIDWith(doc, body, "body-1")
+tsID, err := hdr.AddTimestampWithID(fixedNow, 5*time.Minute, "ts-1")
+tokID, err := hdr.AddBinarySecurityTokenWithID(cert, nil, xmlsec.BSTValueTypeX509v3, "bst-1")
+sig, err := dsig.Sign(doc, key, dsig.SignOptions{
+    // ... references to msgID, bodyID, tsID and attachments ...
+    KeyInfo:          dsig.KeyInfoSecurityTokenReference,
+    SecurityTokenID:  tokID,
+    SignatureID:      "sig-1",
+    SignedInfoID:     "si-1",
+    SignatureValueID: "sv-1",
+    KeyInfoID:        "ki-1",
+})
+```
+
+`AddSignatureConfirmationWithID` does the same for a confirmation, and
+`xenc.EncryptOptions.DataID` for an `EncryptedHeader`. Each `…WithID` takes an
+NCName not already in the document, and refuses anything else; an element
+that already has an ID keeps it. Session keys, IVs and ECDSA signatures stay
+random, so only signed-only output is reproducible end to end.
+
 ### Faults
 
 SOAP Message Security §12 names the faults a receiver returns.
@@ -509,7 +539,7 @@ cov, err := dsig.Verify(doc, sig, dsig.VerifyOptions{
     Certificate:  idpCert,
     IDAttributes: []xdm.QName{dsig.IDAttrSAML},
 })
-// Then confirm cov.SignedElements[0] is the assertion you will read.
+// Then confirm cov.CoversNodes(assertion) for the assertion you will read.
 ```
 
 The listed attributes add to `wsu:Id` and `xml:id` and never replace them.
@@ -650,7 +680,8 @@ Then check `Coverage`, every time:
 
 | Field | Check |
 |---|---|
-| `Covers(ids...)` / `SignedElements` | every element your profile requires is signed; compare identity, not just ID, when you locate elements by position |
+| `CoversNodes(elements...)` | the elements you will read were signed, compared by identity: prefer it |
+| `Covers(ids...)` / `SignedElements` | the IDs were signed; safe only when you then locate each element by that ID with `wss.FindByID`, since a wrapped document satisfies an ID check |
 | `CoversAttachments(ids...)` | every attachment is signed |
 | `WholeDocumentSigned` | set for an enveloped signature |
 | `ExternalURIs` | the absolute URIs your `ResolveURI` supplied; what it returned is what was signed |

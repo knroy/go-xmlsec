@@ -109,8 +109,10 @@ and encryption in full.
    itself, and deciding whether to trust it is up to you: this library makes
    no trust decisions.
 2. **Check `Coverage`.** Confirm it includes every element and attachment you
-   are about to read (`Covers`, `CoversAttachments`, `SignedElements`). A
-   valid signature over the wrong element is how XML Signature Wrapping works.
+   are about to read: `CoversNodes` for the elements themselves, and
+   `CoversAttachments`. A valid signature over the wrong element is how XML
+   Signature Wrapping works, and an ID check (`Covers`) passes on a wrapped
+   document when the element is then found by position.
 3. **Pass allow-lists** (`dsig.VerifyOptions`, `xenc.DecryptOptions`) naming
    exactly the algorithms your profile permits.
 4. **Parse with `xmlsec.Parse`**, or `xmlsec.ParseWithLimits` to tighten the

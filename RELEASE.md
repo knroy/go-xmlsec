@@ -63,6 +63,24 @@ every signature this module has produced. Read the go-xml changelog before
 bumping the pin, and record the bump in this changelog as a security-relevant
 change.
 
+## The Go version floor
+
+`go.mod` says `go 1.26.0`, a choice rather than an accident. Measured by
+building with older toolchains:
+
+* **Go 1.25** is the lowest possible: `go-xml` v1.4.0 itself requires it.
+* **Go 1.26** is required by one call, `rsa.EncryptOAEPWithOptions`
+  (`xenc/keytransport.go`), the only standard library way to encrypt
+  RSA-OAEP with an MGF digest different from the OAEP digest. A 1.25 build
+  would have to refuse `MGFAlgorithm` unequal to `DigestAlgorithm` on
+  encryption, which XML Encryption 1.1 allows and the tests exercise.
+* The code also relies on 1.26 behaviour: `ecdh` key generation ignores its
+  reader and always uses the secure source, and `crypto/rand.Read` never
+  returns an error (since 1.24).
+
+Lowering the floor means giving up divergent-MGF encryption; it is not
+planned unless a consumer needs it.
+
 ## Checklist
 
 - [ ] `internal/version/version.go` bumped

@@ -213,6 +213,17 @@ func TestConformance_AP_10_SignatureCoverage(t *testing.T) {
 	if cov.SignedElements[1] == realBody {
 		t.Fatal("coverage claims the unsigned body is signed")
 	}
+	// The difference between the two checks is the attack: the IDs are
+	// still covered, but the body an application finds by position is not.
+	relocated := xmltree.DocumentElement(doc).ChildElements()[2].ChildElements()[0]
+	switch {
+	case !cov.Covers(msgID, bodyID):
+		t.Fatal("Covers: the signed IDs are covered, wherever they now stand")
+	case cov.CoversNodes(realBody):
+		t.Fatal("CoversNodes: the forged body in the Body position is not signed")
+	case !cov.CoversNodes(relocated), cov.CoversNodes(nil), cov.CoversNodes(relocated, realBody):
+		t.Fatal("CoversNodes: only the relocated original is signed")
+	}
 }
 
 func TestVerifyNegative(t *testing.T) {

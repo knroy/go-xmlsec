@@ -97,8 +97,15 @@ reads the attacker's content believes it was signed.
 Defences here:
 
 * `Verify` returns `Coverage` as its primary result. The caller must check
-  that it includes everything the profile requires, and when elements are
-  located by position, compare `SignedElements` by identity.
+  that it includes everything the profile requires, with
+  `Coverage.CoversNodes` on the elements it will read, which compares by
+  identity. `Coverage.Covers` compares IDs, and a wrapped document satisfies
+  it: the signed element still carries its ID in its new place, while the
+  unsigned element in the Body position carries none. Use `Covers` only
+  when the element is then located by that same ID with `wss.FindByID`,
+  which refuses a duplicated ID. Attachments have no node identity;
+  `CoversAttachments` is safe when the part is read from the same
+  `AttachmentSet` passed to `Verify`, which refuses a duplicated Content-ID.
 * `Coverage` is built from what each reference actually digested during
   resolution, never inferred from the URI text. When an allowed XPath or
   XPath Filter 2.0 transform drops part of a reference's target (other than

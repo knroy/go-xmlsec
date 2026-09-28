@@ -5,6 +5,21 @@ versioning](https://semver.org): within v1 no exported name is removed or
 changed. See [RELEASE.md](RELEASE.md) for the compatibility promise and how a
 release is cut.
 
+## Unreleased
+
+### Added
+
+| Change | What it does | Commit |
+|---|---|---|
+| Explicit IDs for reproducible output | `wss.AssignIDWith`, `Header.AddBinarySecurityTokenWithID`, `AddTimestampWithID` and `AddSignatureConfirmationWithID` take the caller's ID instead of minting one: with every ID and the clock supplied, a signed AS4 message is byte-identical from run to run, for golden files and differentials against other implementations. No package state; the minting functions share the same path. | *this commit* |
+| `Coverage.CoversNodes` | Checks covered elements by node identity. `Covers`, an ID check, is satisfied by a signature-wrapped document when the application then finds the element by position; its documentation now says so, and says when `CoversAttachments` is safe. | *this commit* |
+
+### Documented
+
+| Change | Commit |
+|---|---|
+| The Go 1.26 floor: `go-xml` needs 1.25, and `rsa.EncryptOAEPWithOptions`, for an MGF digest unlike the OAEP digest, needs 1.26 (RELEASE.md). `KeyTransportRSAOAEP` is the one to use; `KeyTransportRSAOAEPMGF1P` is the decryption-only 1.0 algorithm. | *this commit* |
+
 ## v1.1.0 — 2026-09-26
 
 Every requirement of the implemented specifications that v1.0.0 left out,

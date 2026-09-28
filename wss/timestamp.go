@@ -22,6 +22,20 @@ const timestampLayout = "2006-01-02T15:04:05.000Z"
 // 10, Basic Security Profile R3227), so a second call is refused, as is a
 // negative ttl. Times are UTC, in milliseconds (R3217, R3220).
 func (h *Header) AddTimestamp(now time.Time, ttl time.Duration) (string, error) {
+	return h.addTimestamp(now, ttl, "")
+}
+
+// AddTimestampWithID is AddTimestamp with the timestamp's wsu:Id supplied
+// by the caller, as AssignIDWith supplies one: for a byte-reproducible
+// header. id must be an NCName not already in use in the document.
+func (h *Header) AddTimestampWithID(now time.Time, ttl time.Duration, id string) (string, error) {
+	if id == "" {
+		return "", fmt.Errorf("%w: AddTimestampWithID needs an ID", xmlsec.ErrMalformed)
+	}
+	return h.addTimestamp(now, ttl, id)
+}
+
+func (h *Header) addTimestamp(now time.Time, ttl time.Duration, id string) (string, error) {
 	if ttl < 0 {
 		return "", fmt.Errorf("wss: negative timestamp ttl %v", ttl)
 	}
@@ -30,7 +44,7 @@ func (h *Header) AddTimestamp(now time.Time, ttl time.Duration) (string, error) 
 			return "", errors.New("wss: the header already has a wsu:Timestamp")
 		}
 	}
-	id, err := newID(h.doc)
+	id, err := idFor(h.doc, id)
 	if err != nil {
 		return "", err
 	}

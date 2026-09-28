@@ -83,6 +83,25 @@ func FindByID(doc *xdm.Node, id string, extra ...xdm.QName) (*xdm.Node, error) {
 // Generated IDs are "id-" plus 32 hex characters from crypto/rand, unique
 // within the document. The prefix keeps the value an NCName.
 func AssignID(doc *xdm.Node, el *xdm.Node) (string, error) {
+	return assignID(doc, el, "")
+}
+
+// AssignIDWith is AssignID with the ID supplied by the caller instead of
+// minted from crypto/rand, for output that must be byte-reproducible, such
+// as a golden file or a differential against another implementation: an ID
+// is inside the signed octets. id must be an NCName (xmlsec.ErrMalformed)
+// that no counted ID attribute in doc already carries
+// (xmlsec.ErrAmbiguousID). An element that already has an ID keeps it, and
+// that ID is returned, as with AssignID.
+func AssignIDWith(doc *xdm.Node, el *xdm.Node, id string) (string, error) {
+	if id == "" {
+		return "", fmt.Errorf("%w: AssignIDWith needs an ID", xmlsec.ErrMalformed)
+	}
+	return assignID(doc, el, id)
+}
+
+// assignID is AssignID with id, or a minted ID when id is empty.
+func assignID(doc *xdm.Node, el *xdm.Node, id string) (string, error) {
 	if el == nil || el.Kind != xdm.KindElement {
 		return "", fmt.Errorf("%w: AssignID needs an element", xmlsec.ErrMalformed)
 	}
@@ -103,7 +122,7 @@ func AssignID(doc *xdm.Node, el *xdm.Node) (string, error) {
 	if a != nil {
 		return a.Value, nil
 	}
-	id, err := newID(doc)
+	id, err := idFor(doc, id)
 	if err != nil {
 		return "", err
 	}
@@ -125,8 +144,24 @@ func setWSUID(el *xdm.Node, id string) error {
 	return nil
 }
 
-// newID returns an ID not used anywhere in doc.
-func newID(doc *xdm.Node) (string, error) {
+// idFor returns id for a new element of doc, checked, or a minted ID when
+// id is empty.
+func idFor(doc *xdm.Node, id string) (string, error) {
+	if id == "" {
+		return newID(doc)
+	}
+	if !xdm.IsNCName(id) {
+		return "", fmt.Errorf("%w: ID %q is not an NCName", xmlsec.ErrMalformed, id)
+	}
+	if usedIDs(doc)[id] {
+		return "", fmt.Errorf("%w: %q is already in use", xmlsec.ErrAmbiguousID, id)
+	}
+	return id, nil
+}
+
+// usedIDs returns every value of an attribute this module may resolve as an
+// ID, anywhere in doc.
+func usedIDs(doc *xdm.Node) map[string]bool {
 	used := map[string]bool{}
 	if doc != nil {
 		xmltree.Walk(doc.Root(), func(e *xdm.Node) {
@@ -137,6 +172,12 @@ func newID(doc *xdm.Node) (string, error) {
 			}
 		})
 	}
+	return used
+}
+
+// newID returns an ID not used anywhere in doc.
+func newID(doc *xdm.Node) (string, error) {
+	used := usedIDs(doc)
 	for {
 		var b [16]byte
 		if _, err := io.ReadFull(randReader, b[:]); err != nil {
