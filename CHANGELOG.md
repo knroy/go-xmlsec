@@ -5,20 +5,21 @@ versioning](https://semver.org): within v1 no exported name is removed or
 changed. See [RELEASE.md](RELEASE.md) for the compatibility promise and how a
 release is cut.
 
-## Unreleased
+## v1.2.0 — 2026-09-28
 
 ### Added
 
 | Change | What it does | Commit |
 |---|---|---|
-| Explicit IDs for reproducible output | `wss.AssignIDWith`, `Header.AddBinarySecurityTokenWithID`, `AddTimestampWithID` and `AddSignatureConfirmationWithID` take the caller's ID instead of minting one: with every ID and the clock supplied, a signed AS4 message is byte-identical from run to run, for golden files and differentials against other implementations. No package state; the minting functions share the same path. | *this commit* |
-| `Coverage.CoversNodes` | Checks covered elements by node identity. `Covers`, an ID check, is satisfied by a signature-wrapped document when the application then finds the element by position; its documentation now says so, and says when `CoversAttachments` is safe. | *this commit* |
+| Explicit IDs for reproducible output | `wss.AssignIDWith`, `Header.AddBinarySecurityTokenWithID`, `AddTimestampWithID` and `AddSignatureConfirmationWithID` take the caller's ID instead of minting one: with every ID and the clock supplied, a signed AS4 message is byte-identical from run to run, for golden files and differentials against other implementations. No package state; the minting functions share the same path. | [`cf8c78b`][cf8c78b] |
+| `Coverage.CoversNodes` | Checks covered elements by node identity. `Covers`, an ID check, is satisfied by a signature-wrapped document when the application then finds the element by position; its documentation now says so, and says when `CoversAttachments` is safe. | [`cf8c78b`][cf8c78b] |
 
 ### Documented
 
 | Change | Commit |
 |---|---|
-| The Go 1.26 floor: `go-xml` needs 1.25, and `rsa.EncryptOAEPWithOptions`, for an MGF digest unlike the OAEP digest, needs 1.26 (RELEASE.md). `KeyTransportRSAOAEP` is the one to use; `KeyTransportRSAOAEPMGF1P` is the decryption-only 1.0 algorithm. | *this commit* |
+| The Go 1.26 floor: `go-xml` needs 1.25, and `rsa.EncryptOAEPWithOptions`, for an MGF digest unlike the OAEP digest, needs 1.26 (RELEASE.md). `KeyTransportRSAOAEP` is the one to use; `KeyTransportRSAOAEPMGF1P` is the decryption-only 1.0 algorithm. | [`cf8c78b`][cf8c78b], [`cb813c1`][cb813c1] |
+| Canonicalization: what `go-xml/c14n` measures (the W3C C14N 1.1 interop cases, the Recommendations' examples, differentials against `xmllint` and `xmlsec1`), what this module checks independently, and that Canonical XML 1.1 is compared against no other implementation here (docs/testing.md). | [`afb42a1`][afb42a1] |
 
 ## v1.1.0 — 2026-09-26
 
@@ -152,3 +153,6 @@ First release.
 [996144a]: https://github.com/knroy/go-xmlsec/commit/996144a
 [caaf44e]: https://github.com/knroy/go-xmlsec/commit/caaf44e
 [7a6a367]: https://github.com/knroy/go-xmlsec/commit/7a6a367
+[cf8c78b]: https://github.com/knroy/go-xmlsec/commit/cf8c78b
+[cb813c1]: https://github.com/knroy/go-xmlsec/commit/cb813c1
+[afb42a1]: https://github.com/knroy/go-xmlsec/commit/afb42a1
