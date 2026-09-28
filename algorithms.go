@@ -132,7 +132,7 @@ const (
 const (
 	// KeyTransportRSAOAEP is XML Encryption 1.1 RSA-OAEP (section 5.5.2),
 	// with an explicit digest and MGF: the one to use for new work, and the
-	// one WS-Security profiles such as Peppol AS4 require. Not to be confused
+	// one current WS-Security profiles require. Not to be confused
 	// with KeyTransportRSAOAEPMGF1P, the XML Encryption 1.0 algorithm with
 	// SHA-1 fixed, which is decryption-only.
 	KeyTransportRSAOAEP = "http://www.w3.org/2009/xmlenc11#rsa-oaep"
