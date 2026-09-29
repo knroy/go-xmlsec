@@ -173,6 +173,7 @@ var sigCases = []struct {
 	{"rsa-sha256 inclusive", func(t *testing.T) crypto.Signer { return rsaKey(t) }, xmlsec.SigRSASHA256, c14n.Inclusive10},
 	{"rsa-sha256 exclusive", func(t *testing.T) crypto.Signer { return rsaKey(t) }, xmlsec.SigRSASHA256, c14n.Exclusive10},
 	{"ecdsa-sha256 inclusive", func(t *testing.T) crypto.Signer { return ecKey(t) }, xmlsec.SigECDSASHA256, c14n.Inclusive10},
+	{"rsa-sha256 c14n 1.1", func(t *testing.T) crypto.Signer { return rsaKey(t) }, xmlsec.SigRSASHA256, c14n.Inclusive11},
 }
 
 // xmlsec1 accepts our enveloped signatures, with the certificate carried in

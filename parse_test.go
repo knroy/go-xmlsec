@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-// Open item X-1: assert the effective DOCTYPE behaviour rather than trust
-// either version of the upstream documentation.
+// Assert the effective DOCTYPE behaviour rather than trust the upstream
+// documentation.
 func TestParseRefusesDOCTYPE(t *testing.T) {
 	for name, doc := range map[string]string{
 		"internal entity": `<!DOCTYPE a [<!ENTITY x "y">]><a>&x;</a>`,

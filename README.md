@@ -164,7 +164,7 @@ requirement, are in [docs/security.md](docs/security.md#conformance).
 | Real-world documents | 122 real Peppol SMP responses, from 62 providers, all verify; kept in a separate corpus module |
 | Security | XXE, external fetches, signature wrapping, key substitution, algorithm confusion, comment truncation and encryption downgrade, each a regression test |
 | Fuzzing | Three targets on the verify and decrypt paths, one hour each, nightly |
-| Canonicalization | done by `go-xml/c14n` v1.4.0, which publishes its figures in its own docs rather than its README: the W3C C14N 1.1 interop cases 20/20, the Recommendations' examples, and differentials against `xmllint` and `xmlsec1`. A Santuario differential and a real-message corpus are still open there. The byte-identical signatures and the real-world corpus above exercise it independently; see [docs/testing.md](docs/testing.md#canonicalization). |
+| Canonicalization | done by `go-xml/c14n` v1.4.0, which publishes its figures in its own docs rather than its README: the W3C C14N 1.1 interop cases 20/20, the Recommendations' examples, and differentials against `xmllint` and `xmlsec1`. A Santuario differential and a real-message corpus are still open there. The byte-identical signatures, Canonical XML 1.1 included, and the real-world corpus above exercise it independently; see [docs/testing.md](docs/testing.md#canonicalization). |
 
 [docs/testing.md](docs/testing.md) has the detail, including every dataset
 the tests use.

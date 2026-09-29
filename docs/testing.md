@@ -54,7 +54,7 @@ Named `TestConformance_<ID>_<description>` for the requirement they prove.
 | `TestXPathSignErrors`, `TestXPathHereDetached`, `TestXPathShadowedPrefixes`, `TestXPathOmittedURICoverage` | syntax, unbound-prefix and dynamic errors, invalid bindings, a non-node Filter 2.0 result and unparseable octets are `ErrMalformed`; `here()` in a detached signature fails; a prefix may shadow the document's; a reference without URI whose filter drops something reports `OmittedURISigned` false |
 | `TestXSLTTransform`, `TestXSLTStylesheetNamespaces` (`dsig/xslt_test.go`) | XSLT over a node set and over octets, verified against an allow-list; nothing reported covered; a stylesheet rebinding `ds`, declaring a nested namespace and sitting under a default namespace keeps its meaning |
 | `TestXSLTVerifyAdmission`, `TestXSLTSandbox`, `TestXSLTOutputBound` | another stylesheet, and a prefix rebound only inside an XPath expression, are refused; `document()`, `doc()`, `unparsed-text()`, `xsl:include`, `xsl:import`, a terminating message and a serialization error fail; the output bound is `ErrLimitExceeded` |
-| `TestParseRefusesDOCTYPE` | open item X-1: the pinned options refuse a DOCTYPE, asserted rather than read from documentation |
+| `TestParseRefusesDOCTYPE` | the pinned options refuse a DOCTYPE, asserted rather than read from documentation |
 | `TestParseRefusesXXE`, `TestParseFetchesNothing`, `TestVerifyDereferencesNothingExternal` | every XXE and external-reference route in the [assessment](security.md#assessment) is refused or inert, with zero requests reaching a local listener |
 | `TestExternalReferences`, `TestExternalCipherReference` | an absolute-URI reference signs and verifies through `ResolveURI`, raw and through a canonicalization that parses the octets, and is reported in `Coverage.ExternalURIs`; no resolver, a relative or unparsable URI and `cid:` are refused without calling it; resolver errors wrap `ErrDereference`; an external `CipherReference` decrypts raw or base64, and refused transforms never reach the resolver |
 | `TestResolverCalledOnlyForAuthenticSignatures`, `TestCipherReferenceResolverAfterAllowList` | the resolver is never called for an untrusted key, a different pinned key, a disallowed signature or digest algorithm, a URI rewritten after signing, or a disallowed data algorithm |
@@ -143,6 +143,8 @@ package, does not implement XML Encryption 1.1 `rsa-oaep`.
 | `TestWeVerifyXmlsec1EnvelopedSignature`, `TestWeVerifySantuarioEnvelopedSignature` | each → ours | the same three |
 | `TestXmlsec1VerifiesOurDetachedSignature`, `TestWeVerifyXmlsec1DetachedSignature` | both ways | SOAP 1.2, two `#id` references, exclusive C14N with an InclusiveNamespaces prefix list |
 | `TestSignatureValueMatchesSantuarioEnveloped` | byte equality | inclusive and exclusive C14N |
+| `TestSubsetSignatureMatchesReferences` | byte equality with xmlsec1 and Santuario, and each side verifies the others' | a `#id` subset whose ancestors carry `xml:base`, `xml:lang`, `xml:space` and `xml:id`, under Canonical XML 1.0 and 1.1: the only place 1.1 differs, by not inheriting `xml:id` and by joining `xml:base` values; the two algorithms are asserted to digest it differently |
+| `TestSantuarioC14N11NestedXMLBase` | a known Santuario divergence, kept visible | with two omitted ancestors carrying `xml:base`, Santuario 4.0.4 joins one, digesting `http://example.com/a/c/` where C14N 1.1 §2.4, this library and xmlsec1 give `http://example.com/a/b/c/`, and writes that value into its output; the test fails once Santuario agrees |
 | `TestSignatureValueMatchesSantuarioDetached` | byte equality, and both ways | SOAP 1.2 WS-Security header, two `#id` references |
 | `TestWSS4JProcessesOurSecurityHeader` | WSS4J | a WS-Security header built by this library: timestamp, binary security token, signature over body and timestamp; WSS4J must report both as signed, with Basic Security Profile enforcement on |
 | `TestWSS4JDecryptsOurEncryption` | WSS4J | an encrypted body with the `EncryptedKey` in the header, naming the recipient's token and the `EncryptedData`; WSS4J must decrypt it to the original |
@@ -436,13 +438,17 @@ than canonical octets:
   exclusive C14N 1.0 (`TestSignatureValueMatchesSantuarioEnveloped`), and
   the interop tests above, both ways, against xmlsec1, Santuario and WSS4J,
   which use Canonical XML 1.0 and Exclusive C14N, with and without comments.
+* Canonical XML 1.1: whole documents both ways against xmlsec1 and
+  Santuario, and a subset whose ancestors carry the `xml:` attributes 1.1
+  treats differently, byte-identical to xmlsec1 and to Santuario
+  (`TestSubsetSignatureMatchesReferences`). One divergence, Santuario's:
+  with two omitted ancestors carrying `xml:base` it joins only one
+  (`TestSantuarioC14N11NestedXMLBase`); this library agrees with xmlsec1 and
+  the Recommendation.
 * The W3C XML Signature 1.1 interop vectors in `tests/w3c`, all under
   Canonical XML 1.0.
 * 122 real Peppol SMP responses, inclusive C14N 1.0, all verifying (the
   private corpus above).
-
-Canonical XML 1.1 is not compared against another implementation here: its
-only outside evidence is go-xml's 20 W3C C14N 1.1 interop cases.
 
 A `c14n` change that alters output by one byte breaks every signature made
 before it; [RELEASE.md](../RELEASE.md#before-bumping-go-xml) says what to
@@ -455,9 +461,3 @@ check before bumping the pin.
   the interop tests. The one defect real messages have found, the Canonical
   XML 1.0 implied at the end of a reference, which refused most SMP
   providers, was missed by every synthetic test.
-* **Canonical XML 1.1 against a reference implementation.** Signing and
-  verifying under it are tested only against this library itself; see
-  [Canonicalization](#canonicalization).
-* **A one-hour fuzz run on the current code.** The nightly workflow runs one
-  hour per target; the last local runs were shorter and predate the
-  conformance work.
