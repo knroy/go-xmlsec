@@ -5,13 +5,13 @@ versioning](https://semver.org): within v1 no exported name is removed or
 changed. See [RELEASE.md](RELEASE.md) for the compatibility promise and how a
 release is cut.
 
-## Unreleased
+## v1.2.1 — 2026-09-28
 
 ### Tested
 
 | Change | Commit |
 |---|---|
-| Canonical XML 1.1 compared against xmlsec1 and Santuario: whole documents both ways, and byte-identical signatures over a subset whose ancestors carry `xml:base`, `xml:lang`, `xml:space` and `xml:id`. Found a Santuario 4.0.4 divergence: with two omitted ancestors carrying `xml:base` it joins only one; this library agrees with xmlsec1 and C14N 1.1 §2.4, and a test keeps the divergence visible. | *this commit* |
+| Canonical XML 1.1 compared against xmlsec1 and Santuario: whole documents both ways, and byte-identical signatures over a subset whose ancestors carry `xml:base`, `xml:lang`, `xml:space` and `xml:id`. Found a Santuario 4.0.4 divergence: with two omitted ancestors carrying `xml:base` it joins only one; this library agrees with xmlsec1 and C14N 1.1 §2.4, and a test keeps the divergence visible. | [`663bfe5`][663bfe5] |
 
 ## v1.2.0 — 2026-09-28
 
@@ -164,3 +164,4 @@ First release.
 [cf8c78b]: https://github.com/knroy/go-xmlsec/commit/cf8c78b
 [cb813c1]: https://github.com/knroy/go-xmlsec/commit/cb813c1
 [afb42a1]: https://github.com/knroy/go-xmlsec/commit/afb42a1
+[663bfe5]: https://github.com/knroy/go-xmlsec/commit/663bfe5
