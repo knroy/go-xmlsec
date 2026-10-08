@@ -61,6 +61,13 @@ func newPKI(t *testing.T) testPKI {
 	return testPKI{root, inter, leaf, xmlsec.KeyProvider{Signer: rsaKey, Certificate: leaf}}
 }
 
+// strangerCert is a self-signed certificate for a key of its own.
+func strangerCert(t *testing.T) *x509.Certificate {
+	k := mustEC(p384Key.Curve)
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(7), Subject: pkix.Name{CommonName: "Stranger"}}
+	return issue(t, tmpl, tmpl, k.Public(), k)
+}
+
 // signPKI signs the metadata document enveloped with key, letting set
 // adjust the options.
 func signPKI(t *testing.T, key xmlsec.KeyProvider, set func(o *dsig.SignOptions)) ([]byte, error) {
@@ -184,7 +191,10 @@ func TestX509Descriptors(t *testing.T) {
 		{"serial not an integer", leaf + issuerSerial(issuer, "0x1"), dsig.VerifyOptions{}, xmlsec.ErrMalformed},
 		{"unknown ds child", leaf + `<ds:X509Other/>`, dsig.VerifyOptions{}, xmlsec.ErrUnsupportedKeyInfo},
 		{"17 certificates", many.String(), dsig.VerifyOptions{}, xmlsec.ErrUnsupportedKeyInfo},
-		{"two leaves", leaf + x509Cert(other.leaf) + x509Cert(p.inter), dsig.VerifyOptions{}, xmlsec.ErrUnsupportedKeyInfo},
+		// XML-DSig 4.5.4: certificates for one key, such as a re-issue, are
+		// one leaf; the first is the signing certificate.
+		{"two leaves, one key", leaf + x509Cert(other.leaf) + x509Cert(p.inter), dsig.VerifyOptions{}, nil},
+		{"two leaves", leaf + x509Cert(strangerCert(t)) + x509Cert(p.inter), dsig.VerifyOptions{}, xmlsec.ErrUnsupportedKeyInfo},
 		{"a CRL alone", `<ds:X509CRL>AAAA</ds:X509CRL>`, dsig.VerifyOptions{}, xmlsec.ErrUnsupportedKeyInfo},
 	}
 	for _, c := range cases {
@@ -320,7 +330,7 @@ func TestSignX509Options(t *testing.T) {
 		}},
 		{"no descriptors", p.key, func(o *dsig.SignOptions) { o.KeyInfo = dsig.KeyInfoX509Descriptors }},
 		{"chain too long", p.key, func(o *dsig.SignOptions) { o.Chain = long }},
-		{"signer not the leaf", p.key, func(o *dsig.SignOptions) { o.Chain = []*x509.Certificate{newPKI(t).leaf} }},
+		{"signer not the leaf", p.key, func(o *dsig.SignOptions) { o.Chain = []*x509.Certificate{strangerCert(t)} }},
 		{"a descriptor twice", p.key, func(o *dsig.SignOptions) { o.X509Descriptors = []dsig.X509Descriptor{dsig.X509SKI, dsig.X509SKI} }},
 		{"unknown descriptor", p.key, func(o *dsig.SignOptions) { o.X509Descriptors = []dsig.X509Descriptor{99} }},
 		{"SKI of a certificate without one", xmlsec.KeyProvider{Signer: rsaKey, Certificate: &noSKI}, func(o *dsig.SignOptions) { o.X509Descriptors = []dsig.X509Descriptor{dsig.X509SKI} }},
@@ -331,5 +341,50 @@ func TestSignX509Options(t *testing.T) {
 				t.Fatal("signed")
 			}
 		})
+	}
+}
+
+// XML-DSig 3.2.2: with the key pinned, ds:KeyInfo is a hint, and a
+// ds:X509Certificate Go cannot parse is not used, so it does not fail the
+// signature; without a pinned key it is malformed (audit A5).
+func TestX509CertificateUnparsableWhenPinned(t *testing.T) {
+	cert := newKey(t, rsaKey).Certificate
+	for _, bad := range []string{"AAAA", b64(cert.Raw[:len(cert.Raw)-1])} {
+		doc, sig := signedCovDoc(t, covKI(`<ds:X509Data><ds:X509Certificate>`+bad+`</ds:X509Certificate></ds:X509Data>`))
+		if _, err := dsig.Verify(doc, sig, dsig.VerifyOptions{}); !errors.Is(err, xmlsec.ErrMalformed) {
+			t.Fatalf("not pinned: %v", err)
+		}
+		for name, opts := range map[string]dsig.VerifyOptions{
+			"Certificate": {Certificate: cert},
+			"PublicKey":   {PublicKey: &rsaKey.PublicKey},
+		} {
+			cov, err := dsig.Verify(doc, sig, opts)
+			if err != nil {
+				t.Fatalf("%s pinned: %v", name, err)
+			}
+			if cov.KeyInfoForm != dsig.KeyInfoNone || len(cov.Intermediates) != 0 {
+				t.Fatalf("%s pinned: coverage %+v", name, cov)
+			}
+		}
+	}
+}
+
+// XML-DSig 4.5.4: a signing certificate and its re-issue, for the same key,
+// are one leaf in any order: the first is the signing certificate and the
+// other an intermediate. Leaves for different keys stay refused.
+func TestX509DataReissuedCertificate(t *testing.T) {
+	p := newPKI(t)
+	reissued := newPKI(t).leaf // another chain, the same key
+	doc, sig := signedCovDoc(t, covKI(`<ds:X509Data>`+x509Cert(reissued)+`</ds:X509Data><ds:X509Data>`+x509Cert(p.leaf)+`</ds:X509Data>`))
+	cov, err := dsig.Verify(doc, sig, dsig.VerifyOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cov.Certificate.Equal(reissued) || len(cov.Intermediates) != 1 || !cov.Intermediates[0].Equal(p.leaf) {
+		t.Fatalf("coverage %+v", cov)
+	}
+	// Sign accepts the re-issue in the chain it emits.
+	if _, err := signPKI(t, p.key, func(o *dsig.SignOptions) { o.Chain = []*x509.Certificate{reissued, p.inter} }); err != nil {
+		t.Fatal(err)
 	}
 }

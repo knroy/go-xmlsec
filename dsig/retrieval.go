@@ -33,8 +33,10 @@ var retrievalTargets = map[string]xdm.QName{
 // retrievalMethod resolves a ds:RetrievalMethod (XML-DSig 4.5.3), one hop
 // only. Transforms are refused. A same-document URI must name the element
 // its Type says, for a Type in retrievalTargets (DSAKeyValue only for a DSA
-// signature). Any other URI is followed only for the rawX509Certificate
-// Type, through VerifyOptions.ResolveKeyInfoURI, and must be absolute. The
+// signature); without a Type, which is optional, the Type is the one of
+// retrievalTargets the named element is. Any other URI is followed only for
+// the rawX509Certificate Type, through VerifyOptions.ResolveKeyInfoURI, and
+// must be absolute. The
 // form reported is the one the target has: KeyInfoX509Data for X509Data or
 // a raw certificate, KeyInfoKeyValue for a key value, or
 // KeyInfoDEREncodedKeyValue.
@@ -61,14 +63,29 @@ func (c *keyContext) retrievalMethod(rm *xdm.Node) (resolvedKey, error) {
 		}
 		return withKey(cert, KeyInfoX509Data, nil)
 	}
-	want, ok := retrievalTargets[typ]
-	if !ok || typ == typeDSAKeyValue && c.dsaAlg == "" {
+	unsupported := func() bool {
+		_, ok := retrievalTargets[typ]
+		return !ok || typ == typeDSAKeyValue && c.dsaAlg == ""
+	}
+	if typ != "" && unsupported() {
 		return resolvedKey{}, fmt.Errorf("%w: ds:RetrievalMethod Type %q", xmlsec.ErrUnsupportedKeyInfo, typ)
 	}
 	target, err := c.sameDocument("ds:RetrievalMethod", uri.Value)
 	if err != nil {
 		return resolvedKey{}, err
 	}
+	if typ == "" {
+		// XML-DSig 4.5.3: Type is optional; the target says what it is.
+		for t, q := range retrievalTargets {
+			if target.IsElement(q.URI, q.Local) {
+				typ = t
+			}
+		}
+		if unsupported() {
+			return resolvedKey{}, fmt.Errorf("%w: ds:RetrievalMethod without Type names %s", xmlsec.ErrUnsupportedKeyInfo, target.Name.Local)
+		}
+	}
+	want := retrievalTargets[typ]
 	if !target.IsElement(want.URI, want.Local) {
 		return resolvedKey{}, malformed("ds:RetrievalMethod %q of Type %q names %s", uri.Value, typ, target.Name.Local)
 	}

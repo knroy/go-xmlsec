@@ -396,6 +396,7 @@ type VerifiedReference struct {
 }
 
 // Covers reports whether every given element ID appears in SignedElementIDs.
+// A nil Coverage covers nothing.
 //
 // SECURITY: this is an ID check, and it is not enough to decide that the
 // element an application is about to process was signed. In the XML
@@ -406,6 +407,9 @@ type VerifiedReference struct {
 // use CoversNodes. Use Covers only when you will then locate the element by
 // the same ID, with wss.FindByID, which refuses a duplicated ID.
 func (c *Coverage) Covers(elementIDs ...string) bool {
+	if c == nil {
+		return false
+	}
 	for _, id := range elementIDs {
 		if !slices.Contains(c.SignedElementIDs, id) {
 			return false
@@ -415,7 +419,8 @@ func (c *Coverage) Covers(elementIDs ...string) bool {
 }
 
 // CoversNodes reports whether every element given was covered by a
-// same-document reference, compared by node identity, not by ID.
+// same-document reference, compared by node identity, not by ID. A nil
+// Coverage covers nothing.
 //
 // Prefer it to Covers: it answers "was this element signed", which is
 // almost always the question, where Covers answers "was an element with
@@ -423,6 +428,9 @@ func (c *Coverage) Covers(elementIDs ...string) bool {
 // application reads is another one. The elements must come from the
 // document that was verified.
 func (c *Coverage) CoversNodes(elements ...*xdm.Node) bool {
+	if c == nil {
+		return false
+	}
 	for _, want := range elements {
 		if want == nil || !slices.ContainsFunc(c.SignedElements, want.Is) {
 			return false
@@ -432,7 +440,7 @@ func (c *Coverage) CoversNodes(elements ...*xdm.Node) bool {
 }
 
 // CoversAttachments reports whether every given attachment ID appears in
-// SignedAttachmentIDs.
+// SignedAttachmentIDs. A nil Coverage covers nothing.
 //
 // An attachment has no node identity, but it does not share Covers' hazard
 // as long as the application reads the part from the same AttachmentSet it
@@ -440,6 +448,9 @@ func (c *Coverage) CoversNodes(elements ...*xdm.Node) bool {
 // so an ID names exactly the part that was digested. Parsing the MIME
 // message a second time, and taking the first part with an ID, reopens it.
 func (c *Coverage) CoversAttachments(attachmentIDs ...string) bool {
+	if c == nil {
+		return false
+	}
 	for _, id := range attachmentIDs {
 		if !slices.Contains(c.SignedAttachmentIDs, id) {
 			return false
@@ -552,7 +563,7 @@ func verify(doc, sig *xdm.Node, opts VerifyOptions) (*Coverage, error) {
 	if err := checkPinnedSTR(p.keyInfo, opts.Certificate, strict); err != nil {
 		return nil, err
 	}
-	kc := keyContext{doc: doc, opts: opts}
+	kc := keyContext{doc: doc, opts: opts, pinned: pinned}
 	if _, ok := dsaKeySizes[p.sigAlg]; ok {
 		kc.dsaAlg = p.sigAlg
 	}

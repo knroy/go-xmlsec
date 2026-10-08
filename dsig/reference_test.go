@@ -405,3 +405,47 @@ func TestEnvelopedOnReparsedOctets(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+// XML-DSig 6.6.2 names RFC 2045, whose section 6.8 ignores every character
+// outside the base64 alphabet, not only whitespace (audit A1).
+func TestBase64TransformIgnoresNonAlphabet(t *testing.T) {
+	want := sha256.Sum256([]byte("ABCDEF"))
+	for _, body := range []string{"QUJDREVG", "QUJD REVG", "QUJD!REVG", "QU JD*RE-VG ", "QUJD&#9;REVG"} {
+		doc := parse(t, []byte(`<r><o xml:id="o">`+body+`</o></r>`))
+		sig, err := dsig.Sign(doc, newKey(t, rsaKey), dsig.SignOptions{
+			SignatureAlgorithm: xmlsec.SigRSASHA256, CanonicalizationAlgorithm: string(c14n.Exclusive10),
+			References: []dsig.Reference{{URI: "#o", DigestAlgorithm: xmlsec.DigestSHA256, Transforms: []dsig.TransformSpec{{Algorithm: xmlsec.TransformBase64}}}},
+			Parent:     xmltree.DocumentElement(doc),
+		})
+		if err != nil {
+			t.Fatalf("%q: %v", body, err)
+		}
+		if got := findDigestValue(sig); got != base64.StdEncoding.EncodeToString(want[:]) {
+			t.Fatalf("%q: DigestValue %s", body, got)
+		}
+		d := parse(t, serialize(t, doc))
+		if _, err := dsig.Verify(d, findSignature(d), dsig.VerifyOptions{PublicKey: &rsaKey.PublicKey}); err != nil {
+			t.Fatalf("%q: %v", body, err)
+		}
+	}
+	// Data after the pad is still malformed.
+	doc := parse(t, []byte(`<r><o xml:id="o">QUJD=REVG</o></r>`))
+	if _, err := dsig.Sign(doc, newKey(t, rsaKey), dsig.SignOptions{
+		SignatureAlgorithm: xmlsec.SigRSASHA256, CanonicalizationAlgorithm: string(c14n.Exclusive10),
+		References: []dsig.Reference{{URI: "#o", DigestAlgorithm: xmlsec.DigestSHA256, Transforms: []dsig.TransformSpec{{Algorithm: xmlsec.TransformBase64}}}},
+		Parent:     xmltree.DocumentElement(doc),
+	}); !errors.Is(err, xmlsec.ErrMalformed) {
+		t.Fatalf("data after the pad: %v", err)
+	}
+}
+
+// findDigestValue is the text of the first ds:DigestValue under n.
+func findDigestValue(n *xdm.Node) string {
+	v := ""
+	xmltree.Walk(n, func(e *xdm.Node) {
+		if v == "" && e.IsElement(xmlsec.NSDSig, "DigestValue") {
+			v = e.StringValue()
+		}
+	})
+	return v
+}

@@ -345,10 +345,11 @@ func TestX509DataDescriptiveElements(t *testing.T) {
 			add(xmltree.Element(ki, "ds", xmlsec.NSDSig, "X509Data"), "X509SKI", "AAAA")
 		}, nil},
 		{"another subject name", func(ki *xdm.Node) { add(ki.ChildElements()[0], "X509SubjectName", "CN=other") }, nil},
-		{"two certificates", func(ki *xdm.Node) {
+		// XML-DSig 4.5.4: two certificates for one key are one leaf.
+		{"the certificate twice", func(ki *xdm.Node) {
 			x := ki.ChildElements()[0]
 			add(x, "X509Certificate", x.ChildElements()[0].StringValue())
-		}, xmlsec.ErrUnsupportedKeyInfo},
+		}, nil},
 		{"a CRL", func(ki *xdm.Node) { add(ki.ChildElements()[0], "X509CRL", "AAAA") }, nil},
 		{"a KeyName beside X509Data", func(ki *xdm.Node) { add(ki, "KeyName", "k") }, nil},
 		{"no certificate", func(ki *xdm.Node) { ki.Children = nil }, xmlsec.ErrUnsupportedKeyInfo},
@@ -530,5 +531,14 @@ func TestStrictSecurityTokenReference(t *testing.T) {
 	opts.StrictSecurityTokenReference = false
 	if _, err := dsig.Verify(loose, findSignature(loose), opts); err != nil {
 		t.Fatalf("no ValueType, lenient: %v", err)
+	}
+}
+
+// A nil Coverage, as a failed Verify returns, covers nothing and does not
+// panic, even when asked about nothing.
+func TestCoverageNil(t *testing.T) {
+	var c *dsig.Coverage
+	if c.Covers() || c.Covers("a") || c.CoversNodes() || c.CoversNodes(&xdm.Node{}) || c.CoversAttachments() || c.CoversAttachments("a") {
+		t.Fatal("a nil Coverage covers something")
 	}
 }

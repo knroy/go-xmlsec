@@ -289,7 +289,9 @@ func (d *data) digest(h hash.Hash, sig *xdm.Node, uri string, transforms []Trans
 				// in document order, concatenated.
 				d.ns, d.octets = nil, []byte(textOf(d.ns))
 			}
-			b, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(string(d.octets)), ""))
+			// RFC 2045 section 6.8, which XML-DSig 6.6.2 names: characters
+			// outside the base64 alphabet are ignored, not only whitespace.
+			b, err := base64.StdEncoding.DecodeString(strings.Map(base64Alphabet, string(d.octets)))
 			if err != nil {
 				return fmt.Errorf("%w: base64 transform: %v", xmlsec.ErrMalformed, err)
 			}
@@ -344,6 +346,15 @@ func (d *data) digest(h hash.Hash, sig *xdm.Node, uri string, transforms []Trans
 	}
 	h.Write(d.octets)
 	return nil
+}
+
+// base64Alphabet keeps r if it is in the base64 alphabet or the pad, for
+// strings.Map, and drops it otherwise.
+func base64Alphabet(r rune) rune {
+	if 'A' <= r && r <= 'Z' || 'a' <= r && r <= 'z' || '0' <= r && r <= '9' || r == '+' || r == '/' || r == '=' {
+		return r
+	}
+	return -1
 }
 
 // textOf concatenates the text nodes of ns in document order.

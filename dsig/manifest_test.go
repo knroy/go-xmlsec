@@ -109,8 +109,9 @@ func TestVerifyManifestRefusals(t *testing.T) {
 	m := findManifest(doc)
 	other := parse(t, signed)
 
-	// A Manifest standing alone, as a caller-built Coverage names it: its
-	// enveloped-signature transform removes only the Manifest.
+	// A Manifest standing alone, as a caller-built Coverage names it: with
+	// no ds:Signature around it, its enveloped-signature transform has no
+	// output (XML-DSig 6.6.4) and is refused.
 	loose := func(inner string) (*xdm.Node, *xdm.Node, *dsig.Coverage) {
 		d := parse(t, []byte(`<r><ds:Manifest xmlns:ds="`+xmlsec.NSDSig+`">`+inner+`</ds:Manifest></r>`))
 		lm := findManifest(d)
@@ -143,10 +144,10 @@ func TestVerifyManifestRefusals(t *testing.T) {
 		}, dsig.VerifyOptions{}, xmlsec.ErrUnverifiable},
 		{"two omitted URIs", func() (*xdm.Node, *xdm.Node, *dsig.Coverage) { return loose(refXML(``) + refXML(``)) },
 			dsig.VerifyOptions{ResolveOmittedURI: func() ([]byte, error) { return nil, nil }}, xmlsec.ErrMalformed},
-		{"enveloped removes only the Manifest", func() (*xdm.Node, *xdm.Node, *dsig.Coverage) {
+		{"enveloped without a ds:Signature", func() (*xdm.Node, *xdm.Node, *dsig.Coverage) {
 			return loose(`<ds:Reference URI=""><ds:Transforms><ds:Transform Algorithm="` + xmlsec.TransformEnvelopedSignature +
 				`"/><ds:Transform Algorithm="` + covExc + `"/></ds:Transforms>` + covDigest + `</ds:Reference>`)
-		}, dsig.VerifyOptions{}, xmlsec.ErrDigestMismatch},
+		}, dsig.VerifyOptions{}, xmlsec.ErrMalformed},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -182,5 +183,33 @@ func TestBuildManifestRefusals(t *testing.T) {
 				t.Fatalf("got %v, want %v", err, c.want)
 			}
 		})
+	}
+}
+
+// XML-DSig 6.6.4: in a ds:Manifest that no ds:Signature contains, the
+// enveloped-signature transform has no output; VerifyManifest refuses it
+// before any digest rather than digest the document without the Manifest
+// (audit A6). BuildManifest still accepts it, for a Manifest placed inside
+// the signature (TestManifest).
+func TestManifestEnvelopedOutsideSignature(t *testing.T) {
+	doc := parse(t, []byte(`<r xmlns:ds="`+xmlsec.NSDSig+`"><a>x</a><ds:Manifest Id="m"><ds:Reference URI="">`+
+		`<ds:Transforms><ds:Transform Algorithm="`+xmlsec.TransformEnvelopedSignature+`"/><ds:Transform Algorithm="`+covExc+`"/></ds:Transforms>`+
+		covDigest+`</ds:Reference></ds:Manifest></r>`))
+	r := ref("#m")
+	r.Type = xmlsec.TypeManifest
+	opts := dsig.VerifyOptions{IDAttributes: []xdm.QName{dsig.IDAttrDSig}}
+	if _, err := dsig.Sign(doc, newKey(t, rsaKey), dsig.SignOptions{
+		SignatureAlgorithm: xmlsec.SigRSASHA256, CanonicalizationAlgorithm: string(c14n.Exclusive10),
+		References: []dsig.Reference{r}, IDAttributes: opts.IDAttributes, Parent: xmltree.DocumentElement(doc),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	opts.PublicKey = &rsaKey.PublicKey
+	cov, err := dsig.Verify(doc, findSignature(doc), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dsig.VerifyManifest(doc, findManifest(doc), cov, opts); !errors.Is(err, xmlsec.ErrMalformed) {
+		t.Fatalf("got %v", err)
 	}
 }

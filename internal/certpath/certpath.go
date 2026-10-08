@@ -13,18 +13,31 @@ import (
 // subject key identifier. It returns nil when there is no such certificate
 // or more than one. Nothing is verified: which certificate is the leaf is a
 // question of structure, and trusting the path is the caller's decision.
-func Leaf(certs []*x509.Certificate) *x509.Certificate {
-	var leaf *x509.Certificate
+func Leaf(certs []*x509.Certificate) *x509.Certificate { return leaf(certs, false) }
+
+// LeafOfKey is Leaf where certificates for one public key count as one,
+// such as a certificate and its re-issue (XML-DSig 4.5.4): issuance among
+// them is ignored, and when every leaf carries the same key the first of
+// them in certs is returned. Leaves with different keys still return nil.
+func LeafOfKey(certs []*x509.Certificate) *x509.Certificate { return leaf(certs, true) }
+
+func leaf(certs []*x509.Certificate, byKey bool) *x509.Certificate {
+	same := func(a, b *x509.Certificate) bool {
+		return byKey && len(a.RawSubjectPublicKeyInfo) > 0 && bytes.Equal(a.RawSubjectPublicKeyInfo, b.RawSubjectPublicKeyInfo)
+	}
+	var found *x509.Certificate
 	for _, c := range certs {
-		if slices.ContainsFunc(certs, func(d *x509.Certificate) bool { return d != c && issued(c, d) }) {
+		if slices.ContainsFunc(certs, func(d *x509.Certificate) bool { return d != c && !same(c, d) && issued(c, d) }) {
 			continue
 		}
-		if leaf != nil {
+		switch {
+		case found == nil:
+			found = c
+		case !same(found, c):
 			return nil
 		}
-		leaf = c
 	}
-	return leaf
+	return found
 }
 
 // issued reports whether the certificate issuer names issued subject.

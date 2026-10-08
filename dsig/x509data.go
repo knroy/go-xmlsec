@@ -86,9 +86,11 @@ type x509Data struct {
 
 // x509Key resolves the ds:X509Data elements of one ds:KeyInfo (XML-DSig
 // 4.5.4). Their certificates, at most maxX509Certificates, must hold
-// exactly one leaf, the one that issued none of the others: it is the
-// signing certificate, and the others are reported as intermediates. Every
-// descriptor beside them is ignored, as it selects nothing, unless
+// exactly one leaf, the one that issued none of the others, where
+// certificates for one key, such as a re-issue, count as one: the first of
+// them in document order is the signing certificate, and the others are
+// reported as intermediates. Every descriptor beside them is ignored, as it
+// selects nothing, unless
 // VerifyOptions.StrictX509Data requires each to describe one of the
 // certificates (xmlsec1 describes each certificate it carries). Without a
 // certificate the descriptors, each kind at most once, go to
@@ -104,7 +106,7 @@ func (c *keyContext) x509Key(els []*xdm.Node) (resolvedKey, error) {
 	var cert *x509.Certificate
 	switch {
 	case len(d.certs) > 0:
-		if cert = certpath.Leaf(d.certs); cert == nil {
+		if cert = certpath.LeafOfKey(d.certs); cert == nil {
 			return resolvedKey{}, fmt.Errorf("%w: ds:X509Data holds no single leaf certificate", xmlsec.ErrUnsupportedKeyInfo)
 		}
 		if !c.opts.StrictX509Data {
@@ -193,7 +195,14 @@ func (c *keyContext) readX509Data(els []*xdm.Node) (x509Data, error) {
 				}
 				cert, err := x509.ParseCertificate(b)
 				if err != nil {
-					return d, fmt.Errorf("%w: ds:X509Certificate: %v", xmlsec.ErrMalformed, err)
+					// XML-DSig 3.2.2: with the key pinned, a certificate Go
+					// cannot parse is an unused hint (Verify tolerates
+					// ErrUnsupportedKeyInfo then), not a failure.
+					sentinel := xmlsec.ErrMalformed
+					if c.pinned {
+						sentinel = xmlsec.ErrUnsupportedKeyInfo
+					}
+					return d, fmt.Errorf("%w: ds:X509Certificate: %v", sentinel, err)
 				}
 				d.certs = append(d.certs, cert)
 				continue
@@ -413,7 +422,7 @@ func addX509Data(ki *xdm.Node, cert *x509.Certificate, opts SignOptions, descrip
 		return errors.New("dsig: KeyInfoX509Descriptors needs SignOptions.X509Descriptors")
 	case len(opts.Chain) >= maxX509Certificates:
 		return fmt.Errorf("dsig: SignOptions.Chain holds %d certificates; at most %d with the signing one", len(opts.Chain), maxX509Certificates)
-	case len(opts.Chain) > 0 && certpath.Leaf(append([]*x509.Certificate{cert}, opts.Chain...)) != cert:
+	case len(opts.Chain) > 0 && certpath.LeafOfKey(append([]*x509.Certificate{cert}, opts.Chain...)) != cert:
 		return errors.New("dsig: the signing certificate is not the one leaf of itself and SignOptions.Chain")
 	}
 	b64 := base64.StdEncoding.EncodeToString

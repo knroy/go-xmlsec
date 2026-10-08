@@ -22,7 +22,12 @@ import (
 // xmlsec.TypeManifest}. Build it only once the references' targets stand
 // as they will be verified: until it is placed, the enveloped-signature
 // transform of one of its references removes nothing, and a same-document
-// reference cannot name the signature's other ds:Object elements.
+// reference cannot name the signature's other ds:Object elements. That is
+// what verification reproduces once the Manifest stands inside the
+// signature; placed outside any ds:Signature, a reference carrying the
+// enveloped-signature transform is refused by VerifyManifest (XML-DSig
+// 6.6.4). A reference to an element of the Manifest itself must use
+// exclusive canonicalization, as for a detached Sign.
 //
 // Unlike a ds:SignedInfo reference, a failed ds:Manifest reference does not
 // invalidate the signature: the verifier checks the references with
@@ -67,7 +72,8 @@ func BuildManifest(doc *xdm.Node, refs []Reference, opts SignOptions) (*xdm.Node
 // Verify's does a signature's, and must be inspected in the same way. Its
 // key fields are cov's. VerifiedReference.Raw is each ds:Reference under
 // Exclusive C14N. The enveloped-signature transform removes the ds:Signature
-// holding the Manifest, or when there is none, the Manifest. A document
+// holding the Manifest; when there is none, a reference carrying it is
+// refused with xmlsec.ErrMalformed (XML-DSig 6.6.4). A document
 // with no canonical form is reported as by Verify, with
 // xmlsec.ErrUnverifiable.
 func VerifyManifest(doc, manifest *xdm.Node, cov *Coverage, opts VerifyOptions) (*Coverage, error) {
@@ -120,6 +126,13 @@ func verifyManifest(doc, manifest *xdm.Node, cov *Coverage, opts VerifyOptions) 
 			sig = a
 			break
 		}
+	}
+	if sig == manifest && slices.ContainsFunc(refs, func(r parsedReference) bool {
+		return slices.ContainsFunc(r.transforms, func(t TransformSpec) bool { return t.Algorithm == xmlsec.TransformEnvelopedSignature })
+	}) {
+		// XML-DSig 6.6.4: the transform removes the ds:Signature containing
+		// it, and with none its output is empty. Nothing is digested.
+		return nil, malformed("enveloped-signature in a ds:Manifest that no ds:Signature contains")
 	}
 	out := &Coverage{Certificate: cov.Certificate, PublicKey: cov.PublicKey, KeyInfoForm: cov.KeyInfoForm}
 	if err := digestReferences(out, doc, sig, refs, raw, opts); err != nil {

@@ -33,12 +33,14 @@ var namedCurves = map[elliptic.Curve]string{
 
 // keyContext is what resolving a ds:KeyInfo needs: the document its
 // same-document references resolve in, the verification options (with the
-// key resolvers cleared when a key is pinned), and dsaAlg, the signature's
-// DSA algorithm when it is one, which alone admits a DSA key.
+// key resolvers cleared when a key is pinned), dsaAlg, the signature's DSA
+// algorithm when it is one, which alone admits a DSA key, and pinned, set
+// when the caller supplies the key and ds:KeyInfo is only a hint.
 type keyContext struct {
 	doc    *xdm.Node
 	opts   VerifyOptions
 	dsaAlg string
+	pinned bool
 }
 
 // resolvedKey is the key a ds:KeyInfo describes, with what it said beside.

@@ -66,7 +66,9 @@ type SignOptions struct {
 	// wire.
 	References []Reference
 
-	// KeyInfo selects how key material is described. Required.
+	// KeyInfo selects how key material is described. The zero value,
+	// KeyInfoNone, emits no ds:KeyInfo: the verifier must already hold the
+	// key, as it always does for an HMAC.
 	KeyInfo KeyInfoForm
 
 	// SecurityTokenID is the wsu:Id of the wsse:BinarySecurityToken, already
@@ -82,7 +84,8 @@ type SignOptions struct {
 	// Chain are certificates emitted after the signing certificate in
 	// ds:X509Data, for KeyInfoX509Data only: the path from it towards a
 	// trust anchor (XML-DSig 4.5.4). The signing certificate must be the one
-	// leaf of itself and Chain, and there may be at most 15 of them.
+	// leaf of itself and Chain, which may include other certificates for
+	// its key, and there may be at most 15 of them.
 	Chain []*x509.Certificate
 
 	// X509Descriptors are emitted in ds:X509Data, in the order given and
@@ -147,8 +150,14 @@ type SignOptions struct {
 	// ds:SignedInfo, so the signature is computed where it will stand. Any
 	// canonicalization algorithm may then be used. Without it Sign returns a
 	// detached signature, which only exclusive canonicalization keeps valid
-	// wherever the caller places it. An inclusive canonicalization, here or
-	// on a reference, is not Basic Security Profile output (R5404, R5423).
+	// wherever the caller places it: CanonicalizationAlgorithm must be
+	// exclusive, and so must every canonicalization of a reference to an
+	// element of the signature itself, such as a ds:Object or ds:KeyInfo
+	// (XML-DSig 4.4.3.3), without InclusiveNamespacePrefixes; such a
+	// reference may also carry enveloped-signature and base64, and is
+	// otherwise refused with xmlsec.ErrUnsupportedAlgorithm. An inclusive
+	// canonicalization, here or on a reference, is not Basic Security
+	// Profile output (R5404, R5423).
 	Parent *xdm.Node
 
 	// IDAttributes names attributes that "#id" references resolve against
@@ -202,10 +211,17 @@ type SignOptions struct {
 // for example inside wsse:Security, and the document is not modified. Then
 // the CanonicalizationAlgorithm must be exclusive: ds:SignedInfo is
 // canonicalized before it is placed, and only exclusive canonicalization is
-// independent of where it ends up. doc may then be nil, for an enveloping
+// independent of where it ends up. For the same reason a reference to an
+// element of the signature itself, such as a ds:Object, ds:KeyInfo or a
+// token embedded in it, is refused with xmlsec.ErrUnsupportedAlgorithm
+// unless its transforms are exclusive canonicalization without
+// InclusiveNamespacePrefixes, enveloped-signature or base64: an inclusive
+// canonicalization, an XPath or XSLT transform, or the STR Dereference
+// Transform of an embedded token would digest what the element renders
+// before the caller places it. doc may then be nil, for an enveloping
 // signature: references resolve only within the signature, such as to a
 // ds:Object of opts.Objects, and the caller makes the returned element a
-// document's element.
+// document's element, so its references may use any transform.
 //
 // Sign refuses with xmlsec.ErrNotNFC to sign a same-document reference, or
 // a ds:SignedInfo, whose canonical form is not in Unicode Normalization Form
@@ -481,6 +497,13 @@ func addReferences(parent, doc, sig *xdm.Node, refs []Reference, opts SignOption
 				transforms[i].el = tr
 			}
 		}
+		// XML-DSig 4.4.3.3: digesting an element of a detached signature
+		// fixes what it renders now, before the caller places it.
+		detached := sig.Parent == nil && sig != doc
+		if detached && !r.OmitURI && !placementIndependent(r.Transforms) && within(signatureTarget(doc, sig, r.URI, opts.IDAttributes), sig) {
+			return fmt.Errorf("%w: reference %q names an element of the detached signature, and its transforms depend on where the signature is placed; "+
+				"use only exclusive canonicalization without InclusiveNamespacePrefixes, or set SignOptions.Parent", xmlsec.ErrUnsupportedAlgorithm, r.URI)
+		}
 		h := dh.New()
 		sameDocument := !r.OmitURI && isSameDocument(r.URI)
 		if err := checkNFC(sameDocument, h, fmt.Sprintf("reference %q", r.URI), func(w hash.Hash) error {
@@ -488,8 +511,13 @@ func addReferences(parent, doc, sig *xdm.Node, refs []Reference, opts SignOption
 				d := data{octets: opts.OmittedURIData}
 				return d.digest(w, nil, "(omitted)", transforms, false)
 			}
-			_, err := digestReference(w, doc, sig, absoluteURI(opts.BaseURI, r.URI), transforms, opts.Attachments, false, opts.IDAttributes, opts.ResolveURI,
+			out, err := digestReference(w, doc, sig, absoluteURI(opts.BaseURI, r.URI), transforms, opts.Attachments, false, opts.IDAttributes, opts.ResolveURI,
 				strDeref(doc, opts.IDAttributes, opts.ResolveSecurityToken))
+			if err == nil && detached && within(out.token, sig) {
+				// The STR Dereference Transform renders the token's default
+				// namespace in scope, which its placement decides.
+				return fmt.Errorf("%w: reference %q digests a token inside the detached signature; set SignOptions.Parent", xmlsec.ErrUnsupportedAlgorithm, r.URI)
+			}
 			return err
 		}); err != nil {
 			return err
@@ -498,6 +526,42 @@ func addReferences(parent, doc, sig *xdm.Node, refs []Reference, opts SignOption
 		xmltree.Text(xmltree.Element(ref, "ds", xmlsec.NSDSig, "DigestValue"), base64.StdEncoding.EncodeToString(h.Sum(nil)))
 	}
 	return nil
+}
+
+// placementIndependent reports whether transforms digest an element of a
+// signature the same wherever that signature is later placed: only the
+// enveloped-signature transform, exclusive canonicalization without an
+// InclusiveNamespaces PrefixList, base64, and the STR Dereference Transform,
+// which digests a token rather than the element (addReferences checks
+// where that token stands). Inclusive canonicalization renders the
+// ancestors' namespaces and xml: attributes, a PrefixList the in-scope
+// namespaces, and the XPath and XSLT transforms can read anything around
+// the element.
+func placementIndependent(transforms []TransformSpec) bool {
+	for _, t := range transforms {
+		switch a := t.Algorithm; {
+		case a == xmlsec.TransformEnvelopedSignature, a == xmlsec.TransformBase64, a == xmlsec.TransformSTR:
+		case c14n.Algorithm(a).Exclusive() && len(t.InclusiveNamespacePrefixes) == 0:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// signatureTarget is the element a "#id" or #xpointer(id('ID')) uri names,
+// or nil for any other uri or one that does not resolve, which digesting
+// it reports.
+func signatureTarget(doc, sig *xdm.Node, uri string, idAttrs []xdm.QName) *xdm.Node {
+	if !isSameDocument(uri) {
+		return nil
+	}
+	id, whole, _, err := sameDocumentTarget(uri)
+	if err != nil || whole {
+		return nil
+	}
+	el, _ := findID(doc, sig, id, idAttrs)
+	return el
 }
 
 // checkReference refuses a Reference that would make the ds:Signature

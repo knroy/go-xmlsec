@@ -550,3 +550,125 @@ func TestSignOmittedURI(t *testing.T) {
 		}
 	}
 }
+
+// XML-DSig 4.4.3.3: without SignOptions.Parent, a reference to an element of
+// the signature itself is digested before the caller places it, so only
+// transforms independent of the placement are accepted (audit A10).
+func TestSignDetachedSelfReference(t *testing.T) {
+	key := newKey(t, rsaKey)
+	sign := func(doc *xdm.Node, uri string, ts []dsig.TransformSpec, edit func(*dsig.SignOptions)) (*xdm.Node, error) {
+		content := parse(t, []byte(`<x>data</x>`))
+		opts := dsig.SignOptions{
+			SignatureAlgorithm: xmlsec.SigRSASHA256, CanonicalizationAlgorithm: string(c14n.Exclusive10),
+			Objects:    []dsig.Object{{ID: "obj", Content: []*xdm.Node{xmltree.DocumentElement(content)}}},
+			References: []dsig.Reference{{URI: uri, DigestAlgorithm: xmlsec.DigestSHA256, Transforms: ts}},
+			KeyInfo:    dsig.KeyInfoX509Data, KeyInfoID: "ki",
+		}
+		if edit != nil {
+			edit(&opts)
+		}
+		return dsig.Sign(doc, key, opts)
+	}
+	const placed = `<root xmlns:foo="urn:foo" xml:lang="en"><hdr/></root>`
+	refused := map[string][]dsig.TransformSpec{
+		"C14N 1.0":                  {{Algorithm: string(c14n.Inclusive10)}},
+		"C14N 1.0 with comments":    {{Algorithm: string(c14n.Inclusive10WithComments)}},
+		"C14N 1.1":                  {{Algorithm: string(c14n.Inclusive11)}},
+		"C14N 1.1 with comments":    {{Algorithm: string(c14n.Inclusive11WithComments)}},
+		"exclusive with a prefix":   {{Algorithm: string(c14n.Exclusive10), InclusiveNamespacePrefixes: []string{"foo"}}},
+		"exclusive, then inclusive": {excC14N[0], {Algorithm: string(c14n.Inclusive10)}},
+		"XPath":                     {xp(xpNoX, xpNS), excC14N[0]},
+		"XSLT":                      {xsltSpec(stylesheet(t, xsltSheet)), excC14N[0]},
+	}
+	for name, ts := range refused {
+		for _, uri := range []string{"#obj", "#ki", "#xpointer(id('obj'))"} {
+			if _, err := sign(parse(t, []byte(placed)), uri, ts, nil); !errors.Is(err, xmlsec.ErrUnsupportedAlgorithm) {
+				t.Errorf("%s, %s: %v", name, uri, err)
+			}
+		}
+	}
+
+	// Exclusive canonicalization keeps the digest valid where the caller
+	// places the signature, inside an element with namespaces of its own.
+	for name, ts := range map[string][]dsig.TransformSpec{
+		"exclusive":                 excC14N,
+		"exclusive with comments":   {{Algorithm: string(c14n.Exclusive10WithComments)}},
+		"enveloped, then exclusive": {{Algorithm: xmlsec.TransformEnvelopedSignature}, excC14N[0]},
+		"base64":                    {{Algorithm: xmlsec.TransformBase64}},
+	} {
+		doc := parse(t, []byte(placed))
+		uri := "#obj"
+		if name == "base64" {
+			uri = "#b64"
+		}
+		sig, err := sign(doc, uri, ts, func(o *dsig.SignOptions) {
+			if uri == "#b64" {
+				o.Objects = []dsig.Object{{ID: "b64", Content: []*xdm.Node{xmltree.DocumentElement(parse(t, []byte(`<x>ZGF0YQ==</x>`)))}}}
+			}
+		})
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		xmltree.DocumentElement(doc).ChildElements()[0].AppendChild(sig)
+		d := parse(t, serialize(t, doc))
+		if _, err := dsig.Verify(d, findSignature(d), dsig.VerifyOptions{Certificate: key.Certificate}); err != nil {
+			t.Errorf("%s, placed: %v", name, err)
+		}
+	}
+
+	// In place, or enveloping with no document around it, nothing moves.
+	doc := parse(t, []byte(placed))
+	hdr := xmltree.DocumentElement(doc).ChildElements()[0]
+	if _, err := sign(doc, "#obj", refused["C14N 1.1"], func(o *dsig.SignOptions) { o.Parent = hdr }); err != nil {
+		t.Fatalf("in place: %v", err)
+	}
+	if _, err := sign(nil, "#obj", refused["C14N 1.1"], nil); err != nil {
+		t.Fatalf("enveloping: %v", err)
+	}
+	// A target outside the signature stands where it will be verified.
+	if _, err := sign(parse(t, []byte(`<root><a xml:id="a"/></root>`)), "#a", refused["C14N 1.0"], nil); err != nil {
+		t.Fatalf("document element: %v", err)
+	}
+	// So does the whole document, and an external resource.
+	if _, err := sign(parse(t, []byte(placed)), "", []dsig.TransformSpec{{Algorithm: xmlsec.TransformEnvelopedSignature}, refused["C14N 1.0"][0]}, nil); err != nil {
+		t.Fatalf("whole document: %v", err)
+	}
+	if _, err := sign(parse(t, []byte(placed)), "http://example.com/a.xml", refused["C14N 1.0"], func(o *dsig.SignOptions) {
+		o.ResolveURI = func(string) ([]byte, error) { return []byte(`<a/>`), nil }
+	}); err != nil {
+		t.Fatalf("external: %v", err)
+	}
+	// A reference that does not resolve is reported as before.
+	if _, err := sign(parse(t, []byte(placed)), "#missing", refused["C14N 1.0"], nil); !errors.Is(err, xmlsec.ErrIDNotFound) {
+		t.Fatalf("missing: %v", err)
+	}
+	if _, err := sign(parse(t, []byte(placed)), "#xpointer(//x)", refused["C14N 1.0"], nil); !errors.Is(err, xmlsec.ErrMalformed) {
+		t.Fatalf("XPointer: %v", err)
+	}
+}
+
+// The STR Dereference Transform renders the default namespace in scope at
+// the token, so a token embedded in the detached signature's own
+// wsse:SecurityTokenReference is refused; one in the document is not.
+func TestSignDetachedEmbeddedToken(t *testing.T) {
+	key := newKey(t, rsaKey)
+	doc, tokID, bodyID := covTokenDoc(t, key)
+	tok, err := wss.FindByID(doc, tokID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	str := xmltree.Element(nil, "wsse", xmlsec.NSWSSE, "SecurityTokenReference")
+	str.AddNamespace("wsse", xmlsec.NSWSSE)
+	str.AddNamespace("wsu", xmlsec.NSWSU)
+	xmltree.SetAttr(str, "wsu", xmlsec.NSWSU, "Id", "str")
+	xmltree.Element(str, "wsse", xmlsec.NSWSSE, "Embedded").AppendChild(xmltree.Clone(tok))
+	_, err = dsig.Sign(doc, key, dsig.SignOptions{
+		SignatureAlgorithm: xmlsec.SigRSASHA256, CanonicalizationAlgorithm: string(c14n.Exclusive10),
+		KeyInfo: dsig.KeyInfoSecurityTokenReference, KeyInfoElement: str,
+		References: []dsig.Reference{{URI: "#" + bodyID, Transforms: excC14N, DigestAlgorithm: xmlsec.DigestSHA256},
+			{URI: "#str", Transforms: strTransform, DigestAlgorithm: xmlsec.DigestSHA256}},
+	})
+	if !errors.Is(err, xmlsec.ErrUnsupportedAlgorithm) {
+		t.Fatalf("embedded token: %v", err)
+	}
+}
