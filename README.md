@@ -123,9 +123,11 @@ and measured costs.
 
 ## Algorithms
 
-Every algorithm is named explicitly at every call site. There are no defaults:
-the right canonicalization differs between document families, and a wrong
-default produces a signature that looks valid and that no peer accepts.
+Every algorithm is named explicitly when producing a signature or
+ciphertext: the right canonicalization differs between document families,
+and a wrong default produces a signature that looks valid and that no peer
+accepts. Verification and decryption have conservative default allow-lists,
+which a caller replaces by naming its own.
 
 | Purpose | Supported |
 |---|---|

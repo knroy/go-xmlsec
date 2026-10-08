@@ -5,10 +5,11 @@
 // supply documents, node selections, keys and attachments; this package
 // supplies octets and verdicts.
 //
-// Every algorithm is named explicitly at every call site. There are no
-// defaults, because document families differ in the canonicalization they
+// Every algorithm is named explicitly when producing a signature or
+// ciphertext, because document families differ in the canonicalization they
 // require and a default would silently produce a valid-looking signature
-// that no peer accepts.
+// that no peer accepts. Verification and decryption have conservative
+// default allow-lists, which a caller replaces by naming its own.
 //
 // # Canonicalization
 //

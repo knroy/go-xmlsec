@@ -1,9 +1,11 @@
 # Usage
 
-Every call names its algorithms. There are no defaults: two document families
-that commonly meet in one system — WS-Security messages and enveloped
-metadata documents — need different canonicalization, and a default would
-produce a signature that looks right and that no peer accepts.
+Every call that produces a signature or ciphertext names its algorithms:
+two document families that commonly meet in one system — WS-Security
+messages and enveloped metadata documents — need different canonicalization,
+and a default would produce a signature that looks right and that no peer
+accepts. Verification and decryption have conservative default allow-lists,
+which a caller replaces by naming its own.
 
 | Context | Canonicalization |
 |---|---|
@@ -19,7 +21,8 @@ module does not redefine them.
 Parse anything you will verify or decrypt with `xmlsec.Parse`. Its options
 are fixed, because the parse is part of the signature: the same octets parsed
 two ways can canonicalize two ways. Keep the received octets alongside the
-tree.
+tree. A DOCTYPE is refused with `xmlsec.ErrMalformed`; no option enables
+it.
 
 ```go
 tree, err := xmlsec.Parse(received)
@@ -39,6 +42,16 @@ where it ends up, so a detached signature needs exclusive canonicalization.
 To use any other, set `SignOptions.Parent` to the element the signature
 belongs in: `Sign` then appends it there first and computes it in place,
 leaves it there, and leaves the document unchanged if it fails.
+
+For the same reason, without `Parent` a reference to an element of the
+signature itself — its `ds:Object`, `ds:KeyInfo`, or a token embedded in its
+`wsse:SecurityTokenReference` — is refused with
+`xmlsec.ErrUnsupportedAlgorithm` unless its transforms are exclusive
+canonicalization without `InclusiveNamespacePrefixes`, enveloped-signature or
+base64 (§4.4.3.3): an inclusive canonicalization, an XPath or XSLT transform,
+or the STR Dereference Transform would digest the element before you place
+it, and the digest would no longer match. An enveloping signature, with `doc`
+nil, has no surroundings to change and is exempt.
 
 `Sign` refuses RSA keys under 2048 bits (XML Signature §6.4.2), a
 `SignatureID`, `SignedInfoID`, `SignatureValueID`, `KeyInfoID` or
@@ -67,7 +80,10 @@ Reference forms:
 
 Any other XPointer is refused. A canonicalization that follows octets parses
 them with `xmlsec.Parse`, and the base64 transform over an element decodes
-its text content, as XML Signature §4.4.3.2 and §6.6.2 describe.
+its text content, as XML Signature §4.4.3.2 and §6.6.2 describe. The base64
+transform ignores every character outside the base64 alphabet, as RFC 2045
+§6.8 requires, not only whitespace; `ds:DigestValue` and
+`ds:SignatureValue`, which are `base64Binary`, still admit only whitespace.
 
 When signing, a same-document reference with no transforms, or whose last
 transform leaves a node set, is refused: this library never produces a
@@ -151,6 +167,12 @@ checks those, with the same allow-lists, transform opt-ins, `MaxReferences`
 and resolvers as `Verify`, and returns a `Coverage` of what they cover. It
 refuses a Manifest that is not in `cov.SignedElements` (itself, or its
 `ds:Object`), with `ErrSignatureInvalid`: an unsigned Manifest proves nothing.
+The enveloped-signature transform of a Manifest reference removes the
+`ds:Signature` containing the Manifest; in a Manifest outside any signature
+it has no output (§6.6.4), and `VerifyManifest` refuses it with
+`ErrMalformed`. `BuildManifest` digests before the Manifest is placed, so
+such a reference is valid once the Manifest stands in the signature's
+`ds:Object`, as above.
 
 ```go
 cov, err := dsig.Verify(doc, sig, opts)
@@ -599,8 +621,10 @@ names them.
 To pin a sender known by a raw key rather than a certificate, set
 `VerifyOptions.PublicKey` instead of `Certificate`; setting both is an
 error. With a key pinned, a `KeyInfo` form this library does not accept is
-ignored (`KeyInfoForm` is then `KeyInfoNone`); a malformed or ambiguous one is
-still refused. When signing, `KeyInfoKeyValue` and
+ignored (`KeyInfoForm` is then `KeyInfoNone`), and so is a
+`ds:X509Certificate` Go cannot parse (§3.2.2: the key comes from `KeyInfo`
+or an external source); a malformed or ambiguous one is still refused.
+Unpinned, an unparsable certificate is `ErrMalformed`. When signing, `KeyInfoKeyValue` and
 `KeyInfoDEREncodedKeyValue` emit the signer's key without a certificate.
 
 ### KeyInfo forms
@@ -617,14 +641,21 @@ What `Sign` emits, by `SignOptions.KeyInfo`:
 | `KeyInfoSecurityTokenReference` | a `wsse:SecurityTokenReference` | `SecurityTokenID` |
 
 `KeyName`, when set, is emitted first beside any form but `KeyInfoNone`.
-The signing certificate must be the one leaf of itself and `Chain`.
+The signing certificate must be the one leaf of itself and `Chain`;
+`Chain` may hold other certificates for its key, such as a re-issue.
+
+`SignOptions.KeyInfo`'s zero value, `KeyInfoNone`, emits no `ds:KeyInfo`:
+the verifier must already hold the key.
 
 What `Verify` accepts, with at most one `ds:KeyName` beside, reported in
 `Coverage.KeyName`:
 
 * `ds:X509Data`, in one or several elements: up to 16 certificates, of which
-  exactly one issued none of the others. That leaf is the signing
-  certificate; the rest are `Coverage.Intermediates`, and each `ds:X509CRL`
+  exactly one issued none of the others, where certificates for the same
+  public key, such as a certificate and its re-issue, count as one (§4.5.4).
+  That leaf is the signing certificate, the first of them in document order
+  when several carry its key; the rest are `Coverage.Intermediates`. Leaves
+  for different keys are refused with `ErrUnsupportedKeyInfo`. Each `ds:X509CRL`
   is in `Coverage.CRLs`, none of them checked. An `X509IssuerSerial`,
   `X509SKI`, `X509SubjectName` or `dsig11:X509Digest` beside the
   certificates selects nothing and is ignored: real signers renew a
@@ -637,8 +668,10 @@ What `Verify` accepts, with at most one `ds:KeyName` beside, reported in
   allowed DSA signature.
 * A `ds:RetrievalMethod` to `"#id"`, without transforms, whose `Type` is
   `X509Data`, `RSAKeyValue`, `DSAKeyValue`, `ECKeyValue` or
-  `DEREncodedKeyValue` and names an element of that type; or, through
-  `ResolveKeyInfoURI`, to an absolute URI of `Type` `rawX509Certificate`.
+  `DEREncodedKeyValue` and names an element of that type; without a `Type`,
+  which is optional (§4.5.3), the element named must be one of those; or,
+  through `ResolveKeyInfoURI`, to an absolute URI of `Type`
+  `rawX509Certificate`, which needs the `Type`.
 * A `dsig11:KeyInfoReference` to a `ds:KeyInfo` in the same document or,
   through `ResolveKeyInfoURI`, in another.
 * A `wsse:SecurityTokenReference`.
@@ -676,7 +709,8 @@ More options:
 | `StrictX509Data` | Refuse an `X509IssuerSerial`, `X509SKI`, `X509SubjectName` or `dsig11:X509Digest` beside the carried certificates that describes none of them (XML Signature §4.5.4). Off by default: a descriptor beside a certificate selects nothing, and real signers leave stale ones after renewing. |
 | `ResolveKeyName`, `ResolveX509`, `ResolveKeyInfoURI` | Resolve a key the message names without carrying it; see [KeyInfo forms](#keyinfo-forms). |
 
-Then check `Coverage`, every time:
+Then check `Coverage`, every time. The three `Covers` methods of a nil
+`Coverage`, which a failed `Verify` returns, report false:
 
 | Field | Check |
 |---|---|
