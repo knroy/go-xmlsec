@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/knroy/go-xml/c14n"
 	"github.com/knroy/go-xml/xdm"
@@ -58,11 +59,25 @@ func ParseWithLimits(b []byte, l ParseLimits) (*xdm.Tree, error) {
 		MaxNodes: int(nodes),
 	}.WithEntityBudget(xdm.NewEntityBudget())
 	tree, err := xdm.Parse(bytes.NewReader(b), opts)
-	if errors.Is(err, xdm.ErrResourceLimit) {
+	switch {
+	case errors.Is(err, xdm.ErrResourceLimit):
 		return nil, fmt.Errorf("%w: %w", ErrLimitExceeded, err)
+	case err != nil && strings.Contains(err.Error(), "DOCTYPE declaration rejected"):
+		return nil, doctypeError{err}
 	}
 	return tree, err
 }
+
+// doctypeError is the parser's DOCTYPE refusal, whose message names a parse
+// option no caller of Parse can set. It is ErrMalformed, still wraps the
+// cause, and has a message of its own.
+type doctypeError struct{ cause error }
+
+func (e doctypeError) Error() string {
+	return ErrMalformed.Error() + ": a DOCTYPE declaration is refused"
+}
+
+func (e doctypeError) Unwrap() []error { return []error{ErrMalformed, e.cause} }
 
 // tighten returns v, or pinned when v is zero, refusing a negative value or
 // one above pinned.
@@ -81,7 +96,8 @@ func tighten(name string, v, pinned int64) (int64, error) {
 // different options can canonicalize differently, so these options are not
 // configurable.
 //
-// A DOCTYPE is refused and no EntityResolver is ever supplied.
+// A DOCTYPE is refused, with ErrMalformed, and no EntityResolver is ever
+// supplied.
 //
 // Memory use can reach about 40 times len(b) within the limits above, before
 // anything is authenticated. Cap the size of b to what the profile needs, or

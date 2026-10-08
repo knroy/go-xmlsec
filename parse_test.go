@@ -14,9 +14,20 @@ func TestParseRefusesDOCTYPE(t *testing.T) {
 		"external entity": `<!DOCTYPE a [<!ENTITY x SYSTEM "file:///etc/passwd">]><a>&x;</a>`,
 		"bare doctype":    `<!DOCTYPE a><a/>`,
 	} {
-		if _, err := Parse([]byte(doc)); err == nil {
-			t.Errorf("%s: accepted", name)
+		_, err := Parse([]byte(doc))
+		// ErrMalformed, with the parser's refusal still wrapped, and no
+		// mention of a parse option the caller cannot set.
+		var de doctypeError
+		if !errors.Is(err, ErrMalformed) || !errors.As(err, &de) || de.cause == nil || strings.Contains(err.Error(), "AllowDOCTYPE") {
+			t.Errorf("%s: %v", name, err)
 		}
+		if _, err := ParseWithLimits([]byte(doc), ParseLimits{MaxDepth: 10}); !errors.Is(err, ErrMalformed) {
+			t.Errorf("%s, with limits: %v", name, err)
+		}
+	}
+	// Other syntax errors are reported as the parser gives them.
+	if _, err := Parse([]byte(`<a>`)); err == nil || errors.Is(err, ErrMalformed) {
+		t.Fatal(err)
 	}
 	if _, err := Parse([]byte(`<a/>`)); err != nil {
 		t.Fatal(err)
