@@ -12,7 +12,8 @@ package version
 // follows it. Two checks keep them together:
 //
 //   - TestVersionIsReleasedAndDescribed, in every CI run: this is a v1
-//     release triple, and CHANGELOG.md has a section for exactly it.
+//     release triple, and the newest released section of CHANGELOG.md is
+//     for exactly it.
 //   - release.yml, on the tag push: the tag must equal this constant.
 //
 // The major version is 1: a breaking change to the API needs a new module
