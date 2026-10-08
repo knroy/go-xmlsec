@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -107,7 +108,9 @@ func verifySTR(t *testing.T, signed []byte, opts dsig.VerifyOptions) (*dsig.Cove
 func TestSTRTransformDirectReference(t *testing.T) {
 	key := newKey(t, rsaKey)
 	signed := signSTR(t, key, directSTR(t), nil)
-	if !strings.Contains(string(signed), `<wsse:TransformationParameters><ds:CanonicalizationMethod Algorithm="`+string(c14n.Exclusive10)+`"></ds:CanonicalizationMethod></wsse:TransformationParameters>`) {
+	// The PrefixList states the default namespace the transform renders.
+	if !strings.Contains(string(signed), `<wsse:TransformationParameters><ds:CanonicalizationMethod Algorithm="`+string(c14n.Exclusive10)+
+		`"><ec:InclusiveNamespaces xmlns:ec="`+xmlsec.NSExcC14N+`" PrefixList="#default"></ec:InclusiveNamespaces></ds:CanonicalizationMethod></wsse:TransformationParameters>`) {
 		t.Fatalf("transform parameters not emitted:\n%s", signed)
 	}
 	cov, err := verifySTR(t, signed, dsig.VerifyOptions{Certificate: key.Certificate})
@@ -285,18 +288,19 @@ func signKeyIdentifierNoResolver(t *testing.T, key xmlsec.KeyProvider) error {
 }
 
 // A received STR Dereference Transform must carry exactly one
-// wsse:TransformationParameters, without attributes, holding one Exclusive
-// C14N ds:CanonicalizationMethod (BSP R3065; SOAP Message Security section
+// wsse:TransformationParameters, without attributes, holding one
+// ds:CanonicalizationMethod naming a canonicalization (BSP R3065; SOAP Message Security section
 // 8.3: unrecognized parameters SHOULD fault), and must be the only
 // transform of a reference to a wsse:SecurityTokenReference. Each altered
 // signature is re-signed, so only the property under test decides.
 func TestSTRTransformVerifyRefusals(t *testing.T) {
 	key := newKey(t, rsaKey)
 	signed := string(signSTR(t, key, directSTR(t), func(o *dsig.SignOptions) {
-		o.References[1].Transforms[0].InclusiveNamespacePrefixes = []string{"S"}
+		// A new slice: strTransform is shared.
+		o.References[1].Transforms = []dsig.TransformSpec{{Algorithm: xmlsec.TransformSTR, InclusiveNamespacePrefixes: []string{"S"}}}
 	}))
 	const params = `<wsse:TransformationParameters><ds:CanonicalizationMethod Algorithm="` + string(c14n.Exclusive10) +
-		`"><ec:InclusiveNamespaces xmlns:ec="` + xmlsec.NSExcC14N + `" PrefixList="S"></ec:InclusiveNamespaces></ds:CanonicalizationMethod></wsse:TransformationParameters>`
+		`"><ec:InclusiveNamespaces xmlns:ec="` + xmlsec.NSExcC14N + `" PrefixList="S #default"></ec:InclusiveNamespaces></ds:CanonicalizationMethod></wsse:TransformationParameters>`
 	if !strings.Contains(signed, params) {
 		t.Fatalf("PrefixList not emitted:\n%s", signed)
 	}
@@ -313,7 +317,7 @@ func TestSTRTransformVerifyRefusals(t *testing.T) {
 		"two parameters":  {params, params + params, xmlsec.ErrMalformed},
 		"attribute":       {`<wsse:TransformationParameters>`, `<wsse:TransformationParameters a="1">`, xmlsec.ErrMalformed},
 		"other parameter": {params, strings.ReplaceAll(params, "CanonicalizationMethod", "DigestMethod"), xmlsec.ErrMalformed},
-		"inclusive C14N": {params, `<wsse:TransformationParameters><ds:CanonicalizationMethod Algorithm="` + string(c14n.Inclusive10) +
+		"not a canonicalization": {params, `<wsse:TransformationParameters><ds:CanonicalizationMethod Algorithm="` + xmlsec.TransformBase64 +
 			`"></ds:CanonicalizationMethod></wsse:TransformationParameters>`, xmlsec.ErrUnsupportedAlgorithm},
 		"unknown parameter": {`<ec:InclusiveNamespaces`, `<x xmlns="urn:x"></x><ec:InclusiveNamespaces`, xmlsec.ErrMalformed},
 		"not the only transform": {`</ds:Transform></ds:Transforms><ds:DigestMethod Algorithm="` + xmlsec.DigestSHA256 + `"></ds:DigestMethod><ds:DigestValue>` + signed[strings.LastIndex(signed, "<ds:DigestValue>")+16:strings.LastIndex(signed, "</ds:DigestValue>")],
@@ -391,5 +395,131 @@ func TestSTRTransformOverKeyInfo(t *testing.T) {
 	if err != nil || len(cov.SignedTokens) != 1 || cov.SignedTokens[0].AttrValue("ValueType") != xmlsec.BSTValueTypeX509v3 ||
 		!cov.Certificate.Equal(key.Certificate) {
 		t.Fatalf("%v, %+v", err, cov)
+	}
+}
+
+// samlSTRDoc is a SOAP envelope whose header carries tokens, then a
+// wsse:SecurityTokenReference with wsu:Id "str" holding ki.
+func samlSTRDoc(t *testing.T, tokens, ki string) *xdm.Node {
+	return parse(t, []byte(`<S:Envelope xmlns:S="http://www.w3.org/2003/05/soap-envelope"><S:Header>`+
+		`<wsse:Security xmlns:wsse="`+xmlsec.NSWSSE+`" xmlns:wsu="`+xmlsec.NSWSU+`">`+tokens+
+		`<wsse:SecurityTokenReference wsu:Id="str">`+ki+`</wsse:SecurityTokenReference>`+
+		`</wsse:Security></S:Header><S:Body></S:Body></S:Envelope>`))
+}
+
+// A SAML key identifier names an assertion in the message by its ID (SAML
+// Token Profile 1.1.1): the transform digests that assertion, never an
+// X.509 token built from what ResolveSecurityToken returns. Any other key
+// identifier that is not an X.509 one names a token the transform cannot
+// reproduce, and is refused.
+func TestSTRTransformSAMLKeyIdentifier(t *testing.T) {
+	key := newKey(t, rsaKey)
+	resolve := func(*xdm.Node) (*x509.Certificate, error) { return key.Certificate, nil }
+	const (
+		saml1   = `<saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:1.0:assertion" AssertionID="_a1" MajorVersion="1" MinorVersion="1"/>`
+		saml2   = `<saml2:Assertion xmlns:saml2="urn:oasis:names:tc:SAML:2.0:assertion" ID="_a2" Version="2.0"/>`
+		ki1     = `<wsse:KeyIdentifier ValueType="http://docs.oasis-open.org/wss/oasis-wss-saml-token-profile-1.0#SAMLAssertionID">_a1</wsse:KeyIdentifier>`
+		ki2     = `<wsse:KeyIdentifier ValueType="http://docs.oasis-open.org/wss/oasis-wss-saml-token-profile-1.1#SAMLID"> _a2 </wsse:KeyIdentifier>`
+		ekSHA1  = `<wsse:KeyIdentifier EncodingType="` + xmlsec.BSTEncodingBase64 + `" ValueType="http://docs.oasis-open.org/wss/oasis-wss-soap-message-security-1.1#EncryptedKeySHA1">AAAA</wsse:KeyIdentifier>`
+		kerbKI  = `<wsse:KeyIdentifier EncodingType="` + xmlsec.BSTEncodingBase64 + `" ValueType="http://docs.oasis-open.org/wss/oasis-wss-kerberos-tokenprofile-1.1#Kerberosv5APREQSHA1">AAAA</wsse:KeyIdentifier>`
+		wantSA1 = `<saml:Assertion xmlns="" xmlns:saml="urn:oasis:names:tc:SAML:1.0:assertion" AssertionID="_a1" MajorVersion="1" MinorVersion="1"></saml:Assertion>`
+		wantSA2 = `<saml2:Assertion xmlns="" xmlns:saml2="urn:oasis:names:tc:SAML:2.0:assertion" ID="_a2" Version="2.0"></saml2:Assertion>`
+	)
+	sign := func(doc *xdm.Node) (*xdm.Node, error) {
+		return dsig.Sign(doc, key, dsig.SignOptions{
+			SignatureAlgorithm:        xmlsec.SigRSASHA256,
+			CanonicalizationAlgorithm: string(c14n.Exclusive10),
+			References:                []dsig.Reference{{URI: "#str", Transforms: strTransform, DigestAlgorithm: xmlsec.DigestSHA256}},
+			ResolveSecurityToken:      resolve,
+		})
+	}
+	for name, c := range map[string]struct{ ki, want string }{
+		"SAML 1.1": {ki1, wantSA1},
+		"SAML 2.0": {ki2, wantSA2},
+	} {
+		doc := samlSTRDoc(t, saml1+saml2, c.ki)
+		sig, err := sign(doc)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		want := sha256.Sum256([]byte(c.want))
+		if !strings.Contains(string(serialize(t, sig)), base64.StdEncoding.EncodeToString(want[:])) {
+			t.Fatalf("%s: digest is not the assertion's:\n%s", name, serialize(t, sig))
+		}
+		xmltree.DocumentElement(doc).ChildElements()[0].ChildElements()[0].AppendChild(sig)
+		cov, err := dsig.Verify(doc, sig, dsig.VerifyOptions{Certificate: key.Certificate})
+		if err != nil || len(cov.SignedTokens) != 1 || cov.SignedTokens[0].Name.Local != "Assertion" {
+			t.Fatalf("%s: %v, %+v", name, err, cov)
+		}
+	}
+
+	for name, c := range map[string]struct {
+		tokens, ki string
+		want       error
+	}{
+		"assertion not in the message": {saml2, ki1, xmlsec.ErrSecurityTokenUnavailable},
+		"ID on another element":        {`<x wsu:Id="_a1"/>`, ki1, xmlsec.ErrSecurityTokenUnavailable},
+		"SAML 2.0 ID on a 1.1 assertion": {`<saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:1.0:assertion" ID="_a2"/>`, ki2,
+			xmlsec.ErrSecurityTokenUnavailable},
+		"ID twice":         {saml1 + `<x wsu:Id="_a1"/>`, ki1, xmlsec.ErrAmbiguousID},
+		"EncryptedKeySHA1": {saml1, ekSHA1, xmlsec.ErrUnsupportedKeyInfo},
+		"Kerberos":         {saml1, kerbKI, xmlsec.ErrUnsupportedKeyInfo},
+	} {
+		if _, err := sign(samlSTRDoc(t, c.tokens, c.ki)); !errors.Is(err, c.want) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+// The canonicalization of the STR Dereference Transform is any the
+// allow-list admits: Inclusive C14N, as in the section 8.3 example,
+// verifies when allowed and is refused when not, and under StrictBSP, which
+// requires Exclusive C14N (R5404).
+func TestSTRTransformCanonicalization(t *testing.T) {
+	key := newKey(t, rsaKey)
+	signed := string(signSTR(t, key, directSTR(t), nil))
+	exc := `<ds:CanonicalizationMethod Algorithm="` + string(c14n.Exclusive10) + `"><ec:InclusiveNamespaces xmlns:ec="` + xmlsec.NSExcC14N +
+		`" PrefixList="#default"></ec:InclusiveNamespaces></ds:CanonicalizationMethod>`
+	inc := strings.Replace(signed, exc, `<ds:CanonicalizationMethod Algorithm="`+string(c14n.Inclusive10)+`"></ds:CanonicalizationMethod>`, 1)
+	if inc == signed {
+		t.Fatalf("no STR canonicalization:\n%s", signed)
+	}
+	doc := parse(t, []byte(inc))
+	sig := findSignature(doc)
+	// The token's Inclusive C14N, with the xmlns="" section 8.3 adds: the
+	// envelope has no default namespace.
+	var bst *xdm.Node
+	xmltree.Walk(doc, func(e *xdm.Node) {
+		if e.IsElement(xmlsec.NSWSSE, "BinarySecurityToken") {
+			bst = e
+		}
+	})
+	b, err := c14n.Bytes(bst, c14n.Options{Algorithm: c14n.Inclusive10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b = []byte(strings.Replace(string(b), `<wsse:BinarySecurityToken `, `<wsse:BinarySecurityToken xmlns="" `, 1))
+	d := sha256.Sum256(b)
+	refs := sig.ChildElements()[0].ChildElements()
+	digest := refs[len(refs)-1].ChildElements()[2]
+	digest.Children[0].Value = base64.StdEncoding.EncodeToString(d[:])
+	resignSI(t, sig, c14n.Exclusive10)
+
+	if _, err := dsig.Verify(doc, sig, dsig.VerifyOptions{Certificate: key.Certificate}); err != nil {
+		t.Fatalf("Inclusive C14N, default allow-list: %v", err)
+	}
+	allow := []string{string(c14n.Exclusive10), string(c14n.Inclusive10)}
+	if _, err := dsig.Verify(doc, sig, dsig.VerifyOptions{Certificate: key.Certificate, AllowedCanonicalizationAlgorithms: allow}); err != nil {
+		t.Fatalf("Inclusive C14N allowed: %v", err)
+	}
+	if _, err := dsig.Verify(doc, sig, dsig.VerifyOptions{Certificate: key.Certificate, AllowedCanonicalizationAlgorithms: allow[:1]}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
+		t.Fatalf("Inclusive C14N not allowed: %v", err)
+	}
+	// StrictBSP also refuses the ds:X509Data KeyInfo (R5417); without it,
+	// the canonicalization decides.
+	sig.Children = slices.DeleteFunc(sig.Children, func(n *xdm.Node) bool { return n.IsElement(xmlsec.NSDSig, "KeyInfo") })
+	if _, err := dsig.Verify(doc, sig, dsig.VerifyOptions{Certificate: key.Certificate, StrictBSP: true}); !errors.Is(err, xmlsec.ErrMalformed) ||
+		!strings.Contains(err.Error(), "R5404") {
+		t.Fatalf("Inclusive C14N under StrictBSP: %v", err)
 	}
 }

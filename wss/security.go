@@ -10,10 +10,20 @@ import (
 	"github.com/knroy/go-xmlsec/internal/xmltree"
 )
 
-// Header wraps a wsse:Security element under construction.
+// Header wraps a wsse:Security element under construction. Make one with
+// NewHeader: the methods of a nil or zero Header return an error, and its
+// Element is nil.
 type Header struct {
 	doc *xdm.Node
 	el  *xdm.Node
+}
+
+// check refuses a Header that NewHeader did not make.
+func (h *Header) check() error {
+	if h == nil || h.el == nil {
+		return errors.New("wss: Header not made by NewHeader")
+	}
+	return nil
 }
 
 // NewHeader creates a wsse:Security element in the SOAP header of doc,
@@ -110,6 +120,9 @@ func NewHeader(doc *xdm.Node, soapNS string, actor string, mustUnderstand bool) 
 // follows such an EncryptedData, Prepend refuses and leaves the header
 // unchanged.
 func (h *Header) Prepend(el *xdm.Node) error {
+	if err := h.check(); err != nil {
+		return err
+	}
 	if el == nil || el.Kind != xdm.KindElement || el.Parent != nil {
 		return errors.New("wss: Prepend needs a detached element")
 	}
@@ -134,15 +147,24 @@ func (h *Header) Prepend(el *xdm.Node) error {
 // header, for a caller that orders the header itself. Prepend gives the
 // order WS-Security specifies.
 func (h *Header) Append(el *xdm.Node) error {
-	if el.Parent != nil {
-		return errors.New("wss: element already has a parent")
+	if err := h.check(); err != nil {
+		return err
+	}
+	if el == nil || el.Parent != nil {
+		return errors.New("wss: Append needs a detached node")
 	}
 	h.el.AppendChild(el)
 	return nil
 }
 
-// Element returns the wsse:Security element.
-func (h *Header) Element() *xdm.Node { return h.el }
+// Element returns the wsse:Security element, or nil for a nil or zero
+// Header.
+func (h *Header) Element() *xdm.Node {
+	if h == nil {
+		return nil
+	}
+	return h.el
+}
 
 // front returns where a prepended element goes: first, or after a leading
 // wsu:Timestamp.

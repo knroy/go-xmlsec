@@ -153,8 +153,14 @@ func ResolveSecurityTokenReference(doc, str *xdm.Node) (*x509.Certificate, error
 //   - has a wsse11:TokenType other than the token's ValueType, or none when
 //     the token is an X509PKIPathv1 or PKCS7 token (SOAP Message Security
 //     1.1.1 section 7.1, R3074, R5215, R5212);
-//   - is not inside a wsse:Security header whose child is the token
-//     (R3066), or precedes the token (R5205).
+//   - is inside a wsse:Security header of which the token is not a child
+//     (R3066), or precedes the token (R5205);
+//   - is outside every wsse:Security header, as in the SOAP Body, and does
+//     not follow the token in document order (R5205; R3066 governs only a
+//     reference inside a header);
+//
+// and a binary security token without an EncodingType (R3029), which the
+// lenient form reads as Base64Binary, the SOAP Message Security default.
 //
 // A wsse:Embedded token is checked for its TokenType only: the
 // wsse:Embedded carries no ValueType, and the token is where it is
@@ -177,17 +183,42 @@ func ResolveSecurityTokenReferenceStrict(doc, str *xdm.Node) (*x509.Certificate,
 		if got := ref.AttrValue("ValueType"); got == "" || got != vt {
 			return nil, fmt.Errorf("%w: wsse:Reference ValueType %q, token %q (BSP R3059, R3058)", xmlsec.ErrMalformed, got, vt)
 		}
-		// The child of the token's header that holds the reference.
-		step := str
-		for step.Parent != nil && step.Parent != tok.Parent {
-			step = step.Parent
-		}
-		if !tok.Parent.IsElement(xmlsec.NSWSSE, "Security") || step.Parent == nil ||
-			slices.Index(step.Parent.Children, step) <= slices.Index(step.Parent.Children, tok) {
-			return nil, fmt.Errorf("%w: the token must precede the reference in the same wsse:Security (BSP R5205, R3066)", xmlsec.ErrMalformed)
+		if err := checkTokenOrder(doc, str, tok); err != nil {
+			return nil, err
 		}
 	}
+	if tok.IsElement(xmlsec.NSWSSE, "BinarySecurityToken") && tok.Attr("", "EncodingType") == nil {
+		return nil, fmt.Errorf("%w: wsse:BinarySecurityToken without an EncodingType (BSP R3029)", xmlsec.ErrMalformed)
+	}
 	return ParseBinarySecurityToken(tok)
+}
+
+// checkTokenOrder applies R3066 and R5205 to a direct reference str to tok:
+// inside a wsse:Security header, tok is a child of that header and the
+// reference is in a later child; elsewhere, tok precedes str in document
+// order.
+func checkTokenOrder(doc, str, tok *xdm.Node) error {
+	sec := str.Parent
+	for sec != nil && !sec.IsElement(xmlsec.NSWSSE, "Security") {
+		sec = sec.Parent
+	}
+	if sec == nil {
+		pos := map[*xdm.Node]int{}
+		xmltree.Walk(doc.Root(), func(e *xdm.Node) { pos[e] = len(pos) + 1 })
+		if pos[str] <= pos[tok] {
+			return fmt.Errorf("%w: the token must precede the reference (BSP R5205)", xmlsec.ErrMalformed)
+		}
+		return nil
+	}
+	// The child of the header that holds the reference.
+	step := str
+	for step.Parent != sec {
+		step = step.Parent
+	}
+	if tok.Parent != sec || slices.Index(sec.Children, step) <= slices.Index(sec.Children, tok) {
+		return fmt.Errorf("%w: the token must precede the reference in the same wsse:Security (BSP R5205, R3066)", xmlsec.ErrMalformed)
+	}
+	return nil
 }
 
 // ReferencedToken returns the token element a wsse:SecurityTokenReference

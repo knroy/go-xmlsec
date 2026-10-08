@@ -38,6 +38,9 @@ func (h *Header) AddSignatureConfirmationWithID(value []byte, id string) (string
 }
 
 func (h *Header) addSignatureConfirmation(value []byte, id string) (string, error) {
+	if err := h.check(); err != nil {
+		return "", err
+	}
 	id, err := idFor(h.doc, id)
 	if err != nil {
 		return "", err

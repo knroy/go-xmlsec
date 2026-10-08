@@ -6,6 +6,10 @@
 // Where the profile leaves a choice open, or Apache WSS4J, the implementation
 // WS-Security peers run, reads it differently for common input, the choice
 // follows WSS4J so that signatures verify there; each such place says so.
+// Three such departures from section 5.4.1 remain, each required by WSS4J
+// as the interop suite shows: no space after the colon of
+// Content-Description (rule 8), the trailing whitespace a removed comment
+// leaves there (rule 18), and a lowercased filename parameter (rule 15).
 package swa
 
 import (
@@ -30,7 +34,10 @@ const defaultContentType = "text/plain; charset=us-ascii"
 
 // lowerParams are the parameters whose values are case-insensitive and so
 // lowercased (rule 15). The set is WSS4J's; it includes filename, which
-// RFC 2183 does not make case-insensitive.
+// RFC 2183 does not make case-insensitive, so rule 15 would keep its case.
+// WSS4J lowercases it, signing and verifying: the interop suite
+// (tests/interop/swa_test.go, filename="Invoice.XML") fails both ways when
+// the case is kept.
 var lowerParams = map[string]bool{
 	"charset": true, "creation-date": true, "filename": true, "modification-date": true,
 	"padding": true, "read-date": true, "size": true, "type": true,
@@ -108,12 +115,21 @@ func selected(att *xmlsec.Attachment) (map[string]string, error) {
 	return sel, err
 }
 
-// canonicalValue applies rules 5 to 17 to one unfolded header value. The
-// value arrives without the whitespace after the colon, as MIME parsers
-// return it and as WSS4J receives it, so an unstructured
-// Content-Description carries none either, where rule 8 would keep it. As
-// in WSS4J, the whitespace a removed comment leaves in a
-// Content-Description stays, trailing or not, where rule 18 would drop it.
+// canonicalValue applies rules 5 to 17 to one unfolded header value.
+//
+// Two departures from section 5.4.1 follow WSS4J, which the interop suite
+// (tests/interop/swa_test.go) shows signs and verifies only this way; each
+// fails against WSS4J in both directions when "fixed":
+//
+//   - rule 8: the value arrives without the whitespace after the colon, as
+//     MIME parsers return it and as WSS4J receives it, so an unstructured
+//     Content-Description is written "Content-Description:value", where
+//     rule 8 would keep the space;
+//   - rule 18: the whitespace a removed comment leaves in a
+//     Content-Description stays, trailing or not ("a (b)" becomes "a "),
+//     where rule 18 forbids trailing whitespace.
+//
+// The third, rule 15's lowercasing of filename, is in lowerParams.
 func canonicalValue(name, v string) (string, error) {
 	switch name {
 	case "Content-Description":

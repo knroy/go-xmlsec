@@ -102,6 +102,37 @@ func TestAppend(t *testing.T) {
 	if err := h.Append(el); err == nil {
 		t.Fatal("already-parented element accepted")
 	}
+	if err := h.Append(nil); err == nil {
+		t.Fatal("nil accepted")
+	}
+}
+
+// A nil Header, or one NewHeader did not make, has no element, and every
+// method that adds to it returns an error instead of panicking.
+func TestHeaderNotFromNewHeader(t *testing.T) {
+	cert := testCert(t, "c")
+	now := time.Unix(0, 0)
+	for name, h := range map[string]*Header{"nil": nil, "zero": {}} {
+		if h.Element() != nil {
+			t.Errorf("%s: Element %v", name, h.Element())
+		}
+		el := func() *xdm.Node { return xmltree.Element(nil, "", "", "x") }
+		errs := map[string]error{
+			"Append":  h.Append(el()),
+			"Prepend": h.Prepend(el()),
+		}
+		_, errs["AddTimestamp"] = h.AddTimestamp(now, 0)
+		_, errs["AddTimestampWithID"] = h.AddTimestampWithID(now, 0, "ts")
+		_, errs["AddSignatureConfirmation"] = h.AddSignatureConfirmation(nil)
+		_, errs["AddSignatureConfirmationWithID"] = h.AddSignatureConfirmationWithID(nil, "sc")
+		_, errs["AddBinarySecurityToken"] = h.AddBinarySecurityToken(cert, nil, xmlsec.BSTValueTypeX509v3)
+		_, errs["AddBinarySecurityTokenWithID"] = h.AddBinarySecurityTokenWithID(cert, nil, xmlsec.BSTValueTypeX509v3, "bst")
+		for m, err := range errs {
+			if err == nil {
+				t.Errorf("%s: %s succeeded", name, m)
+			}
+		}
+	}
 }
 
 // A wsu or wsse prefix bound to another namespace higher up is not an error:

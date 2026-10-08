@@ -131,12 +131,14 @@ func TestCheckSecurityTokenReference(t *testing.T) {
 		"SKI, PKIPath TokenType":       {tt(xmlsec.BSTValueTypeX509PKIPath), ki(ski + b64), false},
 		"ThumbprintSHA1":               {``, ki(` ValueType="` + valueTypeThumbprintSHA1 + `"` + b64), true},
 		"R3054 no ValueType":           {``, ki(b64), false},
-		"R3063 unknown ValueType":      {``, ki(` ValueType="urn:x"` + b64), false},
 		"R3070 no EncodingType":        {``, ki(ski), false},
 		"R3071 other EncodingType":     {``, ki(ski + ` EncodingType="urn:hex"`), false},
 		"EncryptedKeySHA1":             {tt(valueTypeEncryptedKey), ki(ekv + b64), true},
 		"R3069 EncryptedKeySHA1 alone": {``, ki(ekv + b64), false},
 		"SAML without EncodingType":    {``, ki(` ValueType="` + valueTypeSAML2AssertionID + `"`), true},
+		"R6604 SAML with EncodingType": {``, ki(` ValueType="` + valueTypeSAMLAssertionID + `"` + b64), false},
+		"EncryptedKey reference":       {tt(valueTypeEncryptedKey), `<wsse:Reference URI="#ek" ValueType="` + valueTypeEncryptedKey + `"/>`, true},
+		"R3069 EncryptedKey reference": {``, `<wsse:Reference URI="#ek" ValueType="` + valueTypeEncryptedKey + `"/>`, false},
 		"issuer serial":                {tt(xmlsec.BSTValueTypePKCS7), `<ds:X509Data/>`, true},
 		"issuer serial, EncryptedKey":  {tt(valueTypeEncryptedKey), `<ds:X509Data/>`, false},
 		"R3027 KeyName":                {``, `<ds:KeyName>k</ds:KeyName>`, false},
@@ -150,5 +152,16 @@ func TestCheckSecurityTokenReference(t *testing.T) {
 	}
 	if err := CheckSecurityTokenReference(nil); !errors.Is(err, xmlsec.ErrMalformed) {
 		t.Errorf("nil: %v", err)
+	}
+	// A key identifier of a profile this library does not read is
+	// unsupported, not a breach of R3063.
+	for name, vt := range map[string]string{
+		"unknown":          "urn:x",
+		"Kerberos (R6906)": "http://docs.oasis-open.org/wss/oasis-wss-kerberos-tokenprofile-1.1#Kerberosv5APREQSHA1",
+	} {
+		err := CheckSecurityTokenReference(str(``, ki(` ValueType="`+vt+`"`+b64)))
+		if !errors.Is(err, xmlsec.ErrUnsupportedKeyInfo) || errors.Is(err, xmlsec.ErrMalformed) {
+			t.Errorf("%s: %v", name, err)
+		}
 	}
 }

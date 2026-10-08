@@ -31,6 +31,24 @@ func TestCompleteWSS4JHeaders(t *testing.T) {
 	}
 }
 
+// The three departures from section 5.4.1 that WSS4J requires, pinned: the
+// interop suite fails against WSS4J if any is brought in line with the
+// profile, which would write "Content-Description: hello" (rules 8, 18) and
+// filename="Report.PDF" (rule 15).
+func TestCompleteWSS4JDepartures(t *testing.T) {
+	got, err := swa.Complete(&xmlsec.Attachment{MIMEHeaders: map[string][]string{
+		"Content-Type":        {"application/octet-stream"},
+		"Content-Disposition": {`attachment; filename="Report.PDF"`},
+		"Content-Description": {"hello (note)"},
+	}})
+	want := "Content-Description:hello \r\n" +
+		"Content-Disposition:attachment;filename=\"report.pdf\"\r\n" +
+		"Content-Type:application/octet-stream\r\n"
+	if err != nil || string(got) != want {
+		t.Fatalf("got %q, %v\nwant %q", got, err, want)
+	}
+}
+
 func TestCompleteHeaderRules(t *testing.T) {
 	cases := []struct {
 		name, header, value, want string

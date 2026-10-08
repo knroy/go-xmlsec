@@ -260,9 +260,10 @@ func TestResolveSecurityTokenReferenceStrict(t *testing.T) {
 	v3, pki, p7 := xmlsec.BSTValueTypeX509v3, xmlsec.BSTValueTypeX509PKIPath, xmlsec.BSTValueTypePKCS7
 	type place int
 	const (
-		after  place = iota // appended to the token's header
-		before              // first in the token's header
-		body                // in the SOAP Body
+		after     place = iota // appended to the token's header
+		before                 // first in the token's header
+		body                   // in the SOAP Body
+		bodyFirst              // first in the SOAP Body
 	)
 	for _, c := range []struct {
 		name                 string
@@ -282,7 +283,10 @@ func TestResolveSecurityTokenReferenceStrict(t *testing.T) {
 		{"PKIPath without TokenType (R5215)", func(f strictFixture) string { return f.pki }, pki, "", after, xmlsec.ErrMalformed},
 		{"inconsistent TokenType", func(f strictFixture) string { return f.v3 }, v3, pki, after, xmlsec.ErrMalformed},
 		{"reference before the token (R5205)", func(f strictFixture) string { return f.v3 }, v3, "", before, xmlsec.ErrMalformed},
-		{"reference outside the header (R3066)", func(f strictFixture) string { return f.v3 }, v3, "", body, xmlsec.ErrMalformed},
+		// R3066 governs a reference inside a header; one in the Body need
+		// only follow the token (R5205).
+		{"reference in the Body, after the token", func(f strictFixture) string { return f.v3 }, v3, "", body, nil},
+		{"reference in the Body, before the token (R5205)", func(strictFixture) string { return "bodytoken" }, v3, "", bodyFirst, xmlsec.ErrMalformed},
 		{"token in another header (R3066)", func(f strictFixture) string { return f.other }, v3, "", after, xmlsec.ErrMalformed},
 		{"token not in a header", func(strictFixture) string { return "bodytoken" }, v3, "", after, xmlsec.ErrMalformed},
 		{"missing token", func(strictFixture) string { return "nope" }, v3, "", after, xmlsec.ErrIDNotFound},
@@ -303,6 +307,9 @@ func TestResolveSecurityTokenReferenceStrict(t *testing.T) {
 				f.h.insert(0, ki)
 			case body:
 				f.body.AppendChild(ki)
+			case bodyFirst:
+				f.body.AppendChild(ki)
+				f.body.Children = append([]*xdm.Node{ki}, f.body.Children[:len(f.body.Children)-1]...)
 			}
 			str := ki.ChildElements()[0]
 			got, err := ResolveSecurityTokenReferenceStrict(f.doc, str)

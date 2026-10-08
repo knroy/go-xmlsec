@@ -8,9 +8,11 @@ import (
 	"crypto/x509/pkix"
 	"errors"
 	"math/big"
+	"slices"
 	"testing"
 	"time"
 
+	"github.com/knroy/go-xml/xdm"
 	"github.com/knroy/go-xmlsec"
 	"github.com/knroy/go-xmlsec/internal/xmltree"
 )
@@ -84,7 +86,41 @@ func TestAddBinarySecurityTokenErrors(t *testing.T) {
 	if _, err := h.AddBinarySecurityToken(cert, nil, "urn:bad"); !errors.Is(err, xmlsec.ErrUnsupportedAlgorithm) {
 		t.Errorf("bad ValueType: %v", err)
 	}
+	if _, err := h.AddBinarySecurityToken(nil, nil, xmlsec.BSTValueTypeX509v3); err == nil {
+		t.Error("nil certificate accepted")
+	}
+	if _, err := h.AddBinarySecurityToken(cert, []*x509.Certificate{nil}, xmlsec.BSTValueTypePKCS7); err == nil {
+		t.Error("nil in chain accepted")
+	}
 
+}
+
+// A token without an EncodingType is Base64Binary, the default of SOAP
+// Message Security 1.1.1 section 6.3; the strict resolver refuses it, as
+// BSP requires the attribute (R3029).
+func TestBinarySecurityTokenDefaultEncoding(t *testing.T) {
+	f := newStrictFixture(t)
+	tok, err := FindByID(f.doc, f.v3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok.Attrs = slices.DeleteFunc(tok.Attrs, func(a *xdm.Node) bool { return a.Name.Local == "EncodingType" })
+	if got, err := ParseBinarySecurityToken(tok); err != nil || !got.Equal(f.cert) {
+		t.Fatalf("no EncodingType: %v", err)
+	}
+	str, err := NewSecurityTokenReference(f.doc, f.v3, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.h.Append(str); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResolveSecurityTokenReference(f.doc, str); err != nil {
+		t.Fatalf("lenient: %v", err)
+	}
+	if _, err := ResolveSecurityTokenReferenceStrict(f.doc, str); !errors.Is(err, xmlsec.ErrMalformed) {
+		t.Fatalf("strict: %v", err)
+	}
 }
 
 func bst(attrs, content string) string {
@@ -101,7 +137,6 @@ func TestParseBinarySecurityTokenErrors(t *testing.T) {
 		want error // nil: any error
 	}{
 		{"not a BST", `<wsse:Other xmlns:wsse="` + xmlsec.NSWSSE + `"/>`, xmlsec.ErrUnsupportedKeyInfo},
-		{"missing EncodingType", bst(v3, "AAAA"), xmlsec.ErrUnsupportedKeyInfo},
 		{"bad EncodingType", bst(`EncodingType="urn:hex" `+v3, "AAAA"), xmlsec.ErrUnsupportedKeyInfo},
 		{"bad base64", bst(enc+v3, "!!!"), xmlsec.ErrMalformed},
 		{"bad ValueType", bst(enc+`ValueType="urn:x"`, "AAAA"), xmlsec.ErrUnsupportedKeyInfo},

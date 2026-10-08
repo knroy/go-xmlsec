@@ -36,6 +36,9 @@ func (h *Header) AddTimestampWithID(now time.Time, ttl time.Duration, id string)
 }
 
 func (h *Header) addTimestamp(now time.Time, ttl time.Duration, id string) (string, error) {
+	if err := h.check(); err != nil {
+		return "", err
+	}
 	if ttl < 0 {
 		return "", fmt.Errorf("wss: negative timestamp ttl %v", ttl)
 	}
@@ -67,15 +70,22 @@ type Timestamp struct {
 	Expires time.Time // zero when the timestamp has no wsu:Expires
 }
 
-// dateTimeUTC is an xs:dateTime in UTC with at most millisecond precision.
-var dateTimeUTC = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$`)
+// dateTimeUTC is an xs:dateTime in UTC: written with Z, or with a zero
+// offset.
+var dateTimeUTC = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]00:00)$`)
 
 // ParseTimestamp reads a wsu:Timestamp, refusing with xmlsec.ErrMalformed
 // one that breaks the Basic Security Profile: it must hold exactly one
-// wsu:Created, then at most one wsu:Expires, and nothing else (R3203,
-// R3224, R3221, R3222); neither may carry a ValueType (R3225, R3226); each
-// is an xs:dateTime in UTC, written with Z (R3217, R3223), seconds below 60
-// (R3213, R3215) and at most three fractional digits (R3220, R3229).
+// wsu:Created, then at most one wsu:Expires, and nothing else (R3224,
+// R3221, R3222); neither may carry a ValueType (R3225, R3226); each is an
+// xs:dateTime in UTC (R3217, R3223), seconds below 60 (R3213, R3215).
+//
+// Created is required by BSP R3203, a MUST; SOAP Message Security 1.1.1
+// section 10 makes it optional, and a timestamp without it is refused all
+// the same. UTC may be written with Z, which BSP recommends, or as a zero
+// offset, +00:00, which xs:dateTime also allows. More than three
+// fractional digits, which R3220 and R3229 say SHOULD NOT be sent, are
+// accepted, to the nanosecond.
 //
 // It checks structure only. Timestamp.Check decides freshness.
 func ParseTimestamp(el *xdm.Node) (Timestamp, error) {
@@ -107,7 +117,7 @@ func timestampTime(e *xdm.Node) (time.Time, error) {
 	s := strings.Trim(e.StringValue(), " \t\r\n")
 	t, err := time.Parse(time.RFC3339, s)
 	if !dateTimeUTC.MatchString(s) || err != nil {
-		return time.Time{}, fmt.Errorf("%w: wsu:%s %q is not a UTC xs:dateTime in milliseconds", xmlsec.ErrMalformed, e.Name.Local, s)
+		return time.Time{}, fmt.Errorf("%w: wsu:%s %q is not a UTC xs:dateTime", xmlsec.ErrMalformed, e.Name.Local, s)
 	}
 	return t, nil
 }
@@ -118,6 +128,11 @@ func timestampTime(e *xdm.Node) (time.Time, error) {
 // it was created more than maxAge ago. skew is the clock difference allowed
 // between sender and receiver, applied to each comparison in the sender's
 // favour. Negative durations are refused.
+//
+// A timestamp without wsu:Expires never expires: with maxAge zero, Check
+// then accepts it however old it is, and only a Created in the future
+// fails. A receiver that does not require Expires must pass a non-zero
+// maxAge to bound the age of what it accepts.
 //
 // SOAP Message Security 1.1.1 section 10 RECOMMENDS that a receiver discard
 // an expired message and leaves the judgement of the sender's clock to it:

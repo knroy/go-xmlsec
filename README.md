@@ -23,7 +23,9 @@ because a signature is only as correct as the canonical octets it covers.
 - **WS-Security**: the `wsse:Security` header in processing order, binary
   security tokens (X509v3, PKIPath and PKCS7), direct, embedded,
   key-identifier, issuer-serial and `EncryptedKey` token references,
-  `wsu:Id`, timestamps checked on receipt, the STR Dereference Transform,
+  `wsu:Id`, timestamps checked on receipt, the STR Dereference Transform
+  (in-message tokens, SAML assertions by key identifier, X.509 certificates
+  by key identifier or issuer serial),
   signature confirmation, the symmetric binding (a header `ReferenceList`,
   each `EncryptedData` naming its `EncryptedKey` by a token reference), the
   SOAP Message Security fault codes (`wss.FaultCode`, with one generic

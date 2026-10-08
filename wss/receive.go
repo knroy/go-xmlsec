@@ -98,12 +98,13 @@ func CheckUniqueIDs(doc *xdm.Node, extra ...xdm.QName) error {
 //
 //   - holds anything but exactly one reference (R3061), or a ds:KeyName
 //     (R3027);
-//   - holds a wsse:Reference without a URI (R3062);
+//   - holds a wsse:Reference without a URI (R3062), or whose ValueType is
+//     EncryptedKey without the EncryptedKey wsse11:TokenType (R3069);
 //   - holds a wsse:Embedded with anything but one token, or with a
 //     reference (R3060, R3056);
-//   - holds a wsse:KeyIdentifier without a ValueType (R3054), with one no
-//     token profile defines for it (R3063), or, unless it names a SAML
-//     assertion, without the Base64Binary EncodingType (R3070, R3071);
+//   - holds a wsse:KeyIdentifier without a ValueType (R3054); an X.509 or
+//     EncryptedKeySHA1 one without the Base64Binary EncodingType (R3070,
+//     R3071); a SAML one with any EncodingType (R6604);
 //   - carries a wsse11:TokenType that its reference contradicts (SOAP
 //     Message Security 1.1.1 section 7.1): a ThumbprintSHA1 or
 //     X509SubjectKeyIdentifier for anything but an X509v3 token, an
@@ -112,9 +113,13 @@ func CheckUniqueIDs(doc *xdm.Node, extra ...xdm.QName) error {
 //     (R3069, R3072).
 //
 // A key identifier is accepted in the forms the X.509 Token Profile, SOAP
-// Message Security and the SAML Token Profile define. It checks syntax only:
-// ResolveSecurityTokenReferenceStrict adds the rules that compare a direct
-// reference with its token.
+// Message Security and the SAML Token Profile define. Any other ValueType,
+// such as the Kerberos Token Profile's Kerberosv5APREQSHA1 (R6906), names a
+// token this library does not read, and is refused with
+// xmlsec.ErrUnsupportedKeyInfo, the wsse:UnsupportedSecurityToken fault,
+// rather than as a breach of R3063, which only that token's profile can
+// decide. It checks syntax only: ResolveSecurityTokenReferenceStrict adds
+// the rules that compare a direct reference with its token.
 func CheckSecurityTokenReference(str *xdm.Node) error {
 	if str == nil || !str.IsElement(xmlsec.NSWSSE, "SecurityTokenReference") {
 		return fmt.Errorf("%w: not a wsse:SecurityTokenReference", xmlsec.ErrMalformed)
@@ -129,6 +134,9 @@ func CheckSecurityTokenReference(str *xdm.Node) error {
 	case k.IsElement(xmlsec.NSWSSE, "Reference"):
 		if k.Attr("", "URI") == nil {
 			return fmt.Errorf("%w: wsse:Reference without a URI (BSP R3062)", xmlsec.ErrMalformed)
+		}
+		if k.AttrValue("ValueType") == valueTypeEncryptedKey && tt != valueTypeEncryptedKey {
+			return fmt.Errorf("%w: a reference to an EncryptedKey with wsse11:TokenType %q (BSP R3069)", xmlsec.ErrMalformed, tt)
 		}
 	case k.IsElement(xmlsec.NSWSSE, "Embedded"):
 		if _, err := embeddedToken(k); err != nil {
@@ -161,10 +169,14 @@ func checkKeyIdentifier(k *xdm.Node, tt string) error {
 		want = []string{valueTypeEncryptedKey}
 	case valueTypeSAMLAssertionID, valueTypeSAML2AssertionID:
 		// The SAML Token Profile defines the TokenType of each version;
-		// this library reads no SAML token, so any is let through.
+		// this library reads no SAML token, so any is let through. The
+		// identifier is an xs:string, with no EncodingType (R6604, R6605).
+		if enc := k.Attr("", "EncodingType"); enc != nil {
+			return fmt.Errorf("%w: SAML wsse:KeyIdentifier with EncodingType %q (BSP R6604)", xmlsec.ErrMalformed, enc.Value)
+		}
 		return nil
 	default:
-		return fmt.Errorf("%w: wsse:KeyIdentifier ValueType %q (BSP R3063)", xmlsec.ErrMalformed, vt)
+		return fmt.Errorf("%w: wsse:KeyIdentifier ValueType %q", xmlsec.ErrUnsupportedKeyInfo, vt)
 	}
 	if !slices.Contains(want, tt) {
 		return fmt.Errorf("%w: a %q key identifier with wsse11:TokenType %q (BSP R3069)", xmlsec.ErrMalformed, vt, tt)

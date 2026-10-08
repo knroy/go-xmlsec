@@ -42,6 +42,12 @@ func (h *Header) AddBinarySecurityTokenWithID(cert *x509.Certificate, chain []*x
 }
 
 func (h *Header) addBinarySecurityToken(cert *x509.Certificate, chain []*x509.Certificate, valueType, id string) (string, error) {
+	if err := h.check(); err != nil {
+		return "", err
+	}
+	if cert == nil || slices.Contains(chain, nil) {
+		return "", errors.New("wss: AddBinarySecurityToken needs a certificate, and no nil in chain")
+	}
 	var der []byte
 	switch valueType {
 	case xmlsec.BSTValueTypeX509v3:
@@ -99,6 +105,11 @@ func (h *Header) addBinarySecurityToken(cert *x509.Certificate, chain []*x509.Ce
 // to no certificate, is also xmlsec.ErrInvalidSecurityToken, the
 // wsse:InvalidSecurityToken fault; an unsupported ValueType or EncodingType
 // is only xmlsec.ErrUnsupportedKeyInfo, wsse:UnsupportedSecurityToken.
+//
+// A token without an EncodingType is read as Base64Binary, the default of
+// SOAP Message Security 1.1.1 section 6.3;
+// ResolveSecurityTokenReferenceStrict refuses it, as the Basic Security
+// Profile requires the attribute (R3029).
 func ParseBinarySecurityToken(bst *xdm.Node) (*x509.Certificate, error) {
 	cert, err := parseBinarySecurityToken(bst)
 	if err != nil && !errors.Is(err, xmlsec.ErrUnsupportedKeyInfo) {
@@ -111,8 +122,10 @@ func parseBinarySecurityToken(bst *xdm.Node) (*x509.Certificate, error) {
 	if bst == nil || !bst.IsElement(xmlsec.NSWSSE, "BinarySecurityToken") {
 		return nil, fmt.Errorf("%w: not a wsse:BinarySecurityToken", xmlsec.ErrUnsupportedKeyInfo)
 	}
-	if enc := bst.AttrValue("EncodingType"); enc != xmlsec.BSTEncodingBase64 {
-		return nil, fmt.Errorf("%w: BST EncodingType %q", xmlsec.ErrUnsupportedKeyInfo, enc)
+	// SOAP Message Security 1.1.1 section 6.3: Base64Binary is the
+	// default. BSP R3029 requires it stated; the strict resolver checks.
+	if enc := bst.Attr("", "EncodingType"); enc != nil && enc.Value != xmlsec.BSTEncodingBase64 {
+		return nil, fmt.Errorf("%w: BST EncodingType %q", xmlsec.ErrUnsupportedKeyInfo, enc.Value)
 	}
 	der, err := xmltree.Base64(bst)
 	if err != nil {

@@ -668,7 +668,7 @@ func admitReferences(refs []parsedReference, opts VerifyOptions) error {
 				}
 			}
 			if t.Algorithm == xmlsec.TransformSTR {
-				if err := allowed("STR Dereference Transform canonicalization", string(c14n.Exclusive10), opts.AllowedCanonicalizationAlgorithms, defaultC14N); err != nil {
+				if err := allowed("STR Dereference Transform canonicalization", strC14N(t), opts.AllowedCanonicalizationAlgorithms, defaultC14N); err != nil {
 					return err
 				}
 			}

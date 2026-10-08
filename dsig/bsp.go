@@ -50,6 +50,8 @@ var (
 //   - R5423: every transform is Exclusive C14N, XPath Filter 2.0, the STR
 //     Dereference Transform, enveloped-signature or an SwA signature
 //     transform;
+//   - R5404, R3065: an STR Dereference Transform canonicalizes with
+//     Exclusive C14N;
 //   - R5412: the last is Exclusive C14N, the STR Dereference Transform or
 //     an SwA signature transform;
 //   - R6101 and SwA profile 5.4.4: a cid: reference begins with an SwA
@@ -104,6 +106,9 @@ func checkBSPReference(doc, sig *xdm.Node, r parsedReference, idAttrs []xdm.QNam
 	for _, t := range r.transforms {
 		if !slices.Contains(bspTransforms, t.Algorithm) {
 			return malformed("transform %q (BSP R5423)", t.Algorithm)
+		}
+		if t.Algorithm == xmlsec.TransformSTR && strC14N(t) != string(c14n.Exclusive10) {
+			return malformed("STR Dereference Transform canonicalization %q (BSP R5404, R3065)", strC14N(t))
 		}
 	}
 	if !slices.Contains(bspLastTransforms, r.transforms[n-1].Algorithm) {

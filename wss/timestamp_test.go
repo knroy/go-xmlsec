@@ -92,6 +92,10 @@ func TestParseTimestamp(t *testing.T) {
 		{"Created only", timestampEl(t, created(c)), false},
 		{"Created and Expires", timestampEl(t, created(c)+expires(e)), true},
 		{"whitespace around values", timestampEl(t, created(" \n"+c+"\t")+expires(e)), true},
+		// xs:dateTime admits a zero offset for UTC, and more digits than
+		// the milliseconds R3220 and R3229 say SHOULD NOT be exceeded.
+		{"zero offset", timestampEl(t, created("2026-09-25T12:00:00+00:00")), false},
+		{"negative zero offset", timestampEl(t, created("2026-09-25T12:00:00-00:00")), false},
 	} {
 		ts, err := ParseTimestamp(xmltree.DocumentElement(parseDoc(t, ok.doc)))
 		if err != nil {
@@ -101,6 +105,10 @@ func TestParseTimestamp(t *testing.T) {
 		if want, _ := time.Parse(time.RFC3339, c); !ts.Created.Equal(want) || ts.Expires.IsZero() == ok.expires {
 			t.Errorf("%s: %+v", ok.name, ts)
 		}
+	}
+	ts, err := ParseTimestamp(xmltree.DocumentElement(parseDoc(t, timestampEl(t, created("2026-09-25T12:00:00.123456789Z")))))
+	if err != nil || ts.Created.Nanosecond() != 123456789 {
+		t.Errorf("nanoseconds: %+v, %v", ts, err)
 	}
 
 	for _, bad := range []struct{ name, doc string }{
@@ -113,10 +121,10 @@ func TestParseTimestamp(t *testing.T) {
 		{"other element (R3222)", timestampEl(t, created(c)+`<x/>`)},
 		{"Created ValueType (R3225)", timestampEl(t, `<wsu:Created ValueType="urn:t">`+c+`</wsu:Created>`)},
 		{"Expires ValueType (R3226)", timestampEl(t, created(c)+`<wsu:Expires ValueType="urn:t">`+e+`</wsu:Expires>`)},
-		{"offset, not UTC (R3217)", timestampEl(t, created("2026-09-25T12:00:00+00:00"))},
+		{"offset, not UTC (R3217)", timestampEl(t, created("2026-09-25T12:00:00+01:00"))},
 		{"no timezone (R3217)", timestampEl(t, created("2026-09-25T12:00:00"))},
 		{"bad Expires (R3223)", timestampEl(t, created(c)+expires("tomorrow"))},
-		{"microseconds (R3220)", timestampEl(t, created("2026-09-25T12:00:00.0001Z"))},
+		{"empty fraction", timestampEl(t, created("2026-09-25T12:00:00.Z"))},
 		{"leap second (R3213)", timestampEl(t, created("2026-12-31T23:59:60Z"))},
 		{"month 13", timestampEl(t, created("2026-13-01T00:00:00Z"))},
 	} {

@@ -24,7 +24,7 @@ const (
 	valueTypeEncryptedKeySHA1 = "http://docs.oasis-open.org/wss/oasis-wss-soap-message-security-1.1#EncryptedKeySHA1"
 
 	// The SAML Token Profile key identifiers, which a strict check accepts
-	// without an EncodingType (BSP R3070).
+	// only without an EncodingType (BSP R3070, R6604).
 	valueTypeSAMLAssertionID  = "http://docs.oasis-open.org/wss/oasis-wss-saml-token-profile-1.0#SAMLAssertionID"
 	valueTypeSAML2AssertionID = "http://docs.oasis-open.org/wss/oasis-wss-saml-token-profile-1.1#SAMLID"
 )

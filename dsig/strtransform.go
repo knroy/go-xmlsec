@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"hash"
 	"slices"
+	"strings"
 
 	"github.com/knroy/go-xml/c14n"
 	"github.com/knroy/go-xml/xdm"
@@ -23,15 +24,23 @@ import (
 type tokenDeref func(str *xdm.Node) (*xdm.Node, error)
 
 // strDeref is the tokenDeref of doc: a token in the message, by
-// wss.ReferencedToken with idAttrs, or for a key identifier or issuer-serial
-// reference the X509v3 wsse:BinarySecurityToken that section 8.3 builds from
-// the certificate resolve returns. Without resolve such a reference cannot
-// be dereferenced, and section 8.3 says the transform "MUST signal a
-// failure".
+// wss.ReferencedToken with idAttrs; for an X509SubjectKeyIdentifier or
+// ThumbprintSHA1 key identifier or an issuer-serial reference, the X509v3
+// wsse:BinarySecurityToken that section 8.3 builds from the certificate
+// resolve returns; for a SAML key identifier, the assertion in the message
+// that carries its ID. Without resolve an X.509 reference cannot be
+// dereferenced, and section 8.3 says the transform "MUST signal a failure".
+// Any other key identifier, such as an EncryptedKeySHA1 or a Kerberos one,
+// names a token this transform cannot reproduce and is refused with
+// xmlsec.ErrUnsupportedKeyInfo: digesting a certificate in its place would
+// sign something other than the token.
 func strDeref(doc *xdm.Node, idAttrs []xdm.QName, resolve func(*xdm.Node) (*x509.Certificate, error)) tokenDeref {
 	return func(str *xdm.Node) (*xdm.Node, error) {
 		if !namesCertificate(str) {
 			return wss.ReferencedToken(doc, str, idAttrs...)
+		}
+		if !x509Reference(str) {
+			return samlToken(doc, str.ChildElements()[0], idAttrs)
 		}
 		if resolve == nil {
 			return nil, fmt.Errorf("%w: a key identifier or issuer-serial reference under the STR Dereference Transform needs ResolveSecurityToken",
@@ -43,6 +52,38 @@ func strDeref(doc *xdm.Node, idAttrs []xdm.QName, resolve func(*xdm.Node) (*x509
 		}
 		return x509Token(str, cert), nil
 	}
+}
+
+// The SAML Token Profile 1.1.1 key identifiers, and the assertion each
+// names: its namespace and ID attribute.
+var samlKeyIdentifiers = map[string]struct{ ns, id string }{
+	"http://docs.oasis-open.org/wss/oasis-wss-saml-token-profile-1.0#SAMLAssertionID": {"urn:oasis:names:tc:SAML:1.0:assertion", "AssertionID"},
+	"http://docs.oasis-open.org/wss/oasis-wss-saml-token-profile-1.1#SAMLID":          {"urn:oasis:names:tc:SAML:2.0:assertion", "ID"},
+}
+
+// samlToken returns the saml:Assertion in doc that the SAML key identifier
+// ki names, by FindByID over its ID attribute and idAttrs, so an ID
+// carried twice is refused with xmlsec.ErrAmbiguousID. An assertion not in
+// the message, which only the SAML authority could supply, is
+// xmlsec.ErrSecurityTokenUnavailable; a key identifier of any other
+// ValueType is xmlsec.ErrUnsupportedKeyInfo.
+func samlToken(doc, ki *xdm.Node, idAttrs []xdm.QName) (*xdm.Node, error) {
+	vt := ki.AttrValue("ValueType")
+	saml, ok := samlKeyIdentifiers[vt]
+	if !ok {
+		return nil, fmt.Errorf("%w: the STR Dereference Transform cannot dereference a %q key identifier", xmlsec.ErrUnsupportedKeyInfo, vt)
+	}
+	id := strings.TrimSpace(ki.StringValue())
+	tok, err := wss.FindByID(doc, id, append(slices.Clone(idAttrs), xdm.QName{Local: saml.id})...)
+	switch {
+	case errors.Is(err, xmlsec.ErrIDNotFound):
+		return nil, fmt.Errorf("%w: %w", xmlsec.ErrSecurityTokenUnavailable, err)
+	case err != nil:
+		return nil, err
+	case !tok.IsElement(saml.ns, "Assertion") || tok.AttrValue(saml.id) != id:
+		return nil, fmt.Errorf("%w: SAML key identifier %q names no assertion in the message", xmlsec.ErrSecurityTokenUnavailable, id)
+	}
+	return tok, nil
 }
 
 // namesCertificate reports whether a wsse:SecurityTokenReference names a
@@ -82,17 +123,19 @@ func x509Token(str *xdm.Node, cert *x509.Certificate) *xdm.Node {
 	return bst
 }
 
-// strOctets is the output of the STR Dereference Transform for token: its
-// Exclusive C14N with prefixes and the default namespace inclusive, and
-// xmlns="" on the apex when no default namespace is in scope there, as
-// section 8.3 requires. That is WSS4J's reading, which canonicalizes with
-// "#default" inclusive and Santuario's propagateDefaultNamespace; a default
-// namespace in scope is therefore rendered.
-func strOctets(token *xdm.Node, prefixes []string) ([]byte, error) {
+// strOctets is the output of the STR Dereference Transform for token,
+// canonicalized by alg: under Exclusive C14N with prefixes and the default
+// namespace inclusive, and with xmlns="" on the apex when no default
+// namespace is in scope there, as section 8.3 requires. That is WSS4J's
+// reading, which canonicalizes with "#default" inclusive and Santuario's
+// propagateDefaultNamespace, whatever PrefixList the transform states; a
+// default namespace in scope is therefore rendered. Sign states the
+// "#default" it digests (see strTransformParams).
+func strOctets(token *xdm.Node, alg string, prefixes []string) ([]byte, error) {
 	if !slices.Contains(prefixes, "") {
 		prefixes = append(slices.Clone(prefixes), "")
 	}
-	b, err := c14n.Bytes(token, c14n.Options{Algorithm: c14n.Exclusive10, InclusiveNamespacePrefixes: prefixes})
+	b, err := c14n.Bytes(token, c14n.Options{Algorithm: c14n.Algorithm(alg), InclusiveNamespacePrefixes: prefixes})
 	if err != nil {
 		return nil, err
 	}
@@ -111,6 +154,14 @@ func strOctets(token *xdm.Node, prefixes []string) ([]byte, error) {
 	return b, nil
 }
 
+// strC14N is the canonicalization algorithm of an STR Dereference
+// Transform: the ds:CanonicalizationMethod of its
+// wsse:TransformationParameters, which parseSTRTransform has checked on a
+// received transform and strTransformParams built on a signed one.
+func strC14N(t TransformSpec) string {
+	return t.el.ChildElements()[0].ChildElements()[0].AttrValue("Algorithm")
+}
+
 // digestSTR applies the STR Dereference Transform to d, which must be the
 // node set of a wsse:SecurityTokenReference; only is whether it is the
 // reference's only transform. It writes the output into w.
@@ -122,7 +173,7 @@ func (d *data) digestSTR(w hash.Hash, t TransformSpec, only bool) error {
 	if err != nil {
 		return err
 	}
-	b, err := strOctets(tok, t.InclusiveNamespacePrefixes)
+	b, err := strOctets(tok, strC14N(t), t.InclusiveNamespacePrefixes)
 	if err != nil {
 		return err
 	}
@@ -133,9 +184,12 @@ func (d *data) digestSTR(w hash.Hash, t TransformSpec, only bool) error {
 
 // parseSTRTransform reads the parameters of a received STR Dereference
 // Transform: one wsse:TransformationParameters without attributes, holding
-// one ds:CanonicalizationMethod (Basic Security Profile R3065), which must be
-// Exclusive C14N; its InclusiveNamespaces become the spec's. Section 8.3
-// says unrecognized parameters and attributes SHOULD cause a fault; they do.
+// one ds:CanonicalizationMethod (Basic Security Profile R3065), which must
+// name a canonicalization algorithm; its InclusiveNamespaces become the
+// spec's. VerifyOptions.AllowedCanonicalizationAlgorithms decides which
+// algorithm is admitted, and VerifyOptions.StrictBSP requires Exclusive C14N
+// (R5404). Section 8.3 says unrecognized parameters and attributes SHOULD
+// cause a fault; they do.
 func parseSTRTransform(spec TransformSpec) (TransformSpec, error) {
 	kids := spec.el.ChildElements()
 	if len(kids) != 1 || !kids[0].IsElement(xmlsec.NSWSSE, "TransformationParameters") || len(kids[0].Attrs) > 0 {
@@ -149,8 +203,8 @@ func parseSTRTransform(spec TransformSpec) (TransformSpec, error) {
 	if err != nil {
 		return spec, err
 	}
-	if cm.Algorithm != string(c14n.Exclusive10) {
-		return spec, fmt.Errorf("%w: STR Dereference Transform canonicalization %q; only Exclusive C14N is supported", xmlsec.ErrUnsupportedAlgorithm, cm.Algorithm)
+	if !isC14N(cm.Algorithm) {
+		return spec, fmt.Errorf("%w: STR Dereference Transform canonicalization %q", xmlsec.ErrUnsupportedAlgorithm, cm.Algorithm)
 	}
 	spec.InclusiveNamespacePrefixes = cm.InclusiveNamespacePrefixes
 	return spec, nil
@@ -158,14 +212,22 @@ func parseSTRTransform(spec TransformSpec) (TransformSpec, error) {
 
 // strTransformParams appends the wsse:TransformationParameters of an STR
 // Dereference Transform that Sign emits: Exclusive C14N, with
-// t.InclusiveNamespacePrefixes as its PrefixList.
+// t.InclusiveNamespacePrefixes and the default namespace as its PrefixList.
+// The transform renders the default namespace whatever the PrefixList says
+// (see strOctets), so "#default" is always stated: the parameter then names
+// the octets digested, and WSS4J, which ignores the PrefixList, verifies it
+// all the same.
 func strTransformParams(tr *xdm.Node, t TransformSpec) error {
 	tp := xmltree.Element(tr, "wsse", xmlsec.NSWSSE, "TransformationParameters")
 	if err := xmltree.Declare(tp, "wsse", xmlsec.NSWSSE); err != nil {
 		return err
 	}
+	prefixes := t.InclusiveNamespacePrefixes
+	if !slices.Contains(prefixes, "") {
+		prefixes = append(slices.Clone(prefixes), "")
+	}
 	cm := algElement(tp, "CanonicalizationMethod", string(c14n.Exclusive10))
-	return transformParams(cm, TransformSpec{Algorithm: string(c14n.Exclusive10), InclusiveNamespacePrefixes: t.InclusiveNamespacePrefixes})
+	return transformParams(cm, TransformSpec{Algorithm: string(c14n.Exclusive10), InclusiveNamespacePrefixes: prefixes})
 }
 
 // resolveSTR resolves the wsse:SecurityTokenReference of a ds:KeyInfo: a

@@ -347,10 +347,17 @@ err = ts.Check(time.Now(), 5*time.Minute, 10*time.Minute) // skew, maximum age
 ```
 
 `ParseTimestamp` enforces the Basic Security Profile structure: exactly one
-`Created`, an optional `Expires` after it, UTC with `Z`, at most millisecond
-precision. `Check` returns `ErrMessageExpired` for an expired, future-dated
-or too-old timestamp. A timestamp protects nothing unless the signature's
-`Coverage` includes its ID.
+`Created` (BSP R3203; SOAP Message Security makes it optional, but a
+timestamp without it is refused), an optional `Expires` after it, UTC
+written with `Z` or a zero offset (`+00:00`). More than three fractional
+digits, which BSP says SHOULD NOT be sent, are accepted; `AddTimestamp`
+sends milliseconds. `Check` returns `ErrMessageExpired` for an expired,
+future-dated or too-old timestamp. A timestamp protects nothing unless the
+signature's `Coverage` includes its ID.
+
+**A timestamp without `Expires` never expires.** `ts.Check(now, skew, 0)`
+accepts it however old it is; only a `Created` in the future fails. Unless
+your policy requires `Expires`, always pass a non-zero `maxAge`, as above.
 
 ### Token references
 
@@ -360,7 +367,11 @@ its certificate. `wss.ResolveSecurityTokenReferenceStrict` also enforces the
 Basic Security Profile rules on how the reference is written: a `ValueType`
 matching the token, a consistent `TokenType`, the token in the same header
 before the reference. `VerifyOptions.StrictSecurityTokenReference` applies
-the strict form inside `dsig.Verify`. `wss.ReferencedToken` returns the
+the strict form inside `dsig.Verify`. The same-header rule (R3066) applies
+to a reference inside a `wsse:Security`; one outside every header, such as
+in the Body, need only follow its token in document order (R5205). The
+strict form also refuses a binary security token without an `EncodingType`
+(R3029), which the lenient one reads as Base64Binary, the default of §6.3. `wss.ReferencedToken` returns the
 token element of either form, of any kind: a binary security token, an
 `xenc:EncryptedKey`, a SAML assertion. All three refuse a reference to
 another reference, to a `wsse:Embedded` or to a `ds:KeyInfo` (R3057, R3064,
@@ -369,8 +380,10 @@ reference to an ID nothing carries is `ErrSecurityTokenUnavailable`, as well
 as `ErrIDNotFound`. `wss.CheckSecurityTokenReference` applies the profile's
 syntax rules to any reference: one reference (R3061), no `KeyName` (R3027),
 a `URI` on a direct reference (R3062), a key identifier with a `ValueType`
-its profile defines and the Base64Binary `EncodingType` (R3054, R3063,
-R3070, R3071), and a `TokenType` consistent with it (§7.1, R3069).
+(R3054) and the Base64Binary `EncodingType` (R3070, R3071), or none for a
+SAML one (R6604), and a `TokenType` consistent with it (§7.1, R3069; on a
+direct reference to an `EncryptedKey` too). A key identifier of a profile
+this library does not read, such as Kerberos, is `ErrUnsupportedKeyInfo`.
 
 `wss.MatchSecurityTokenReference(str, cert)` checks a key identifier or
 issuer-serial reference against a certificate you supply. It never selects a
@@ -432,14 +445,28 @@ refs = append(refs, dsig.Reference{URI: "#" + strID, DigestAlgorithm: xmlsec.Dig
 	Transforms: []dsig.TransformSpec{{Algorithm: xmlsec.TransformSTR}}})
 ```
 
-The token is serialized with Exclusive C14N (the only one accepted, in
-`wsse:TransformationParameters`), with `TransformSpec.InclusiveNamespacePrefixes`
-as its PrefixList, and `xmlns=""` on the token when no default namespace is
-in scope, as §8.3 requires and WSS4J does. A key identifier or issuer-serial
-reference names a certificate outside the message: the transform digests the
-X509v3 `wsse:BinarySecurityToken` §8.3 builds from the certificate
-`SignOptions.ResolveSecurityToken` or `VerifyOptions.ResolveSecurityToken`
-returns, and fails with `ErrSecurityTokenUnavailable` without one.
+`Sign` serializes the token with Exclusive C14N, stated in
+`wsse:TransformationParameters` with `TransformSpec.InclusiveNamespacePrefixes`
+and `#default` as its PrefixList, and `xmlns=""` on the token when no
+default namespace is in scope, as §8.3 requires. The default namespace is
+always inclusive, as WSS4J reads §8.3, so `Sign` states it, and `Verify`
+applies it to a received transform whether its PrefixList states it or not
+(WSS4J's does not). `Verify` accepts any canonicalization
+`AllowedCanonicalizationAlgorithms` admits, such as the Inclusive C14N of
+the §8.3 example; `StrictBSP` requires Exclusive C14N (R5404).
+
+An X509SubjectKeyIdentifier or ThumbprintSHA1 key identifier, or an
+issuer-serial reference, names a certificate outside the message: the
+transform digests the X509v3 `wsse:BinarySecurityToken` §8.3 builds from
+the certificate `SignOptions.ResolveSecurityToken` or
+`VerifyOptions.ResolveSecurityToken` returns, and fails with
+`ErrSecurityTokenUnavailable` without one. A SAML key identifier
+(`SAMLAssertionID`, `SAMLID`) names the assertion in the message whose
+`AssertionID` or `ID` it holds, and that assertion is digested; an ID
+carried twice is `ErrAmbiguousID`, an assertion not in the message
+`ErrSecurityTokenUnavailable`. Any other key identifier, such as
+`EncryptedKeySHA1` or a Kerberos one, is `ErrUnsupportedKeyInfo`: the
+transform cannot reproduce that token.
 `Coverage.SignedTokens` reports each token covered this way; the reference
 itself is not covered and not reported. To protect both, sign the reference
 twice, with and without the transform.
