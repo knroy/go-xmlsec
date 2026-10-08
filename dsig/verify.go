@@ -210,7 +210,10 @@ type VerifyOptions struct {
 	// certificate; and for such a reference through the STR Dereference
 	// Transform (xmlsec.TransformSTR), after the signature value has
 	// verified, to build the X509v3 wsse:BinarySecurityToken that section
-	// 8.3 digests. When nil, the first is refused with
+	// 8.3 digests. Only X.509 key identifiers (SubjectKeyIdentifier,
+	// ThumbprintSHA1) and issuer-serial references reach it there: a SAML
+	// key identifier resolves to the assertion in the document, and any
+	// other key identifier is refused. When nil, the first is refused with
 	// xmlsec.ErrUnsupportedKeyInfo and the second with
 	// xmlsec.ErrSecurityTokenUnavailable; an error it returns, or a nil
 	// certificate, is xmlsec.ErrSecurityTokenUnavailable.

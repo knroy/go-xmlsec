@@ -193,8 +193,9 @@ type SignOptions struct {
 	// or issuer-serial wsse:SecurityTokenReference names, for a reference
 	// through the STR Dereference Transform (xmlsec.TransformSTR), which
 	// digests the token rather than the reference to it; see
-	// VerifyOptions.ResolveSecurityToken. A direct reference or a
-	// wsse:Embedded needs no resolver.
+	// VerifyOptions.ResolveSecurityToken. A direct reference, a
+	// wsse:Embedded or a SAML key identifier, whose assertion is found in
+	// the document, needs no resolver.
 	ResolveSecurityToken func(str *xdm.Node) (*x509.Certificate, error)
 }
 

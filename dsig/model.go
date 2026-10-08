@@ -73,8 +73,9 @@ type Reference struct {
 	// xmlsec.TransformSTR, the STR Dereference Transform of SOAP Message
 	// Security 1.1.1 section 8.3, is the only transform of a "#id"
 	// reference to a wsse:SecurityTokenReference, and digests the token it
-	// names; its InclusiveNamespacePrefixes become the PrefixList of the
-	// Exclusive C14N in its wsse:TransformationParameters.
+	// names; its InclusiveNamespacePrefixes, with "#default" always added
+	// as WSS4J renders the token, become the PrefixList of the Exclusive
+	// C14N in its wsse:TransformationParameters.
 	//
 	// The Basic Security Profile requires transforms on every reference
 	// (R5416), ending with Exclusive C14N, the STR Dereference Transform or
