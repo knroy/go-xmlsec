@@ -8,7 +8,7 @@ that line.
 
 | Check | Runs on | Fails when |
 |---|---|---|
-| `TestVersionIsReleasedAndDescribed` | every push and pull request | the constant is not a `1.N.N` triple; `CHANGELOG.md` has no `## vX.Y.Z` section for it; an `## Unreleased` heading sits below that section |
+| `TestVersionIsReleasedAndDescribed` | every push and pull request | the constant is not a `1.N.N` triple; the newest released section of `CHANGELOG.md` (the first `## vX.Y.Z` heading, with only `## Unreleased` allowed above it) is not `## v` plus the constant; an `## Unreleased` heading sits below that section |
 | `release.yml` | the tag push | the tag does not equal the constant; the changelog section is missing or empty |
 
 ## Compatibility within v1

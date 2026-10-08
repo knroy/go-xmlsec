@@ -217,17 +217,24 @@ func TestSignatureConfirmationMismatch(t *testing.T) {
 }
 
 // VerifyOptions.StrictBSP refuses a signature the Basic Security Profile
-// forbids before any cryptographic work: TrustKey, which runs just before
+// forbids before any cryptographic work, with xmlsec.ErrMalformed: TrustKey, which runs just before
 // the signature value is checked, is never called, although the
 // signature's own key is not even pinned.
 func TestStrictBSPRefusesBeforeCrypto(t *testing.T) {
 	kp := keyPair(t, rsaKey(t))
 	msg, _, _ := signedWSS(t, kp)
+	// The XSLT stylesheet is allowed, so only StrictBSP can refuse it.
+	const sheet = `<xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0"></xsl:stylesheet>`
+	xslt, err := xmlsec.Parse([]byte(sheet))
+	if err != nil {
+		t.Fatal(err)
+	}
 	called := false
-	opts := dsig.VerifyOptions{StrictBSP: true, TrustKey: func(*x509.Certificate, crypto.PublicKey) error {
-		called = true
-		return nil
-	}}
+	opts := dsig.VerifyOptions{StrictBSP: true, AllowedXSLTStylesheets: []*xdm.Node{xmltree.DocumentElement(xslt.Root)},
+		TrustKey: func(*x509.Certificate, crypto.PublicKey) error {
+			called = true
+			return nil
+		}}
 	if _, err := verifyWSS(t, msg, opts); err != nil || !called {
 		t.Fatalf("conforming message: %v", err)
 	}
@@ -237,10 +244,10 @@ func TestStrictBSPRefusesBeforeCrypto(t *testing.T) {
 		"enveloping (R3102)": strings.Replace(strings.Replace(msg, `</ds:KeyInfo>`,
 			`</ds:KeyInfo><ds:Object><o xmlns:wsu="`+xmlsec.NSWSU+`" wsu:Id="o"></o></ds:Object>`, 1), `<ds:Reference URI="#`, `<ds:Reference URI="#o" x="#`, 1),
 		"Manifest (R5403)": strings.Replace(msg, `</ds:KeyInfo>`, `</ds:KeyInfo><ds:Object><ds:Manifest></ds:Manifest></ds:Object>`, 1),
-		"XSLT (R5423)":     strings.Replace(msg, `<ds:Transform `+exc, `<ds:Transform Algorithm="`+xmlsec.TransformXSLT+`"></ds:Transform><ds:Transform `+exc, 1),
+		"XSLT (R5423)":     strings.Replace(msg, `<ds:Transform `+exc, `<ds:Transform Algorithm="`+xmlsec.TransformXSLT+`">`+sheet+`</ds:Transform><ds:Transform `+exc, 1),
 	} {
 		called = false
-		if _, err := verifyWSS(t, attacked, opts); err == nil || errors.Is(err, xmlsec.ErrSignatureInvalid) || called {
+		if _, err := verifyWSS(t, attacked, opts); !errors.Is(err, xmlsec.ErrMalformed) || called {
 			t.Errorf("%s: %v, TrustKey called %v", name, err, called)
 		}
 	}

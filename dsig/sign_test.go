@@ -1,6 +1,7 @@
 package dsig_test
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
@@ -432,12 +433,12 @@ func TestSignInPlaceRefusals(t *testing.T) {
 		}
 	}
 	// A failure after placing the signature leaves the document unchanged.
-	before := len(root.Children)
+	before := serialize(t, doc)
 	if _, err := dsig.Sign(doc, key, base(doc, root, "#nope")); !errors.Is(err, xmlsec.ErrIDNotFound) {
 		t.Fatalf("got %v", err)
 	}
-	if len(root.Children) != before {
-		t.Fatal("a failed Sign left a signature in the document")
+	if after := serialize(t, doc); !bytes.Equal(after, before) {
+		t.Fatalf("a failed Sign changed the document:\n%s", after)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
+	"errors"
 	"math/big"
 	"net"
 	"net/http"
@@ -153,11 +154,13 @@ func TestVerifyDereferencesNothingExternal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, uri := range []string{
-		url + "/verify",
-		file,
-		"cid:" + url,
-		"#xpointer(document('" + url + "/xp'))",
+	// Each refusal is the resolver's, never ErrSignatureInvalid: the
+	// re-signed SignedInfo is authentic, so the URI itself was refused.
+	for uri, want := range map[string]error{
+		url + "/verify":                         xmlsec.ErrMalformed,
+		file:                                    xmlsec.ErrMalformed,
+		"cid:" + url:                            xmlsec.ErrAttachmentNotFound,
+		"#xpointer(document('" + url + "/xp'))": xmlsec.ErrMalformed,
 	} {
 		t.Run(uri, func(t *testing.T) {
 			tree, err := xmlsec.Parse([]byte(`<r><a>x</a></r>`))
@@ -193,8 +196,9 @@ func TestVerifyDereferencesNothingExternal(t *testing.T) {
 			}
 			value.Children[0].Value = base64.StdEncoding.EncodeToString(v)
 
-			if _, err := dsig.Verify(doc.Root, sig, dsig.VerifyOptions{Certificate: cert}); err == nil {
-				t.Fatal("verified")
+			_, err = dsig.Verify(doc.Root, sig, dsig.VerifyOptions{Certificate: cert})
+			if !errors.Is(err, want) || errors.Is(err, xmlsec.ErrSignatureInvalid) {
+				t.Fatalf("got %v, want %v from reference resolution", err, want)
 			}
 		})
 	}

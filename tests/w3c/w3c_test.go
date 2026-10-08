@@ -18,10 +18,11 @@ type entry struct {
 	Path      string `json:"path"`
 	Source    string `json:"source"`
 	Signature string `json:"signature"` // "enveloped": child of the document element; "root": the document element
-	Expect    string `json:"expect"`    // "verify", "refuse" or "bug"
-	Error     string `json:"error"`
-	Reason    string `json:"reason"`
-	Bug       string `json:"bug"`
+	// "verify" or "refuse". Nothing else is accepted: a vector go-xmlsec
+	// gets wrong fails the build, it is not skipped.
+	Expect string `json:"expect"`
+	Error  string `json:"error"`
+	Reason string `json:"reason"`
 
 	// Algorithms outside the default sets that the vector needs named, and
 	// the HMAC key of an HMAC vector.
@@ -83,9 +84,6 @@ func TestW3CInteropVectors(t *testing.T) {
 }
 
 func check(t *testing.T, e entry) {
-	if e.Expect == "bug" {
-		t.Skip("suspected go-xmlsec bug: " + e.Bug)
-	}
 	raw, err := os.ReadFile(filepath.Join("testdata", filepath.FromSlash(e.Path)))
 	if err != nil {
 		t.Fatal(err)

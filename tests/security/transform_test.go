@@ -1,6 +1,9 @@
 package security
 
 import (
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
 	"errors"
 	"testing"
 
@@ -133,11 +136,14 @@ func TestXPathPrefixRebindingRefused(t *testing.T) {
 	}
 }
 
-// Even an allowed stylesheet reads nothing: no document(), no include.
+// Even an allowed stylesheet reads nothing: no document(), no include,
+// whether signing runs it or verifying an authentic signature does.
 func TestAllowedXSLTFetchesNothing(t *testing.T) {
 	url, hits := listener(t)
 	file, _ := secret(t)
-	kp := keyPair(t, rsaKey(t))
+	rk := rsaKey(t)
+	kp := keyPair(t, rk)
+	benign := legacyParse(t, `<xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0"><xsl:template match="/"><o/></xsl:template></xsl:stylesheet>`)
 	for _, body := range []string{
 		`<xsl:template match="/"><o><xsl:copy-of select="document('` + url + `/d')"/></o></xsl:template>`,
 		`<xsl:template match="/"><o><xsl:copy-of select="document('` + file + `')"/></o></xsl:template>`,
@@ -162,6 +168,29 @@ func TestAllowedXSLTFetchesNothing(t *testing.T) {
 		})
 		if !errors.Is(err, xmlsec.ErrMalformed) {
 			t.Fatalf("%s: got %v", body, err)
+		}
+
+		// Verify: the stylesheet replaces a benign one, SignedInfo is
+		// re-signed with the real key, and the stylesheet is allowed, so
+		// verification goes on to run it.
+		doc, _ := signTransform(t, kp, dsig.TransformSpec{Algorithm: xmlsec.TransformXSLT, Stylesheet: benign})
+		xmltree.Walk(doc, func(e *xdm.Node) {
+			if e.IsElement(xmlsec.NSDSig, "Transform") && e.AttrValue("Algorithm") == xmlsec.TransformXSLT {
+				e.Children = nil
+				e.AppendChild(xmltree.DocumentElement(s.Root))
+			}
+		})
+		sig := resign(t, doc, xmlsec.SigRSASHA256, func(d []byte) []byte {
+			v, err := rsa.SignPKCS1v15(rand.Reader, rk, crypto.SHA256, d)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return v
+		})
+		allowed := legacyParse(t, `<xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0">`+body+`</xsl:stylesheet>`)
+		_, err = dsig.Verify(doc, sig, dsig.VerifyOptions{Certificate: kp.Certificate, AllowedXSLTStylesheets: []*xdm.Node{allowed}})
+		if !errors.Is(err, xmlsec.ErrMalformed) {
+			t.Fatalf("%s: Verify got %v", body, err)
 		}
 	}
 	if n := hits.Load(); n != 0 {

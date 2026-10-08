@@ -76,6 +76,13 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
+      # The interop tests build only under -tags interop, and the W3C
+      # vectors are a nested module ./... does not reach. gosec skips test
+      # files, which is all either holds, so it has nothing more to see.
+      - run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 -tags interop ./...
+      - name: staticcheck tests/w3c
+        working-directory: tests/w3c
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
       - run: go run github.com/securego/gosec/v2/cmd/gosec@v2.29.0 -quiet ./...
 
   hygiene:

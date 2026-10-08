@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -77,7 +78,8 @@ func xpVerify(t *testing.T, doc, sig *xdm.Node, opts dsig.VerifyOptions) (*dsig.
 }
 
 // replaceText changes the first text node equal to old, to tamper with a
-// signed document.
+// signed document. It panics when there is none: a tamper that changed
+// nothing would let a test pass vacuously.
 func replaceText(doc *xdm.Node, old, new string) {
 	var walk func(n *xdm.Node) bool
 	walk = func(n *xdm.Node) bool {
@@ -92,7 +94,9 @@ func replaceText(doc *xdm.Node, old, new string) {
 		}
 		return false
 	}
-	walk(doc)
+	if !walk(doc) {
+		panic("replaceText: no text node " + strconv.Quote(old))
+	}
 }
 
 func TestXPathTransform(t *testing.T) {

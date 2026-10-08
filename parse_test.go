@@ -31,15 +31,17 @@ func TestParseLimits(t *testing.T) {
 		name    string
 		doc     []byte
 		wantErr bool
+		limit   bool // the error is ErrLimitExceeded
 	}{
-		{"at depth limit", deep(MaxParseDepth), false},
-		{"beyond depth limit", deep(MaxParseDepth + 1), true},
-		{"not well-formed", []byte("<a>"), true},
-		{"empty", nil, true},
+		{"at depth limit", deep(MaxParseDepth), false, false},
+		{"beyond depth limit", deep(MaxParseDepth + 1), true, true},
+		{"not well-formed", []byte("<a>"), true, false},
+		{"empty", nil, true, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if _, err := Parse(c.doc); (err != nil) != c.wantErr {
+			_, err := Parse(c.doc)
+			if (err != nil) != c.wantErr || errors.Is(err, ErrLimitExceeded) != c.limit {
 				t.Fatalf("err = %v", err)
 			}
 		})
