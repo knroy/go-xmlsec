@@ -5,7 +5,7 @@ versioning](https://semver.org): within v1 no exported name is removed or
 changed. See [RELEASE.md](RELEASE.md) for the compatibility promise and how a
 release is cut.
 
-## Unreleased
+## v1.3.0 — 2026-10-08
 
 Fixes from an independent audit, run without reference to this project's own
 claims: five auditors (XML Signature, XML Encryption, WS-Security, security,
@@ -46,7 +46,7 @@ that overstated the code.
 
 | Change | Commit |
 |---|---|
-| The deliberate exceptions, stated in `docs/security.md`: DOCTYPE refused when octets are re-parsed, XPath in a 2.0 engine's 1.0 mode, combined `KeyInfo` forms, raw RSA keys under 2048 bits, DH groups under 2048 bits, several keys in one `KeyInfo`, `kw-tripledes` parity unchecked (xmlsec1 wraps without it), and the three SwA header canonicalization departures WSS4J requires. The default allow-lists named. The `docs/usage.md` examples that did not compile fixed. | [`f320ad2`][f320ad2], [`1146d94`][1146d94], [`7e0f8aa`][7e0f8aa], *this commit* |
+| The deliberate exceptions, stated in `docs/security.md`: DOCTYPE refused when octets are re-parsed, XPath in a 2.0 engine's 1.0 mode, combined `KeyInfo` forms, raw RSA keys under 2048 bits, DH groups under 2048 bits, several keys in one `KeyInfo`, `kw-tripledes` parity unchecked (xmlsec1 wraps without it), and the three SwA header canonicalization departures WSS4J requires. The default allow-lists named. The `docs/usage.md` examples that did not compile fixed. | [`f320ad2`][f320ad2], [`1146d94`][1146d94], [`7e0f8aa`][7e0f8aa], [`391978c`][391978c] |
 | Security tests assert the refusal they claim; the version test requires the newest changelog section; CI lints the `interop` code and `tests/w3c`; `docs/testing.md` no longer claims no clock, no network and no `#nosec` | [`feb2a92`][feb2a92], [`94c506f`][94c506f] |
 
 ## v1.2.2 — 2026-10-07
@@ -225,3 +225,4 @@ First release.
 [f320ad2]: https://github.com/knroy/go-xmlsec/commit/f320ad2
 [feb2a92]: https://github.com/knroy/go-xmlsec/commit/feb2a92
 [94c506f]: https://github.com/knroy/go-xmlsec/commit/94c506f
+[391978c]: https://github.com/knroy/go-xmlsec/commit/391978c
