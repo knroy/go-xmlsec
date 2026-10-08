@@ -631,9 +631,10 @@ cov, err := dsig.Verify(doc, sigElement, dsig.VerifyOptions{
 ```
 
 Pass exactly the algorithms your profile permits. An empty list means the
-default set: every secure algorithm this library implements. An algorithm
-kept only for legacy interoperability is outside that set and is accepted
-only when named explicitly.
+default set: RSA and ECDSA with SHA-256, SHA-384 and SHA-512, and the
+digests and canonicalizations to match. Legacy algorithms, HMAC and the
+SHA-224 family are outside that set and are accepted only when named
+explicitly.
 
 Legacy algorithms verify only when listed: `SigRSASHA1`, `SigDSASHA1`,
 `SigDSASHA256` (with (2048, 256) or (3072, 256) DSA keys), `SigECDSASHA1`,

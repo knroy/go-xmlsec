@@ -124,6 +124,19 @@ Named `TestConformance_<ID>_<description>` for the requirement they prove.
 | `TestFindByIDExtraAttributes`, `TestSAMLAssertionByID`, `TestPlainIdReference`, `TestDefaultIDSetUnchanged` | opt-in `ID`/`Id` resolution; duplicates refused across every counted attribute; an attacker assertion with the signed `ID` refused; the default set unchanged |
 | `TestPrefixBoundElsewhere` | a `wsu` or `wsse` prefix bound to another namespace higher up does not corrupt the header |
 | `TestVersionIsReleasedAndDescribed` | the version constant is a `1.N.N` triple and names the newest released `CHANGELOG.md` section: the first `## vX.Y.Z` heading, with only `## Unreleased` allowed above it and none below; see [RELEASE.md](../RELEASE.md) |
+| `TestSignDetachedSelfReference`, `TestSignDetachedEmbeddedToken` | without `Parent`, a reference into the detached signature itself (its `ds:Object`, `KeyInfo` or an embedded token) through a placement-dependent transform is refused: it would digest differently once placed (§4.4.3.3) |
+| `TestManifestEnvelopedOutsideSignature` | `VerifyManifest` refuses the enveloped-signature transform in a Manifest with no enclosing `ds:Signature` (§6.6.4) |
+| `TestBase64TransformIgnoresNonAlphabet` | the base64 transform drops every character outside the alphabet (RFC 2045 §6.8) |
+| `TestX509CertificateUnparsableWhenPinned`, `TestX509DataReissuedCertificate`, `TestCertpathLeafOfKey` | with a key pinned, a `ds:X509Certificate` Go cannot parse is an ignored hint; certificates for one public key count as one leaf, different keys stay refused |
+| `TestCoverageNil`, `TestHeaderNotFromNewHeader`, `TestEncryptedKeyMethodsNilReceiver` | methods on a nil `Coverage`, a `Header` not from `NewHeader` and an `EncryptedKey` with no element return false or an error, never panic |
+| `TestSTRTransformSAMLKeyIdentifier`, `TestSTRTransformCanonicalization` | a SAML key identifier dereferences to the assertion in the document, duplicated IDs refused; other non-X.509 key identifiers are refused; any allow-listed canonicalization, Exclusive only under `StrictBSP` |
+| `TestBinarySecurityTokenDefaultEncoding` | a token without `EncodingType` is Base64Binary when lenient (SOAP Message Security §6.3), refused by the strict resolver (BSP R3029) |
+| `TestCompleteWSS4JDepartures` | pins the three SwA MIME header canonicalization departures (§5.4.1 rules 8, 15, 18) that WSS4J interop requires |
+| `TestEncryptionPropertiesWithKeyInfo` | with `EncryptionProperties`, the `ds:KeyInfo` of a master key, password or direct key agreement stays before `CipherData`, and the output decrypts |
+| `TestDecryptAttachmentCompleteNoOracle` | after decryption, malformed or unlisted Attachment-Complete headers fail with the same `ErrDecryptionFailed` as bad padding or a wrong key |
+| `TestLegacyTripleDESKeyWrapRFC3217` | the RFC 3217 §3.4 vector unwraps; parity is deliberately not checked, since xmlsec1 wraps keys without setting it |
+| `TestConcatKDFBitStrings`, `TestImpliedKeyDerivationMethod`, `TestDigestSHA384XMLEnc` | ConcatKDF parameters concatenated bit by bit, refused only when the total is not whole octets; an absent `KeyDerivationMethod` with `ImpliedKeyDerivationMethod`; the XML Encryption SHA-384 URI accepted on encryption |
+| `TestGenerateEncryptedKeyInapplicableOptions` | `EncryptOptions` fields that do not apply to the chosen key transport, wrap or derivation are refused, not ignored |
 
 ## The differential against xmlsec1 and Santuario
 

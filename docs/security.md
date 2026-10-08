@@ -151,10 +151,12 @@ that `Coverage` exposes it.
 
 `VerifyOptions` and the `xenc.Decrypt*` functions take allow-lists, checked
 before any cryptographic work. Pass exactly what your profile permits. An
-empty list means the default set: every secure algorithm this library
-implements, which is still broader than any single profile. An algorithm
-kept only for legacy interoperability is outside the default set and is
-accepted only when a caller names it.
+empty list means the default set, which is broader than any single profile:
+RSA and ECDSA with SHA-256, SHA-384 and SHA-512, AES-GCM, RSA-OAEP with
+SHA-2, AES key wrap, ECDH-ES with ConcatKDF. Everything else is accepted
+only when a caller names it: the legacy algorithms kept for
+interoperability, HMAC (its key is a shared secret), the SHA-224 family,
+finite-field Diffie-Hellman, PBKDF2 and MGF1 with SHA-224.
 
 ## Deliberate refusals
 

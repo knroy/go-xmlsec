@@ -5,6 +5,50 @@ versioning](https://semver.org): within v1 no exported name is removed or
 changed. See [RELEASE.md](RELEASE.md) for the compatibility promise and how a
 release is cut.
 
+## Unreleased
+
+Fixes from an independent audit, run without reference to this project's own
+claims: five auditors (XML Signature, XML Encryption, WS-Security, security,
+sanity), every finding reproduced. The security audit found nothing
+exploitable; these are specification divergences, API edges and documentation
+that overstated the code.
+
+### Fixed
+
+| Change | Why | Commit |
+|---|---|---|
+| A detached `Sign` refuses a placement-dependent transform (inclusive C14N, a PrefixList, XPath, XSLT, the STR transform of an embedded token) on a reference into the signature itself | It was digested before the signature was placed, so the signature never verified once placed (XML Signature §4.4.3.3). | [`ddea0d6`][ddea0d6] |
+| `EncryptionProperties` with `MasterKey`, `Password` or `DirectKeyAgreement` keeps `ds:KeyInfo` before `CipherData` | The output was schema-invalid, and this library could not decrypt it (XML Encryption §3.1). | [`1146d94`][1146d94] |
+| The STR Dereference Transform dereferences a SAML key identifier to the assertion in the document, and refuses other non-X.509 key identifiers | It built and digested an X.509 token for any key identifier (SOAP Message Security §8.3). | [`7e0f8aa`][7e0f8aa] |
+| Attachment-Complete decryption reports every failure after decryption as `ErrDecryptionFailed` | Detailed header errors on CBC data were a format oracle (XML Encryption §6.1.1). | [`1146d94`][1146d94] |
+| No method panics on a nil or zero value: `Coverage`, a `wss.Header` not from `NewHeader`, an `EncryptedKey` with no element | `docs/security.md` promised errors, never panics. | [`ddea0d6`][ddea0d6], [`7e0f8aa`][7e0f8aa], [`1146d94`][1146d94] |
+| `VerifyManifest` refuses the enveloped-signature transform in a Manifest outside any `ds:Signature` | It removed the Manifest itself; the specification's output is empty (§6.6.4). | [`ddea0d6`][ddea0d6] |
+| The base64 transform ignores characters outside the alphabet; a pinned key ignores an unparsable `ds:X509Certificate`; `RetrievalMethod` without `Type` infers it; certificates for one public key count as one leaf | XML Signature §6.6.2 (RFC 2045), §3.2.2, §4.5.3, §4.5.4. | [`ddea0d6`][ddea0d6] |
+| A Content-Only attachment without a Content-Type is encrypted with `MimeType` `text/plain; charset=us-ascii`; the `xenc11#DerivedKey` `RetrievalMethod` Type is accepted; `DigestSHA384XMLEnc` is accepted on encryption; ConcatKDF parameters are concatenated bit by bit | SwA §5.5.2, XML Encryption §3.5.2, §5.8.3, §5.4.1. | [`1146d94`][1146d94] |
+| Strict token-reference resolution applies R3066 only inside a `wsse:Security`; `CheckSecurityTokenReference` enforces R3069 and R6604 and reports unknown profiles as `ErrUnsupportedKeyInfo`; a `BinarySecurityToken` without `EncodingType` is Base64Binary when lenient; `ParseTimestamp` accepts more than three fractional digits and a zero offset | BSP and SOAP Message Security §6.3, §10. | [`7e0f8aa`][7e0f8aa] |
+| A refused DOCTYPE is `ErrMalformed` | It wrapped no sentinel and suggested a go-xml option callers cannot reach. | [`126f886`][126f886] |
+
+### Changed
+
+| Change | Why | Commit |
+|---|---|---|
+| `GenerateEncryptedKey` and the Encrypt functions refuse `EncryptOptions` fields that do not apply to the chosen key transport, wrap or derivation, and `PBKDF2Iterations` without `Password` or out of range | They were silently ignored. | [`1146d94`][1146d94] |
+| An `xenc:CipherReference` without a `URI` attribute is refused; an attachment's must carry the Attachment-Ciphertext-Transform | One read as the whole document; SwA §5.5.1 requires the transform. | [`1146d94`][1146d94] |
+| The STR transform accepts any allow-listed canonicalization (Exclusive C14N only under `StrictBSP`), and `Sign` states `#default` in the PrefixList it emits | §8.3 takes any canonicalization; the emitted XML now says what is digested. | [`7e0f8aa`][7e0f8aa] |
+
+### Added
+
+| Change | Commit |
+|---|---|
+| `xenc.DecryptOptions.ImpliedKeyDerivationMethod`, for an `xenc11:DerivedKey` without a `KeyDerivationMethod` (§3.5.2), allow-listed like the other `Implied*` options | [`1146d94`][1146d94] |
+
+### Documented and tested
+
+| Change | Commit |
+|---|---|
+| The deliberate exceptions, stated in `docs/security.md`: DOCTYPE refused when octets are re-parsed, XPath in a 2.0 engine's 1.0 mode, combined `KeyInfo` forms, raw RSA keys under 2048 bits, DH groups under 2048 bits, several keys in one `KeyInfo`, `kw-tripledes` parity unchecked (xmlsec1 wraps without it), and the three SwA header canonicalization departures WSS4J requires. The default allow-lists named. The `docs/usage.md` examples that did not compile fixed. | [`f320ad2`][f320ad2], [`1146d94`][1146d94], [`7e0f8aa`][7e0f8aa], *this commit* |
+| Security tests assert the refusal they claim; the version test requires the newest changelog section; CI lints the `interop` code and `tests/w3c`; `docs/testing.md` no longer claims no clock, no network and no `#nosec` | [`feb2a92`][feb2a92], [`94c506f`][94c506f] |
+
 ## v1.2.2 — 2026-10-07
 
 ### Changed
@@ -174,3 +218,10 @@ First release.
 [afb42a1]: https://github.com/knroy/go-xmlsec/commit/afb42a1
 [663bfe5]: https://github.com/knroy/go-xmlsec/commit/663bfe5
 [57683c8]: https://github.com/knroy/go-xmlsec/commit/57683c8
+[ddea0d6]: https://github.com/knroy/go-xmlsec/commit/ddea0d6
+[1146d94]: https://github.com/knroy/go-xmlsec/commit/1146d94
+[7e0f8aa]: https://github.com/knroy/go-xmlsec/commit/7e0f8aa
+[126f886]: https://github.com/knroy/go-xmlsec/commit/126f886
+[f320ad2]: https://github.com/knroy/go-xmlsec/commit/f320ad2
+[feb2a92]: https://github.com/knroy/go-xmlsec/commit/feb2a92
+[94c506f]: https://github.com/knroy/go-xmlsec/commit/94c506f
