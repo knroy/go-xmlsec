@@ -5,6 +5,14 @@ versioning](https://semver.org): within v1 no exported name is removed or
 changed. See [RELEASE.md](RELEASE.md) for the compatibility promise and how a
 release is cut.
 
+## Unreleased
+
+### Changed
+
+| Change | Why | Commit |
+|---|---|---|
+| `go-xml` v1.4.0 → v1.6.0 | Security-relevant, per RELEASE.md. Canonicalization: Exclusive C14N no longer renders a namespace node an XPath filter removed (Exc-C14N §1.1), which only the opt-in XPath transforms reach; no other canonical output changed, and the interop suite, the W3C vectors and the real-message corpus are unchanged. Parsing: a new tokeniser replaces the `encoding/xml` fork, refusing 20 not-well-formed documents it accepted and accepting 16 well-formed ones it refused, so `xmlsec.Parse` is stricter on malformed input and more complete on DTD edge cases (DOCTYPE stays refused). The Go floor is unchanged: `go-xml` still needs 1.25. | *this commit* |
+
 ## v1.2.1 — 2026-09-28
 
 ### Tested

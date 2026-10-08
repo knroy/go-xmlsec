@@ -123,7 +123,7 @@ Defences here:
   to plant a second target: with the default set, an `ID` or `Id` attribute
   is neither resolved nor counted. `xdm.ElementByID` is never used on the
   verify path: on duplicates it returns the first depth-first match
-  (confirmed against go-xml v1.4.0), which is exactly the ambiguity the
+  (confirmed against go-xml v1.6.0), which is exactly the ambiguity the
   attack needs.
 * The enveloped-signature transform removes the enclosing signature by
   identity, not every `ds:Signature` in the document. Over a node set parsed

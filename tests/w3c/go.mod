@@ -3,7 +3,7 @@ module github.com/knroy/go-xmlsec/tests/w3c
 go 1.26.0
 
 require (
-	github.com/knroy/go-xml v1.4.0
+	github.com/knroy/go-xml v1.6.0
 	github.com/knroy/go-xmlsec v0.0.0
 )
 

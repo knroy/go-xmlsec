@@ -68,7 +68,7 @@ change.
 `go.mod` says `go 1.26.0`, a choice rather than an accident. Measured by
 building with older toolchains:
 
-* **Go 1.25** is the lowest possible: `go-xml` v1.4.0 itself requires it.
+* **Go 1.25** is the lowest possible: `go-xml` itself requires it (v1.6.0 still does).
 * **Go 1.26** is required by one call, `rsa.EncryptOAEPWithOptions`
   (`xenc/keytransport.go`), the only standard library way to encrypt
   RSA-OAEP with an MGF digest different from the OAEP digest. A 1.25 build

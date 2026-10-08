@@ -411,22 +411,24 @@ known-answer test.
 ## Canonicalization
 
 Every digest and signature this library computes is over octets from
-`go-xml/c14n`, pinned at v1.4.0. It is tested in go-xml, not here, and its
+`go-xml/c14n`, pinned at v1.6.0. It is tested in go-xml, not here, and its
 figures are published only in that module's
-[docs/c14n.md](https://github.com/knroy/go-xml/blob/v1.4.0/docs/c14n.md#conformance-and-verification),
+[docs/c14n.md](https://github.com/knroy/go-xml/blob/v1.6.0/docs/c14n.md#conformance-and-verification),
 not in the conformance table of its README, where its sibling packages
-report theirs. At v1.4.0:
+report theirs. At v1.6.0:
 
 | Check | Result |
 |---|---|
 | Worked examples of the three Recommendations (C14N 1.0 §3, 1.1 §3 with erratum E11-01, Exclusive §2) | 28 / 28 |
-| C14N 1.1 §2.4 URI-joining examples and the Appendix A dot-segment table | 69 / 69 |
+| C14N 1.1 §2.4 URI-joining examples and the Appendix A dot-segment table | 67 / 67 |
 | W3C C14N 1.1 interop cases, digests checked against all five implementations | 20 / 20 |
+| Baltimore Merlin interop signature `merlin-c14n-three` (Canonical XML, Exclusive C14N, Exclusive C14N with a PrefixList), octets and signed digest per reference | 27 / 27 |
+| Baltimore Merlin interop signature `merlin-exc-c14n-one`, octets and signed digest per reference | 4 / 4 |
 | Differential against `xmllint`, whole documents, three algorithms | 129 / 129 |
-| Differential against `xmlsec1`, node sets through signature references, six algorithms | 870 compared: 790 identical, 80 documented differences |
+| Differential against `xmlsec1`, node sets through signature references, six algorithms | 1250 compared: 1136 identical, 114 documented differences |
 
 The W3C publishes no pass/fail conformance suite for Canonical XML beyond the
-Recommendations' examples and the C14N 1.1 interop cases, so there is no
+Recommendations' examples and the interop cases, so there is no
 single figure to report beside the XPath and XML Schema suites. Not measured
 in go-xml: a differential against Santuario, and a corpus of real signed
 messages.
