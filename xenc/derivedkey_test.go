@@ -134,7 +134,7 @@ func TestDeriveKeyForEncryptedKey(t *testing.T) {
 		t.Fatalf("unwrap: %v", err)
 	}
 	// Example 25's own PartyUInfo "03D8" is a bit string of 5 bits, which
-	// ConcatKDF over octets cannot hash.
+	// makes OtherInfo 21 bits, which ConcatKDF over octets cannot hash.
 	doc = strings.Replace(doc, `PartyUInfo="00D8"`, `PartyUInfo="03D8"`, 1)
 	ek = firstNamed(covParse(t, doc), "EncryptedKey")
 	dk, _ = xenc.FindDerivedKey(ek)
@@ -253,5 +253,43 @@ func TestMasterKeyAttachment(t *testing.T) {
 	att, err := xenc.DecryptAttachment(ed, ct, key, xenc.DecryptOptions{})
 	if err != nil || string(att.Body) != "body" {
 		t.Fatalf("%v", err)
+	}
+}
+
+// Section 3.5.2: a DerivedKey without KeyDerivationMethod is derived by
+// the one the recipient knows, DecryptOptions.ImpliedKeyDerivationMethod,
+// under the same allow-lists; one the DerivedKey has always wins.
+func TestImpliedKeyDerivationMethod(t *testing.T) {
+	master := bytes.Repeat([]byte{9}, 32)
+	ed := dkEncrypt(t, xenc.EncryptOptions{DataAlgorithm: xmlsec.EncAES128GCM, DigestAlgorithm: xmlsec.DigestSHA256, MasterKey: master})
+	dk, err := xenc.FindDerivedKey(ed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := xenc.DeriveKey(dk, ed, master, xenc.DecryptOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	kdm := firstNamed(dk, "KeyDerivationMethod")
+	bare := covParse(t, `<xenc11:DerivedKey xmlns:xenc11="`+xmlsec.NSXEnc11+`"><xenc11:MasterKeyName>m</xenc11:MasterKeyName></xenc11:DerivedKey>`)
+	implied := xenc.DecryptOptions{ImpliedKeyDerivationMethod: kdm}
+	if got, err := xenc.DeriveKey(bare, ed, master, implied); err != nil || !bytes.Equal(got, want) {
+		t.Fatalf("implied: %x, %v", got, err)
+	}
+	other := covParse(t, strings.Replace(dkString(t, kdm), xmlsec.DigestSHA256, xmlsec.DigestSHA512, 1))
+	if got, err := xenc.DeriveKey(dk, ed, master, xenc.DecryptOptions{ImpliedKeyDerivationMethod: other}); err != nil || !bytes.Equal(got, want) {
+		t.Fatalf("explicit beside implied: %x, %v", got, err)
+	}
+	for name, c := range map[string]struct {
+		opts xenc.DecryptOptions
+		want error // nil: any error
+	}{
+		"none":               {xenc.DecryptOptions{}, xmlsec.ErrMalformed},
+		"not a method":       {xenc.DecryptOptions{ImpliedKeyDerivationMethod: bare}, nil},
+		"outside allow-list": {xenc.DecryptOptions{ImpliedKeyDerivationMethod: kdm, AllowedKeyDerivationAlgorithms: []string{xmlsec.KeyDerivationPBKDF2}}, xmlsec.ErrAlgorithmNotAllowed},
+	} {
+		if key, err := xenc.DeriveKey(bare, ed, master, c.opts); err == nil || c.want != nil && !errors.Is(err, c.want) || key != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
 	}
 }

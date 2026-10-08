@@ -853,6 +853,9 @@ opts := xenc.EncryptOptions{
     Recipient:             recipientCert,
 }
 ek, err := xenc.GenerateEncryptedKey(opts)
+if err != nil {
+    return err
+}
 defer clear(ek.SessionKey)
 // For a second recipient, wrap the same key: set opts.SessionKey =
 // ek.SessionKey and opts.Recipient, and call GenerateEncryptedKey again.
@@ -864,12 +867,35 @@ ciphertext, ed, err := xenc.EncryptAttachment(att, ek.SessionKey, xmlsec.Transfo
 
 Pass `xmlsec.TransformAttachmentComplete` instead to encrypt the listed MIME
 headers with the body. Then keep Content-ID on the part and drop the other
-listed headers.
+listed headers. With Attachment-Content-Only, a part without a Content-Type
+gets `MimeType="text/plain; charset=us-ascii"`, the Content-Type such a part
+has (SwA profile sections 5.4.1 and 5.5.2).
+
+`DecryptAttachment` requires the `CipherReference` to carry exactly the
+Attachment-Ciphertext-Transform (SwA profile section 5.5.1), as
+`EncryptAttachment` writes it. For Attachment-Complete, decrypted MIME
+headers that do not parse, or include one the profile does not list or one
+twice, are `ErrDecryptionFailed`, the same error as a wrong key or bad CBC
+padding: a detailed error about the plaintext would be an oracle.
 
 The MGF is emitted explicitly. Omitting it means SHA-1 by specification
 default, so `DecryptEncryptedKey` refuses an `EncryptedKey` without one.
 `xmlsec.MGF1SHA224` is produced when you name it, and accepted only when
-`AllowedMGFAlgorithms` names it.
+`AllowedMGFAlgorithms` names it. `DigestAlgorithm` may be
+`xmlsec.DigestSHA384XMLEnc`, XML Encryption's own SHA-384 identifier
+(section 5.8.3), as well as the SHA-2 `Digest*` constants.
+
+An option that has no effect on what is produced, or contradicts another,
+is refused rather than ignored: `GenerateEncryptedKey` refuses more than
+one of `Recipient`, `RecipientDH`, `KeyEncryptionKey` and `Password`;
+`MGFAlgorithm` and `OAEPParams` except with RSA-OAEP; `KeyEncryptionKey`,
+`Password` and `RecipientDH` with RSA-OAEP; `DigestAlgorithm` and
+`KeyAgreementAlgorithm` with a `KeyEncryptionKey` or `Password`;
+`RecipientKeyName` without `RecipientDH`; and `MasterKey` and
+`DirectKeyAgreement`, which make no `EncryptedKey`. Every function refuses
+`PBKDF2Iterations` without `Password` or outside 1000 to 10,000,000. The
+`EncryptedData` fields, such as `DataID`, are ignored by
+`GenerateEncryptedKey`, so one options value serves both.
 
 What to encrypt:
 
@@ -935,7 +961,8 @@ Key agreement and key wrap:
   `KeyTransportAlgorithm: xmlsec.KeyWrapAES128` (or 192, 256),
   `KeyAgreementAlgorithm: xmlsec.KeyAgreementECDHES`, `DigestAlgorithm` for
   the KDF, and an EC `Recipient`. The receiver calls
-  `xenc.DecryptAgreedKey(ek, priv.ECDH(), xenc.DecryptOptions{})`.
+  `priv, err := ecKey.ECDH()` and `xenc.DecryptAgreedKey(ekElement, priv,
+  xenc.DecryptOptions{})`, `ekElement` being the received `EncryptedKey`.
 - **AES key wrap** with a key you share: set `KeyEncryptionKey`, and receive
   with `xenc.UnwrapEncryptedKey`.
 - **Finite-field Diffie-Hellman** and **a password (PBKDF2)**: OPTIONAL, and
@@ -1059,7 +1086,7 @@ ek, err := xenc.GenerateEncryptedKey(xenc.EncryptOptions{
     RecipientKeyName:      "recipient",             // optional; xmlsec1 finds the key only by name
 })
 
-key, err := xenc.DecryptAgreedKeyDH(ek, recipient, xenc.DecryptOptions{
+key, err := xenc.DecryptAgreedKeyDH(ek.Element, recipient, xenc.DecryptOptions{
     AllowedKeyAgreementAlgorithms: []string{xmlsec.KeyAgreementDHES},
 })
 ```
@@ -1079,7 +1106,7 @@ ek, err := xenc.GenerateEncryptedKey(xenc.EncryptOptions{
     Password:              password,
 })
 
-key, err := xenc.UnwrapEncryptedKeyPassword(ek, password, xenc.DecryptOptions{
+key, err := xenc.UnwrapEncryptedKeyPassword(ek.Element, password, xenc.DecryptOptions{
     AllowedKeyDerivationAlgorithms: []string{xmlsec.KeyDerivationPBKDF2},
 })
 ```
@@ -1095,8 +1122,10 @@ secret as the password.
 
 The other `ds:KeyInfo` forms of sections 3.5 and 5.6, each found the same
 ways: a child of the `KeyInfo`, a same-document `ds:RetrievalMethod` of
-`Type` `xenc.TypeEncryptedKey` or `xenc.TypeDerivedKey` (or several naming
-one element; naming two is `xmlsec.ErrAmbiguousID`), a
+`Type` `xenc.TypeEncryptedKey` or `xenc.TypeDerivedKey` (or
+`http://www.w3.org/2009/xmlenc11#DerivedKey`, which section 3.5.3 gives
+instead; several naming one element are accepted, naming two is
+`xmlsec.ErrAmbiguousID`), a
 `ds:KeyName`, or, with no `KeyInfo`, the one key whose `xenc:ReferenceList`
 names the element by `DataReference` (for an `EncryptedData`) or
 `KeyReference` (for an `EncryptedKey`).
@@ -1136,6 +1165,11 @@ pt, err := xenc.DecryptData(ed, key, xenc.DecryptOptions{})
 and its target may be an `EncryptedKey`, whose KEK it derives. With
 `Password` instead of `MasterKey` the `DerivedKey` names PBKDF2, which
 `DeriveKey` accepts only when `AllowedKeyDerivationAlgorithms` names it.
+A `DerivedKey` without `KeyDerivationMethod` is derived by the one you
+pass, with its parameters, as `DecryptOptions.ImpliedKeyDerivationMethod`.
+`ConcatKDFParams` are bit strings (section 5.4.1), concatenated unpadded;
+when their total is not a whole number of octets, which no hash over octets
+can take, they are refused.
 
 The data key agreed directly, with the `AgreementMethod` in the
 `EncryptedData` (ECDH-ES, or `dh-es` and `dh` with `RecipientDH`):
@@ -1150,8 +1184,9 @@ opts := xenc.EncryptOptions{
 }
 out, err := xenc.EncryptElement(doc, payload, nil, opts)
 
-key, err := xenc.DecryptAgreedDataKey(ed, priv.ECDH(), xenc.DecryptOptions{})
-// finite-field: xenc.DecryptAgreedDataKeyDH(ed, dhPriv, opts)
+priv, err := ecKey.ECDH() // ecKey is the recipient's *ecdsa.PrivateKey
+key, err := xenc.DecryptAgreedDataKey(ed, priv, xenc.DecryptOptions{})
+// finite-field: xenc.DecryptAgreedDataKeyDH(ed, dhPriv, xenc.DecryptOptions{...})
 ```
 
 A `KA-Nonce` beside ECDH-ES or `dh-es` is accepted and ignored: ConcatKDF
@@ -1166,6 +1201,10 @@ Without an `EncryptionMethod`, the algorithm "must be known to the
 recipient" (section 3.1): name it in `DecryptOptions.ImpliedDataAlgorithm`,
 `ImpliedKeyWrapAlgorithm` or `ImpliedKeyTransportAlgorithm`. It is used only
 for an element with none, and passes the allow-list like an explicit one.
+
+An `xenc:CipherReference` without a `URI` attribute is refused
+(`ErrMalformed`): the schema requires it, and only `URI=""` names the whole
+document.
 
 ### Receiving from a legacy peer
 

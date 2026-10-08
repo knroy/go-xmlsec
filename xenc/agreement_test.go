@@ -154,7 +154,7 @@ func TestDecryptAgreedKeyErrors(t *testing.T) {
 		{"KDF digest outside allow-list", good, r.priv, lists{digest: []string{xmlsec.DigestSHA512}}, xmlsec.ErrAlgorithmNotAllowed},
 		{"unimplemented KDF digest", edit(`<ds:DigestMethod Algorithm="`+xmlsec.DigestSHA256, `<ds:DigestMethod Algorithm="urn:x`), r.priv, lists{digest: []string{"urn:x"}}, xmlsec.ErrUnsupportedAlgorithm},
 		{"padded bit string", edit(`PartyUInfo=""`, `PartyUInfo="03D8"`), r.priv, lists{}, xmlsec.ErrUnsupportedAlgorithm},
-		{"not hex", edit(`PartyVInfo=""`, `PartyVInfo="0g"`), r.priv, lists{}, xmlsec.ErrUnsupportedAlgorithm},
+		{"not hex", edit(`PartyVInfo=""`, `PartyVInfo="0g"`), r.priv, lists{}, xmlsec.ErrMalformed},
 		{"no KeyValue", cut(`<ds:KeyValue>`, `</ds:KeyValue>`), r.priv, lists{}, xmlsec.ErrMalformed},
 		{"X509Data as originator", edit(`<xenc:OriginatorKeyInfo>`, `<xenc:OriginatorKeyInfo><ds:X509Data></ds:X509Data>`), r.priv, lists{}, xmlsec.ErrMalformed},
 		{"two KeyValues", edit(`<xenc:OriginatorKeyInfo>`, `<xenc:OriginatorKeyInfo><ds:KeyValue></ds:KeyValue>`), r.priv, lists{}, xmlsec.ErrMalformed},
@@ -247,5 +247,43 @@ func TestDirectKeyAgreement(t *testing.T) {
 	withDigest := covParse(t, strings.Replace(s, `<xenc11:KeyDerivationMethod`, `<ds:DigestMethod Algorithm="`+xmlsec.DigestSHA256+`"></ds:DigestMethod><xenc11:KeyDerivationMethod`, 1))
 	if _, err := xenc.DecryptAgreedDataKey(withDigest, r.priv, xenc.DecryptOptions{}); !errors.Is(err, xmlsec.ErrMalformed) {
 		t.Fatalf("DigestMethod: %v", err)
+	}
+}
+
+// Section 5.4.1: ConcatKDFParams are bit strings, concatenated unpadded,
+// so attributes that are not whole octets derive the key their whole-octet
+// concatenation does. A total that is not whole octets is refused.
+func TestConcatKDFBitStrings(t *testing.T) {
+	master := bytes.Repeat([]byte{9}, 32)
+	ed := dkEncrypt(t, xenc.EncryptOptions{DataAlgorithm: xmlsec.EncAES128GCM, DigestAlgorithm: xmlsec.DigestSHA256, MasterKey: master})
+	derive := func(params string) ([]byte, error) {
+		dk := covParse(t, `<xenc11:DerivedKey xmlns:xenc11="`+xmlsec.NSXEnc11+`" xmlns:ds="`+xmlsec.NSDSig+`"><xenc11:KeyDerivationMethod Algorithm="`+xmlsec.KeyDerivationConcatKDF+`">`+
+			`<xenc11:ConcatKDFParams `+params+`><ds:DigestMethod Algorithm="`+xmlsec.DigestSHA256+`"/></xenc11:ConcatKDFParams></xenc11:KeyDerivationMethod></xenc11:DerivedKey>`)
+		return xenc.DeriveKey(dk, ed, master, xenc.DecryptOptions{})
+	}
+	for bitwise, octets := range map[string]string{
+		`AlgorithmID="0000" PartyUInfo="03D8" PartyVInfo="05E0"`:   `AlgorithmID="0000" PartyUInfo="00DF"`,
+		`PartyUInfo="04A0" PartyVInfo="04B0"`:                      `PartyUInfo="00AB"`,
+		`AlgorithmID="05E0" PartyUInfo="05ABC0" PartyVInfo="0680"`: `AlgorithmID="00F57A"`,
+	} {
+		a, err := derive(bitwise)
+		if err != nil {
+			t.Fatalf("%s: %v", bitwise, err)
+		}
+		if b, err := derive(octets); err != nil || !bytes.Equal(a, b) {
+			t.Fatalf("%s: %x, %s: %x, %v", bitwise, a, octets, b, err)
+		}
+	}
+	for params, want := range map[string]error{
+		`PartyUInfo="03D8"`: xmlsec.ErrUnsupportedAlgorithm, // 5 bits
+		`AlgorithmID="0000" PartyUInfo="03D8" PartyVInfo="03D0"`: xmlsec.ErrUnsupportedAlgorithm, // Example 25: 18 bits
+		`PartyUInfo="08D8"`: xmlsec.ErrMalformed, // over 7 padding bits
+		`PartyUInfo="03"`:   xmlsec.ErrMalformed, // padding with no octet
+		`PartyUInfo="03D9"`: xmlsec.ErrMalformed, // padding bits not zero
+		`PartyUInfo="0g"`:   xmlsec.ErrMalformed,
+	} {
+		if key, err := derive(params); !errors.Is(err, want) || key != nil {
+			t.Fatalf("%s: %v, want %v", params, err, want)
+		}
 	}
 }

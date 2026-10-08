@@ -37,6 +37,14 @@ func place(parent *xdm.Node) {
 	}
 }
 
+// newKeyInfo adds a ds:KeyInfo to parent, an EncryptedData or
+// EncryptedKey, in its schema place, and returns it.
+func newKeyInfo(parent *xdm.Node) *xdm.Node {
+	ki := nsElement(parent, "ds", xmlsec.NSDSig, "KeyInfo")
+	place(parent)
+	return ki
+}
+
 // dataAttrs sets the Type ("" for none), MimeType and Encoding attributes
 // of ed, a new EncryptedData, and appends opts.EncryptionProperties.
 func dataAttrs(ed *xdm.Node, typ string, opts EncryptOptions) error {

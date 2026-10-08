@@ -138,10 +138,10 @@ which a caller replaces by naming its own.
 | Key information | X.509 certificates and chains with issuer-serial, SKI, subject name and `X509Digest`; raw RSA and EC keys; `KeyName`; same-document `RetrievalMethod` and `KeyInfoReference`; WS-Security token references. Names, identifiers and external references are resolved only by caller-supplied resolvers |
 | Canonicalization | Canonical XML 1.0 and 1.1, Exclusive Canonical XML 1.0, with or without comments, from `go-xml/c14n` |
 | Transforms | enveloped signature, base64, SwA `Attachment-Content-Signature` and `Attachment-Complete-Signature`, the WS-Security STR Dereference Transform; XPath, XPath Filter 2.0 and XSLT, verified only for allowed expressions and stylesheets |
-| Key transport | RSA-OAEP (XML Encryption 1.1), MGF1 with SHA-256, SHA-384, SHA-512; opt-in: MGF1 with SHA-224 |
+| Key transport | RSA-OAEP (XML Encryption 1.1), MGF1 with SHA-256, SHA-384, SHA-512, and an OAEP digest of SHA-256, SHA-384 (either identifier) or SHA-512; opt-in: MGF1 with SHA-224 |
 | Key wrap | AES-128, AES-192, AES-256 (RFC 3394) |
 | Key agreement | ECDH-ES on P-256, P-384, P-521, with ConcatKDF; opt-in: finite-field `dh-es` and `dh` in 2048- to 8192-bit groups |
-| Key derivation | ConcatKDF, from a master key or a shared secret; opt-in: PBKDF2 with HMAC-SHA256, 384, 512, from a password or a shared secret |
+| Key derivation | ConcatKDF, from a master key or a shared secret, with bit-string parameters; opt-in: PBKDF2 with HMAC-SHA256, 384, 512, from a password or a shared secret |
 | Data encryption | AES-128-GCM, AES-192-GCM, AES-256-GCM; attachments as SwA `Attachment-Content-Only` or `Attachment-Complete` |
 
 Never produced, and accepted only when a caller names each one: SHA-1,

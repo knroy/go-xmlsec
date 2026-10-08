@@ -33,7 +33,7 @@ func oaepOptions(mgf, digest string, label []byte) (*rsa.OAEPOptions, error) {
 	if !ok {
 		return nil, unsupported("MGF %q", mgf)
 	}
-	dh, ok := hashes.Digest(digest)
+	dh, ok := encDigest(digest)
 	if !ok {
 		return nil, unsupported("OAEP digest %q", digest)
 	}
@@ -78,9 +78,14 @@ func oaepOptions(mgf, digest string, label []byte) (*rsa.OAEPOptions, error) {
 //
 // A legacy algorithm (see the package documentation) in any of opts'
 // algorithm fields is refused with xmlsec.ErrUnsupportedAlgorithm: those are
-// implemented for decryption only.
+// implemented for decryption only. An option that does not apply to the
+// EncryptedKey made, or contradicts another, is refused before any
+// cryptographic work, as EncryptOptions documents.
 func GenerateEncryptedKey(opts EncryptOptions) (*EncryptedKey, error) {
 	if err := encryptable(opts.DataAlgorithm, opts.KeyTransportAlgorithm, opts.MGFAlgorithm, opts.DigestAlgorithm); err != nil {
+		return nil, err
+	}
+	if err := inapplicable(opts); err != nil {
 		return nil, err
 	}
 	size, ok := keySizes[opts.DataAlgorithm]
@@ -115,6 +120,43 @@ func GenerateEncryptedKey(opts EncryptOptions) (*EncryptedKey, error) {
 		xmltree.Text(element(ek, "CarriedKeyName"), opts.CarriedKeyName)
 	}
 	return &EncryptedKey{Element: ek, SessionKey: key}, nil
+}
+
+// inapplicable refuses, before any cryptographic work, options that have
+// no effect on the EncryptedKey GenerateEncryptedKey makes under opts, or
+// contradict it: see EncryptOptions.
+func inapplicable(opts EncryptOptions) error {
+	keys := 0
+	for _, set := range []bool{opts.Recipient != nil, opts.KeyEncryptionKey != nil, opts.RecipientDH != nil, len(opts.Password) > 0} {
+		if set {
+			keys++
+		}
+	}
+	if keys > 1 {
+		return errors.New("xenc: more than one of Recipient, RecipientDH, KeyEncryptionKey and Password")
+	}
+	oaep := opts.KeyTransportAlgorithm == xmlsec.KeyTransportRSAOAEP
+	agreed := !oaep && (opts.Recipient != nil || opts.RecipientDH != nil)
+	for _, f := range []struct {
+		name         string
+		set, applies bool
+	}{
+		{"KeyEncryptionKey", opts.KeyEncryptionKey != nil, !oaep},
+		{"Password", len(opts.Password) > 0, !oaep},
+		{"RecipientDH", opts.RecipientDH != nil, !oaep},
+		{"MGFAlgorithm", opts.MGFAlgorithm != "", oaep},
+		{"OAEPParams", len(opts.OAEPParams) > 0, oaep},
+		{"DigestAlgorithm", opts.DigestAlgorithm != "", oaep || agreed},
+		{"KeyAgreementAlgorithm", opts.KeyAgreementAlgorithm != "", agreed},
+		{"RecipientKeyName", opts.RecipientKeyName != "", agreed && opts.RecipientDH != nil},
+		{"MasterKey", opts.MasterKey != nil, false},
+		{"DirectKeyAgreement", opts.DirectKeyAgreement, false},
+	} {
+		if f.set && !f.applies {
+			return fmt.Errorf("xenc: EncryptOptions.%s does not apply to an EncryptedKey by %s with this key", f.name, opts.KeyTransportAlgorithm)
+		}
+	}
+	return pbkdf2Iterations(opts)
 }
 
 // rsaOAEPWrap encrypts key to opts.Recipient and writes the OAEP
@@ -233,10 +275,22 @@ func DecryptEncryptedKey(el *xdm.Node, dec crypto.Decrypter, opts DecryptOptions
 	return key, nil
 }
 
+// check refuses a nil EncryptedKey, or one whose Element is not an
+// xenc:EncryptedKey, such as the zero value.
+func (ek *EncryptedKey) check() error {
+	if ek == nil || ek.Element == nil || !ek.Element.IsElement(xmlsec.NSXEnc, "EncryptedKey") {
+		return errors.New("xenc: EncryptedKey without an xenc:EncryptedKey Element")
+	}
+	return nil
+}
+
 // SetKeyInfo places el, such as a wsse:SecurityTokenReference to the
 // recipient's certificate, in a ds:KeyInfo of the EncryptedKey, where a
 // receiver looks to find which private key unwraps it.
 func (ek *EncryptedKey) SetKeyInfo(el *xdm.Node) error {
+	if err := ek.check(); err != nil {
+		return err
+	}
 	if el == nil || el.Kind != xdm.KindElement || el.Parent != nil {
 		return errors.New("xenc: SetKeyInfo needs a detached element")
 	}
@@ -245,9 +299,7 @@ func (ek *EncryptedKey) SetKeyInfo(el *xdm.Node) error {
 			return errors.New("xenc: EncryptedKey already has a ds:KeyInfo")
 		}
 	}
-	ki := nsElement(ek.Element, "ds", xmlsec.NSDSig, "KeyInfo")
-	ki.AppendChild(el)
-	place(ek.Element)
+	newKeyInfo(ek.Element).AppendChild(el)
 	return nil
 }
 
@@ -256,6 +308,9 @@ func (ek *EncryptedKey) SetKeyInfo(el *xdm.Node) error {
 // xenc:EncryptedData this key decrypts, see EncryptOptions.DataID; it must
 // be an NCName.
 func (ek *EncryptedKey) AddDataReference(id string) error {
+	if err := ek.check(); err != nil {
+		return err
+	}
 	if !xdm.IsNCName(id) {
 		return fmt.Errorf("xenc: data reference %q is not an NCName", id)
 	}

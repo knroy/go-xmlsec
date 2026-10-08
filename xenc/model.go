@@ -36,8 +36,11 @@
 //
 // Every Decrypt and Unwrap function takes a DecryptOptions whose allow-lists
 // are checked before any cryptographic work. An empty list means the
-// default set: every secure algorithm this package implements. A list can
-// never enable an algorithm this package does not implement.
+// default set of its role, which DecryptOptions lists: the recommended
+// algorithms. The OPTIONAL ones (finite-field Diffie-Hellman, PBKDF2,
+// MGF1 with SHA-224, HMAC-SHA1 as the PBKDF2 PRF) and the legacy ones
+// below are in no default set, and are accepted only when named. A list
+// can never enable an algorithm this package does not implement.
 //
 // Every failure of the decryption itself, whatever its cause, wraps
 // xmlsec.ErrDecryptionFailed with a fixed message, so that a receiver is
@@ -89,11 +92,33 @@ const (
 	TypeEncryptedKey = "http://www.w3.org/2001/04/xmlenc#EncryptedKey"
 
 	// TypeDerivedKey is the ds:RetrievalMethod Type of a reference to an
-	// xenc11:DerivedKey (section 3.5.2).
+	// xenc11:DerivedKey (section 3.5.2). Section 3.5.3 names
+	// "http://www.w3.org/2009/xmlenc11#DerivedKey" instead, which
+	// FindDerivedKey accepts as well.
 	TypeDerivedKey = "http://www.w3.org/2001/04/xmlenc#DerivedKey"
 )
 
+// typeDerivedKey11 is the RetrievalMethod Type of a DerivedKey that section
+// 3.5.3 gives, contradicting section 3.5.2.
+const typeDerivedKey11 = "http://www.w3.org/2009/xmlenc11#DerivedKey"
+
 // EncryptOptions configures encryption.
+//
+// One EncryptOptions may serve GenerateEncryptedKey and the Encrypt
+// functions alike, but an option that has no effect on what is produced,
+// or contradicts another, is refused rather than silently ignored: each
+// field says when. GenerateEncryptedKey refuses, before any cryptographic
+// work, more than one of Recipient, RecipientDH, KeyEncryptionKey and
+// Password; MGFAlgorithm and OAEPParams except for RSA-OAEP;
+// KeyEncryptionKey, Password and RecipientDH with RSA-OAEP;
+// DigestAlgorithm and KeyAgreementAlgorithm under a KeyEncryptionKey or
+// Password, which use no digest and agree no key; RecipientKeyName
+// without RecipientDH; and MasterKey and DirectKeyAgreement, which make no
+// EncryptedKey. GenerateEncryptedKey and every Encrypt function refuse
+// PBKDF2Iterations set without Password, or outside MinPBKDF2Iterations to
+// MaxPBKDF2Iterations. The fields of the EncryptedData alone, such as
+// DataID, MimeType or EncryptionProperties, are ignored by
+// GenerateEncryptedKey, so that the same options can make both.
 type EncryptOptions struct {
 	// DataAlgorithm is an Enc*GCM constant. Required. The CBC ones are
 	// decryption-only and refused.
@@ -105,16 +130,22 @@ type EncryptOptions struct {
 	// EC Recipient, under a key agreed by KeyAgreementAlgorithm.
 	KeyTransportAlgorithm string
 
-	// MGFAlgorithm is MGF1SHA256, 384 or 512, required for RSA-OAEP. It is
-	// emitted as an explicit xenc11:MGF element: omitting it means SHA-1
-	// MGF by specification default.
+	// MGFAlgorithm is MGF1SHA256, 384 or 512, required for RSA-OAEP and
+	// refused with any other KeyTransportAlgorithm. It is emitted as an
+	// explicit xenc11:MGF element: omitting it means SHA-1 MGF by
+	// specification default.
 	MGFAlgorithm string
 
-	// DigestAlgorithm is a SHA-2 Digest* constant: the OAEP digest for
-	// RSA-OAEP, the ConcatKDF digest for key agreement. Required for both.
+	// DigestAlgorithm is a SHA-2 Digest* constant, or
+	// xmlsec.DigestSHA384XMLEnc (section 5.8.3): the OAEP digest for
+	// RSA-OAEP, the ConcatKDF digest for key agreement and MasterKey, the
+	// Legacy KDF digest for xmlsec.KeyAgreementDH. Required for each, and
+	// emitted as given. GenerateEncryptedKey refuses it under a
+	// KeyEncryptionKey or Password, which use no digest.
 	DigestAlgorithm string
 
-	// OAEPParams is the optional OAEP label. Normally empty.
+	// OAEPParams is the optional OAEP label. Normally empty; refused with
+	// any KeyTransportAlgorithm but RSA-OAEP.
 	OAEPParams []byte
 
 	// Recipient is the certificate whose public key protects the session
@@ -124,12 +155,14 @@ type EncryptOptions struct {
 	// KeyAgreementAlgorithm is xmlsec.KeyAgreementECDHES, required when
 	// Recipient holds an EC key. The KEK is derived with ConcatKDF. With
 	// RecipientDH it is xmlsec.KeyAgreementDHES or KeyAgreementDH.
+	// GenerateEncryptedKey refuses it without either, or with RSA-OAEP.
 	KeyAgreementAlgorithm string
 
 	// KeyEncryptionKey is a shared AES key wrapping the session key under
 	// a KeyWrap* algorithm of its size, when there is no Recipient. The
 	// EncryptedKey then names no key; identify it with SetKeyInfo, such as
-	// a ds:KeyName.
+	// a ds:KeyName. Refused with RSA-OAEP, and beside Recipient,
+	// RecipientDH or Password.
 	KeyEncryptionKey []byte
 
 	// CarriedKeyName, if set, is emitted as the EncryptedKey's
@@ -159,23 +192,28 @@ type EncryptOptions struct {
 	// a KeyWrap* algorithm under a key agreed by KeyAgreementAlgorithm
 	// xmlsec.KeyAgreementDHES (ConcatKDF) or xmlsec.KeyAgreementDH (the
 	// Legacy KDF), with DigestAlgorithm, when there is no Recipient.
+	// Refused with RSA-OAEP.
 	RecipientDH *DHPublicKey
 
 	// RecipientKeyName, if set, names the RecipientDH key in the
 	// RecipientKeyInfo as a ds:KeyName, instead of its public value in an
 	// xenc:DHKeyValue. xmlsec1 finds a recipient's DH key only by name.
+	// GenerateEncryptedKey refuses it without RecipientDH.
 	RecipientKeyName string
 
 	// Password, when set and there is no other key, derives the KEK of a
 	// KeyWrap* algorithm by PBKDF2 with HMAC-SHA256, a fresh 16-octet salt
 	// and PBKDF2Iterations. Given to an Encrypt function with no session
 	// key, it derives the data key the same way, named by an
-	// xenc11:DerivedKey in the EncryptedData's ds:KeyInfo.
+	// xenc11:DerivedKey in the EncryptedData's ds:KeyInfo. Refused with
+	// RSA-OAEP.
 	Password []byte
 
 	// PBKDF2Iterations is the PBKDF2 iteration count for Password, from
 	// MinPBKDF2Iterations to MaxPBKDF2Iterations. Zero means
-	// DefaultPBKDF2Iterations.
+	// DefaultPBKDF2Iterations. Any other value without Password, or
+	// outside that range, is refused by GenerateEncryptedKey and every
+	// Encrypt function.
 	PBKDF2Iterations int
 
 	// Type, if set, is the Type attribute of the xenc:EncryptedData that
@@ -217,7 +255,8 @@ type EncryptOptions struct {
 	// in the EncryptedData's ds:KeyInfo (section 3.5.2). A fresh 16-octet
 	// PartyUInfo makes each derived key new. It must be at least as long as
 	// the data key. A receiver sharing it calls FindDerivedKey and
-	// DeriveKey.
+	// DeriveKey. GenerateEncryptedKey refuses it: it makes no
+	// EncryptedKey.
 	MasterKey []byte
 
 	// DerivedKeyName and MasterKeyName, if set, are emitted as the
@@ -230,7 +269,8 @@ type EncryptOptions struct {
 	// RecipientDH, by KeyAgreementAlgorithm and DigestAlgorithm, and puts
 	// the xenc:AgreementMethod in the EncryptedData's ds:KeyInfo, with no
 	// EncryptedKey (section 5.6). A receiver calls DecryptAgreedDataKey or
-	// DecryptAgreedDataKeyDH.
+	// DecryptAgreedDataKeyDH. GenerateEncryptedKey refuses it: it makes no
+	// EncryptedKey.
 	DirectKeyAgreement bool
 
 	// DataKeyInfo, if set, is placed in a ds:KeyInfo of each
@@ -267,10 +307,11 @@ var wrapSizes = map[string]int{
 
 // DecryptOptions restricts the algorithms the Decrypt and Unwrap functions
 // accept. Every list is checked before any cryptographic work. An empty list
-// means the default set: every secure algorithm this package implements in
-// that role. A list can never enable an algorithm this package does not
-// implement, and a legacy algorithm (see the package documentation) is
-// accepted only when named. Each function reads only the lists that apply
+// means the default set each field documents: the recommended algorithms
+// of that role, which leave out the OPTIONAL finite-field Diffie-Hellman,
+// PBKDF2, MGF1 with SHA-224 and HMAC-SHA1 PRF. A list can never enable an
+// algorithm this package does not implement, and an OPTIONAL or legacy
+// algorithm (see the package documentation) is accepted only when named. Each function reads only the lists that apply
 // to it.
 type DecryptOptions struct {
 	// AllowedDataAlgorithms restricts the EncryptedData EncryptionMethod.
@@ -353,6 +394,17 @@ type DecryptOptions struct {
 	// EncryptionMethod is xmlsec.ErrMalformed.
 	ImpliedDataAlgorithm, ImpliedKeyWrapAlgorithm, ImpliedKeyTransportAlgorithm string
 
+	// ImpliedKeyDerivationMethod is the xenc11:KeyDerivationMethod, with
+	// its parameters, of an xenc11:DerivedKey that has none, which section
+	// 3.5.2 leaves to be known by the recipient, for DeriveKey and
+	// UnwrapEncryptedKeyPassword. It is an element rather than an
+	// algorithm URI because every key derivation algorithm takes
+	// parameters: ConcatKDF its ds:DigestMethod, PBKDF2 its salt and
+	// iteration count. It is used only when the DerivedKey has none, and
+	// passes the same allow-lists and checks an explicit one would. Nil, a
+	// missing KeyDerivationMethod is xmlsec.ErrMalformed.
+	ImpliedKeyDerivationMethod *xdm.Node
+
 	// StrictBSP enforces the WS-I Basic Security Profile 1.1 rules on the
 	// shape of what is decrypted, before any cryptographic work, refusing
 	// with xmlsec.ErrMalformed:
@@ -434,18 +486,25 @@ func digest(kind, v string, list []string) (crypto.Hash, error) {
 	if err := allowed(kind, v, list, defaultDigest); err != nil {
 		return 0, err
 	}
-	switch v {
-	case xmlsec.DigestSHA384XMLEnc:
-		return crypto.SHA384, nil
-	case xmlsec.DigestSHA1:
+	if v == xmlsec.DigestSHA1 {
 		// Allowed only by name: never in defaultDigest.
 		return crypto.SHA1, nil
 	}
-	h, ok := hashes.Digest(v)
+	h, ok := encDigest(v)
 	if !ok {
 		return 0, unsupported("%s %q", kind, v)
 	}
 	return h, nil
+}
+
+// encDigest returns the hash of a secure RSA-OAEP or key derivation digest
+// URI: a SHA-2 Digest* constant, or xmlsec.DigestSHA384XMLEnc, the SHA-384
+// identifier section 5.8.3 gives.
+func encDigest(uri string) (crypto.Hash, bool) {
+	if uri == xmlsec.DigestSHA384XMLEnc {
+		return crypto.SHA384, true
+	}
+	return hashes.Digest(uri)
 }
 
 func element(parent *xdm.Node, local string) *xdm.Node {
@@ -489,8 +548,7 @@ func newEncryptedData(typ string, opts EncryptOptions) (*xdm.Node, error) {
 		if k.Kind != xdm.KindElement || k.Parent != nil || k.IsElement(xmlsec.NSDSig, "KeyInfo") {
 			return nil, errors.New("xenc: DataKeyInfo must be a detached element to go inside ds:KeyInfo")
 		}
-		nsElement(ed, "ds", xmlsec.NSDSig, "KeyInfo").AppendChild(xmltree.Clone(k))
-		place(ed)
+		newKeyInfo(ed).AppendChild(xmltree.Clone(k))
 	}
 	return ed, nil
 }

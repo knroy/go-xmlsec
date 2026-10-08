@@ -64,7 +64,9 @@ func FindEncryptedKey(el *xdm.Node) (*xdm.Node, error) {
 // xenc:EncryptedData or xenc:EncryptedKey, found the ways sections 3.5.2
 // and 3.6 provide, as FindEncryptedKey finds an EncryptedKey: an
 // xenc11:DerivedKey in el's ds:KeyInfo, a same-document ds:RetrievalMethod
-// with Type TypeDerivedKey (or several naming the same element), a
+// with Type TypeDerivedKey, or the xenc11 namespace's
+// "http://www.w3.org/2009/xmlenc11#DerivedKey" that section 3.5.3 names
+// (or several naming the same element), a
 // ds:KeyName equal to the xenc11:DerivedKeyName of exactly one DerivedKey
 // in the document, or, when el has no ds:KeyInfo, the one DerivedKey whose
 // xenc:ReferenceList has a DataReference or KeyReference to el's Id.
@@ -143,8 +145,11 @@ func inKeyInfo(el, ki *xdm.Node, k keyKind) (*xdm.Node, error) {
 // retrieve resolves rm, a ds:RetrievalMethod, to the key element of kind k
 // it names in el's document.
 func retrieve(el, rm *xdm.Node, k keyKind) (*xdm.Node, error) {
-	uri := rm.AttrValue("URI")
-	if rm.AttrValue("Type") != k.typ || !strings.HasPrefix(uri, "#") || len(rm.ChildElements()) > 0 {
+	uri, typ := rm.AttrValue("URI"), rm.AttrValue("Type")
+	if k == derivedKeyKind && typ == typeDerivedKey11 {
+		typ = k.typ
+	}
+	if typ != k.typ || !strings.HasPrefix(uri, "#") || len(rm.ChildElements()) > 0 {
 		return nil, fmt.Errorf("%w: only a same-document ds:RetrievalMethod of Type %s without transforms", xmlsec.ErrUnsupportedKeyInfo, k.typ)
 	}
 	t, err := idref.Find(el, uri[1:], idAttr)

@@ -7,7 +7,6 @@ import (
 
 	"github.com/knroy/go-xml/xdm"
 	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/hashes"
 	"github.com/knroy/go-xmlsec/internal/xmltree"
 )
 
@@ -16,10 +15,11 @@ import (
 const partyUSize = 16
 
 // derivedKeyMethod returns the xenc11:KeyDerivationMethod of dk, an
-// xenc11:DerivedKey. Beside it the schema allows an xenc:ReferenceList, a
-// DerivedKeyName and a MasterKeyName (section 3.5.2), which are ignored
-// here: the master key is the caller's choice.
-func derivedKeyMethod(dk *xdm.Node) (*xdm.Node, error) {
+// xenc11:DerivedKey, or, when it has none, implied. Beside it the schema
+// allows an xenc:ReferenceList, a DerivedKeyName and a MasterKeyName
+// (section 3.5.2), which are ignored here: the master key is the caller's
+// choice.
+func derivedKeyMethod(dk, implied *xdm.Node) (*xdm.Node, error) {
 	if dk == nil || !dk.IsElement(xmlsec.NSXEnc11, "DerivedKey") {
 		return nil, malformed("not an xenc11:DerivedKey")
 	}
@@ -34,10 +34,15 @@ func derivedKeyMethod(dk *xdm.Node) (*xdm.Node, error) {
 			return nil, malformed("unexpected %s in xenc11:DerivedKey", k.Name.Local)
 		}
 	}
-	if kdm == nil {
+	switch {
+	case kdm != nil:
+		return kdm, nil
+	case implied == nil:
 		return nil, malformed("xenc11:DerivedKey without xenc11:KeyDerivationMethod")
+	case !implied.IsElement(xmlsec.NSXEnc11, "KeyDerivationMethod"):
+		return nil, errors.New("xenc: DecryptOptions.ImpliedKeyDerivationMethod must be an xenc11:KeyDerivationMethod")
 	}
-	return kdm, nil
+	return implied, nil
 }
 
 // DeriveKey derives from master the key that dk, an xenc11:DerivedKey,
@@ -74,7 +79,7 @@ func DeriveKey(dk, target *xdm.Node, master []byte, opts DecryptOptions) ([]byte
 		}
 		size, _ = dataKeySize(alg)
 	}
-	kdm, err := derivedKeyMethod(dk)
+	kdm, err := derivedKeyMethod(dk, opts.ImpliedKeyDerivationMethod)
 	if err != nil {
 		return nil, err
 	}
@@ -94,6 +99,9 @@ func DeriveKey(dk, target *xdm.Node, master []byte, opts DecryptOptions) ([]byte
 // opts.DirectKeyAgreement. With none of those it returns nil, which the
 // encryption refuses.
 func dataKey(ed *xdm.Node, sessionKey []byte, opts EncryptOptions) ([]byte, error) {
+	if err := pbkdf2Iterations(opts); err != nil {
+		return nil, err
+	}
 	master, direct, password := opts.MasterKey != nil, opts.DirectKeyAgreement, len(opts.Password) > 0
 	if sessionKey != nil {
 		if master || direct {
@@ -142,7 +150,7 @@ func dataKey(ed *xdm.Node, sessionKey []byte, opts EncryptOptions) ([]byte, erro
 // holding the xenc11:DerivedKey that names it. OtherInfo is the data
 // algorithm and a fresh PartyUInfo.
 func masterKey(ed *xdm.Node, size int, opts EncryptOptions) ([]byte, error) {
-	h, ok := hashes.Digest(opts.DigestAlgorithm)
+	h, ok := encDigest(opts.DigestAlgorithm)
 	if !ok {
 		return nil, unsupported("ConcatKDF digest %q", opts.DigestAlgorithm)
 	}
@@ -153,7 +161,7 @@ func masterKey(ed *xdm.Node, size int, opts EncryptOptions) ([]byte, error) {
 	rand.Read(partyU)
 	key := concatKDF(h, opts.MasterKey, append([]byte(opts.DataAlgorithm), partyU...), size)
 
-	dk := nsElement(nsElement(ed, "ds", xmlsec.NSDSig, "KeyInfo"), "xenc11", xmlsec.NSXEnc11, "DerivedKey")
+	dk := nsElement(newKeyInfo(ed), "xenc11", xmlsec.NSXEnc11, "DerivedKey")
 	concatKDFMethod(dk, opts.DataAlgorithm, partyU, opts.DigestAlgorithm)
 	if opts.DerivedKeyName != "" {
 		xmltree.Text(xmltree.Element(dk, "xenc11", xmlsec.NSXEnc11, "DerivedKeyName"), opts.DerivedKeyName)

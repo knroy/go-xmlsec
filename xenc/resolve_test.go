@@ -175,6 +175,8 @@ func TestFindDerivedKey(t *testing.T) {
 	}{
 		{"inline", `<r ` + resolveNS + `>` + resolveDK(`Id="decoy"`, ``) + resolveED(``, resolveDK(`Id="want"`, ``)) + `</r>`, "EncryptedData"},
 		{"RetrievalMethod", `<r ` + resolveNS + `>` + resolveDK(`Id="dk" Recipient="want"`, ``) + resolveED(``, rm) + `</r>`, "EncryptedData"},
+		{"RetrievalMethod of the xenc11 Type", `<r ` + resolveNS + `>` + resolveDK(`Id="dk" Recipient="want"`, ``) +
+			resolveED(``, `<ds:RetrievalMethod Type="http://www.w3.org/2009/xmlenc11#DerivedKey" URI="#dk"/>`) + `</r>`, "EncryptedData"},
 		{"two RetrievalMethods to one", `<r ` + resolveNS + `>` + resolveDK(`Id="dk" Recipient="want"`, ``) + resolveED(``, rm+rm) + `</r>`, "EncryptedData"},
 		{"KeyName", `<r ` + resolveNS + `>` + resolveDK(`Id="n1"`, `<xenc11:DerivedKeyName>other</xenc11:DerivedKeyName>`) +
 			resolveDK(`Id="want"`, `<xenc11:DerivedKeyName>dk</xenc11:DerivedKeyName>`) + resolveED(``, `<ds:KeyName>dk</ds:KeyName>`) + `</r>`, "EncryptedData"},
@@ -201,6 +203,8 @@ func TestFindDerivedKey(t *testing.T) {
 		{"EncryptedKey in KeyInfo", `<r ` + resolveNS + `>` + resolveED(``, resolveEK(``, ``)) + `</r>`, "EncryptedData", xmlsec.ErrUnsupportedKeyInfo},
 		{"RetrievalMethod of Type EncryptedKey", `<r ` + resolveNS + `>` + resolveDK(`Id="dk"`, ``) +
 			resolveED(``, `<ds:RetrievalMethod Type="`+xenc.TypeEncryptedKey+`" URI="#dk"/>`) + `</r>`, "EncryptedData", xmlsec.ErrUnsupportedKeyInfo},
+		{"other xenc11 Type", `<r ` + resolveNS + `>` + resolveDK(`Id="dk"`, ``) +
+			resolveED(``, `<ds:RetrievalMethod Type="http://www.w3.org/2009/xmlenc11#EncryptedKey" URI="#dk"/>`) + `</r>`, "EncryptedData", xmlsec.ErrUnsupportedKeyInfo},
 		{"RetrievalMethod to an EncryptedKey", `<r ` + resolveNS + `>` + resolveEK(`Id="dk"`, ``) + resolveED(``, rm) + `</r>`, "EncryptedData", xmlsec.ErrMalformed},
 		{"two RetrievalMethods apart", `<r ` + resolveNS + `>` + resolveDK(`Id="dk"`, ``) + resolveDK(`Id="d2"`, ``) +
 			resolveED(``, rm+`<ds:RetrievalMethod Type="`+xenc.TypeDerivedKey+`" URI="#d2"/>`) + `</r>`, "EncryptedData", xmlsec.ErrAmbiguousID},

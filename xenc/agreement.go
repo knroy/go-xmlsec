@@ -13,7 +13,6 @@ import (
 
 	"github.com/knroy/go-xml/xdm"
 	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/hashes"
 	"github.com/knroy/go-xmlsec/internal/xmltree"
 )
 
@@ -43,23 +42,43 @@ func concatKDF(h crypto.Hash, z, otherInfo []byte, size int) []byte {
 // to form OtherInfo.
 var kdfParams = []string{"AlgorithmID", "PartyUInfo", "PartyVInfo", "SuppPubInfo", "SuppPrivInfo"}
 
-// otherInfo decodes and concatenates the ConcatKDFParams attributes. Each
-// is hexBinary whose first octet counts the padding bits of the last
-// (section 5.4.1); only byte-aligned strings are accepted, as xmlsec1 and
-// Santuario do, and the count octet is dropped. An absent or empty
-// attribute is the empty string.
+// otherInfo decodes the ConcatKDFParams attributes and concatenates them
+// into OtherInfo. Each is hexBinary whose first octet counts the zero
+// padding bits of the last (section 5.4.1), and the bit strings are
+// concatenated unpadded, so they need not each be whole octets. A total
+// that is not whole octets, which a hash over octets cannot take, is
+// xmlsec.ErrUnsupportedAlgorithm. An absent or empty attribute is the
+// empty string.
 func otherInfo(p *xdm.Node) ([]byte, error) {
 	var out []byte
+	bits := 0 // the bits of out; those past it in its last octet are zero
 	for _, name := range kdfParams {
 		v := p.AttrValue(name)
 		if v == "" {
 			continue
 		}
 		b, err := hex.DecodeString(v)
-		if err != nil || b[0] != 0 {
-			return nil, unsupported("ConcatKDFParams %s %q: only a byte-aligned hexBinary bit string is supported", name, v)
+		if err != nil || b[0] > 7 || b[0] > 0 && (len(b) == 1 || b[len(b)-1]&(1<<b[0]-1) != 0) {
+			return nil, malformed("ConcatKDFParams %s %q is not a padded hexBinary bit string", name, v)
 		}
-		out = append(out, b[1:]...)
+		for i, o := range b[1:] {
+			n := 8
+			if i == len(b)-2 {
+				n -= int(b[0])
+			}
+			if used := bits % 8; used == 0 {
+				out = append(out, o)
+			} else {
+				out[len(out)-1] |= o >> used
+				if n > 8-used {
+					out = append(out, o<<(8-used))
+				}
+			}
+			bits += n
+		}
+	}
+	if bits%8 != 0 {
+		return nil, unsupported("ConcatKDFParams of %d bits: only whole octets can be hashed", bits)
 	}
 	return out, nil
 }
@@ -80,7 +99,7 @@ func agree(ek *xdm.Node, alg string, size int, opts EncryptOptions) ([]byte, err
 	if err != nil {
 		return nil, unsupported("ECDH-ES on %s: %v", pub.Curve.Params().Name, err)
 	}
-	h, ok := hashes.Digest(opts.DigestAlgorithm)
+	h, ok := encDigest(opts.DigestAlgorithm)
 	if !ok {
 		return nil, unsupported("ConcatKDF digest %q", opts.DigestAlgorithm)
 	}
@@ -104,7 +123,7 @@ func agree(ek *xdm.Node, alg string, size int, opts EncryptOptions) ([]byte, err
 // newAgreementMethod adds to ek a ds:KeyInfo holding an
 // xenc:AgreementMethod of alg, and returns the AgreementMethod.
 func newAgreementMethod(ek *xdm.Node, alg string) *xdm.Node {
-	am := element(nsElement(ek, "ds", xmlsec.NSDSig, "KeyInfo"), "AgreementMethod")
+	am := element(newKeyInfo(ek), "AgreementMethod")
 	xmltree.SetAttr(am, "", "", "Algorithm", alg)
 	return am
 }
@@ -322,7 +341,9 @@ func concatKDFParams(kdm *xdm.Node, size int, opts DecryptOptions) (func([]byte)
 // key agreement and ConcatKDF digest algorithms. Its key derivation list
 // restricts the KDF: PBKDF2 (section 5.4.2), with the shared secret as its
 // password, is accepted only when named there, and its PRF only from
-// AllowedPRFAlgorithms. Callers with an *ecdsa.PrivateKey pass its ECDH().
+// AllowedPRFAlgorithms. Callers with an *ecdsa.PrivateKey convert it with
+// its ECDH method, which returns the *ecdh.PrivateKey and an error, and
+// pass the key.
 // For finite-field Diffie-Hellman use DecryptAgreedKeyDH, and for an
 // AgreementMethod directly under an EncryptedData DecryptAgreedDataKey.
 func DecryptAgreedKey(el *xdm.Node, priv *ecdh.PrivateKey, opts DecryptOptions) ([]byte, error) {

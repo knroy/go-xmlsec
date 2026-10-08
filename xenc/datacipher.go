@@ -310,6 +310,11 @@ func dataCiphertext(el *xdm.Node, opts DecryptOptions) ([]byte, error) {
 		return cipherValue(cd)
 	}
 	cr := kids[0]
+	// The schema requires URI (section 3.3.1); only a present URI="" means
+	// the whole document.
+	if cr.Attr("", "URI") == nil {
+		return nil, malformed("xenc:CipherReference without a URI attribute")
+	}
 	uri := cr.AttrValue("URI")
 	ext, err := externalURI(uri, opts)
 	if err != nil {

@@ -15,6 +15,9 @@ import (
 // that FindEncryptedKey on that EncryptedKey finds this one; it must be an
 // NCName.
 func (ek *EncryptedKey) AddKeyReference(id string) error {
+	if err := ek.check(); err != nil {
+		return err
+	}
 	if !xdm.IsNCName(id) {
 		return fmt.Errorf("xenc: key reference %q is not an NCName", id)
 	}

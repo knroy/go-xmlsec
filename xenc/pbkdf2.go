@@ -120,16 +120,28 @@ func positiveInteger(e *xdm.Node) (int, error) {
 	return n, nil
 }
 
+// pbkdf2Iterations refuses an EncryptOptions.PBKDF2Iterations set without
+// a Password, which it would have no effect on, or outside
+// MinPBKDF2Iterations to MaxPBKDF2Iterations.
+func pbkdf2Iterations(opts EncryptOptions) error {
+	switch n := opts.PBKDF2Iterations; {
+	case n == 0:
+		return nil
+	case len(opts.Password) == 0:
+		return errors.New("xenc: EncryptOptions.PBKDF2Iterations without a Password")
+	case n < MinPBKDF2Iterations || n > MaxPBKDF2Iterations:
+		return fmt.Errorf("xenc: PBKDF2Iterations %d, outside %d to %d", n, MinPBKDF2Iterations, MaxPBKDF2Iterations)
+	}
+	return nil
+}
+
 // passwordKEK derives a KEK of size octets from opts.Password by PBKDF2
 // with HMAC-SHA256, and adds to ek the ds:KeyInfo holding the
 // xenc11:DerivedKey that names its parameters.
 func passwordKEK(ek *xdm.Node, size int, opts EncryptOptions) ([]byte, error) {
-	iter := opts.PBKDF2Iterations
+	iter := opts.PBKDF2Iterations // checked by pbkdf2Iterations
 	if iter == 0 {
 		iter = DefaultPBKDF2Iterations
-	}
-	if iter < MinPBKDF2Iterations || iter > MaxPBKDF2Iterations {
-		return nil, fmt.Errorf("xenc: PBKDF2Iterations %d, outside %d to %d", iter, MinPBKDF2Iterations, MaxPBKDF2Iterations)
 	}
 	salt := make([]byte, pbkdf2SaltSize)
 	rand.Read(salt)
@@ -137,7 +149,7 @@ func passwordKEK(ek *xdm.Node, size int, opts EncryptOptions) ([]byte, error) {
 	// PRF is SHA-256, which even FIPS 140-only mode accepts.
 	kek, _ := pbkdf2.Key(crypto.SHA256.New, string(opts.Password), salt, iter, size)
 
-	dk := nsElement(nsElement(ek, "ds", xmlsec.NSDSig, "KeyInfo"), "xenc11", xmlsec.NSXEnc11, "DerivedKey")
+	dk := nsElement(newKeyInfo(ek), "xenc11", xmlsec.NSXEnc11, "DerivedKey")
 	kdm := xmltree.Element(dk, "xenc11", xmlsec.NSXEnc11, "KeyDerivationMethod")
 	xmltree.SetAttr(kdm, "", "", "Algorithm", xmlsec.KeyDerivationPBKDF2)
 	params := xmltree.Element(kdm, "xenc11", xmlsec.NSXEnc11, "PBKDF2-params")
@@ -184,7 +196,7 @@ func UnwrapEncryptedKeyPassword(el *xdm.Node, password []byte, opts DecryptOptio
 	if err != nil {
 		return nil, err
 	}
-	kdm, err := derivedKeyMethod(dk)
+	kdm, err := derivedKeyMethod(dk, opts.ImpliedKeyDerivationMethod)
 	if err != nil {
 		return nil, err
 	}

@@ -2,6 +2,7 @@ package xenc_test
 
 import (
 	"bytes"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha1" // #nosec G505 -- the test sender of the SHA-1 an implied rsa-oaep means
@@ -77,4 +78,56 @@ func TestImpliedAlgorithms(t *testing.T) {
 // covEMCanon is an EncryptionMethod as canonical XML writes it.
 func covEMCanon(alg string) string {
 	return `<xenc:EncryptionMethod Algorithm="` + alg + `"></xenc:EncryptionMethod>`
+}
+
+// Section 5.8.3: the SHA-384 identifier of XML Encryption is accepted as
+// the RSA-OAEP, ConcatKDF and Legacy KDF digest on encryption too, and
+// emitted as given.
+func TestDigestSHA384XMLEnc(t *testing.T) {
+	const sha384 = xmlsec.DigestSHA384XMLEnc
+	oaep := as4Opts(t)
+	oaep.DigestAlgorithm = sha384
+	ek, err := xenc.GenerateEncryptedKey(oaep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key, err := xenc.DecryptEncryptedKey(reparse(t, ek.Element), recipientKey, xenc.DecryptOptions{}); err != nil || !bytes.Equal(key, ek.SessionKey) {
+		t.Fatalf("RSA-OAEP: %v", err)
+	}
+
+	r := newECRecipient(t, elliptic.P256(), xmlsec.KeyWrapAES128)
+	r.opts.DigestAlgorithm = sha384
+	ek, err = xenc.GenerateEncryptedKey(r.opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key, err := xenc.DecryptAgreedKey(reparse(t, ek.Element), r.priv, xenc.DecryptOptions{}); err != nil || !bytes.Equal(key, ek.SessionKey) {
+		t.Fatalf("ECDH-ES: %v", err)
+	}
+
+	dh := dhKey(t, modp2048)
+	ek, err = xenc.GenerateEncryptedKey(dhOpts(dh, xmlsec.KeyAgreementDH, xmlsec.KeyWrapAES128, sha384))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key, err := xenc.DecryptAgreedKeyDH(reparse(t, ek.Element), dh, dhAllow(xmlsec.KeyAgreementDH)); err != nil || !bytes.Equal(key, ek.SessionKey) {
+		t.Fatalf("DH: %v", err)
+	}
+
+	master := bytes.Repeat([]byte{9}, 32)
+	ed := dkEncrypt(t, xenc.EncryptOptions{DataAlgorithm: xmlsec.EncAES128GCM, DigestAlgorithm: sha384, MasterKey: master})
+	if !strings.Contains(dkString(t, ed), `Algorithm="`+sha384+`"`) {
+		t.Fatal("digest not emitted as given")
+	}
+	dk, err := xenc.FindDerivedKey(ed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := xenc.DeriveKey(dk, ed, master, xenc.DecryptOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := xenc.DecryptData(ed, key, xenc.DecryptOptions{}); err != nil {
+		t.Fatal(err)
+	}
 }

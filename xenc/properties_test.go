@@ -2,6 +2,7 @@ package xenc_test
 
 import (
 	"bytes"
+	"crypto/elliptic"
 	"strings"
 	"testing"
 
@@ -137,5 +138,52 @@ func TestEncryptedKeySchemaOrder(t *testing.T) {
 	}
 	if got := childNames(ek.Element); got != "EncryptionMethod,KeyInfo,CipherData,ReferenceList,CarriedKeyName" {
 		t.Fatalf("children %s", got)
+	}
+}
+
+// Section 3.1: with EncryptionProperties, a ds:KeyInfo the EncryptedData's
+// own key adds still goes before CipherData, so the key is found again.
+func TestEncryptionPropertiesWithKeyInfo(t *testing.T) {
+	master, pw := bytes.Repeat([]byte{9}, 32), []byte("pw")
+	r := newECRecipient(t, elliptic.P256(), "")
+	r.opts.DirectKeyAgreement = true
+	for name, c := range map[string]struct {
+		opts   xenc.EncryptOptions
+		derive func(ed *xdm.Node) ([]byte, error)
+	}{
+		"MasterKey": {xenc.EncryptOptions{DataAlgorithm: xmlsec.EncAES128GCM, DigestAlgorithm: xmlsec.DigestSHA256, MasterKey: master},
+			func(ed *xdm.Node) ([]byte, error) {
+				dk, err := xenc.FindDerivedKey(ed)
+				if err != nil {
+					return nil, err
+				}
+				return xenc.DeriveKey(dk, ed, master, xenc.DecryptOptions{})
+			}},
+		"Password": {xenc.EncryptOptions{DataAlgorithm: xmlsec.EncAES128GCM, Password: pw, PBKDF2Iterations: xenc.MinPBKDF2Iterations},
+			func(ed *xdm.Node) ([]byte, error) {
+				dk, err := xenc.FindDerivedKey(ed)
+				if err != nil {
+					return nil, err
+				}
+				return xenc.DeriveKey(dk, ed, pw, xenc.DecryptOptions{AllowedKeyDerivationAlgorithms: []string{xmlsec.KeyDerivationPBKDF2}})
+			}},
+		"DirectKeyAgreement": {r.opts, func(ed *xdm.Node) ([]byte, error) {
+			return xenc.DecryptAgreedDataKey(ed, r.priv, xenc.DecryptOptions{})
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c.opts.EncryptionProperties = []*xdm.Node{property(t)}
+			ed := dkEncrypt(t, c.opts)
+			if got := childNames(ed); got != "EncryptionMethod,KeyInfo,CipherData,EncryptionProperties" {
+				t.Fatalf("children %s", got)
+			}
+			key, err := c.derive(ed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := xenc.DecryptData(ed, key, xenc.DecryptOptions{}); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }

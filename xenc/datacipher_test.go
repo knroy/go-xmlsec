@@ -419,6 +419,8 @@ func TestSameDocumentCipherReference(t *testing.T) {
 		"transform params":   {wrap(ref("#cv", `<xenc:Transforms><ds:Transform xmlns:ds="`+xmlsec.NSDSig+`" Algorithm="`+xmlsec.TransformBase64+`"><p/></ds:Transform></xenc:Transforms>`)), xmlsec.ErrMalformed},
 		"not ds:Transform":   {wrap(ref("#cv", `<xenc:Transforms><xenc:Transform Algorithm="`+xmlsec.TransformBase64+`"/></xenc:Transforms>`)), xmlsec.ErrMalformed},
 		"two CipherRef kids": {wrap(ref("#cv", base64T+base64T)), xmlsec.ErrMalformed},
+		// The schema requires URI: no attribute is not URI="".
+		"no URI attribute": {`<r>` + b64 + strings.Replace(ref("", base64T), ` URI=""`, ``, 1) + `</r>`, xmlsec.ErrMalformed},
 	} {
 		t.Run(name, func(t *testing.T) {
 			pt, err := xenc.DecryptData(firstNamed(covParse(t, c.doc), "EncryptedData"), key, xenc.DecryptOptions{})

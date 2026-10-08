@@ -352,3 +352,68 @@ func TestDecryptEncryptedKeyCipherReference(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+// A nil or zero-value EncryptedKey, or one whose Element is not an
+// xenc:EncryptedKey, is an error from every method, never a panic.
+func TestEncryptedKeyMethodsNilReceiver(t *testing.T) {
+	for name, ek := range map[string]*xenc.EncryptedKey{
+		"nil":           nil,
+		"zero":          {},
+		"other element": {Element: xmltree.Element(nil, "", "", "x")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := ek.AddDataReference("d"); err == nil {
+				t.Fatal("AddDataReference")
+			}
+			if err := ek.AddKeyReference("k"); err == nil {
+				t.Fatal("AddKeyReference")
+			}
+			if err := ek.SetKeyInfo(xmltree.Element(nil, "ds", xmlsec.NSDSig, "KeyName")); err == nil {
+				t.Fatal("SetKeyInfo")
+			}
+		})
+	}
+}
+
+// An option with no effect on the EncryptedKey made, or contradicting it,
+// is refused rather than ignored.
+func TestGenerateEncryptedKeyInapplicableOptions(t *testing.T) {
+	kek := xenc.EncryptOptions{DataAlgorithm: xmlsec.EncAES128GCM, KeyTransportAlgorithm: xmlsec.KeyWrapAES128, KeyEncryptionKey: make([]byte, 16)}
+	pw := xenc.EncryptOptions{DataAlgorithm: xmlsec.EncAES128GCM, KeyTransportAlgorithm: xmlsec.KeyWrapAES128, Password: []byte("pw"), PBKDF2Iterations: xenc.MinPBKDF2Iterations}
+	ec := newECRecipient(t, elliptic.P256(), xmlsec.KeyWrapAES128).opts
+	for name, c := range map[string]struct {
+		base xenc.EncryptOptions
+		mod  func(*xenc.EncryptOptions)
+	}{
+		"KEK, MGFAlgorithm":               {kek, func(o *xenc.EncryptOptions) { o.MGFAlgorithm = xmlsec.MGF1SHA256 }},
+		"KEK, OAEPParams":                 {kek, func(o *xenc.EncryptOptions) { o.OAEPParams = []byte("l") }},
+		"KEK, DigestAlgorithm":            {kek, func(o *xenc.EncryptOptions) { o.DigestAlgorithm = xmlsec.DigestSHA256 }},
+		"KEK, KeyAgreementAlgorithm":      {kek, func(o *xenc.EncryptOptions) { o.KeyAgreementAlgorithm = xmlsec.KeyAgreementECDHES }},
+		"KEK, RecipientKeyName":           {kek, func(o *xenc.EncryptOptions) { o.RecipientKeyName = "r" }},
+		"KEK, DirectKeyAgreement":         {kek, func(o *xenc.EncryptOptions) { o.DirectKeyAgreement = true }},
+		"KEK, MasterKey":                  {kek, func(o *xenc.EncryptOptions) { o.MasterKey = make([]byte, 32) }},
+		"KEK, PBKDF2Iterations":           {kek, func(o *xenc.EncryptOptions) { o.PBKDF2Iterations = xenc.MinPBKDF2Iterations }},
+		"Password, DigestAlgorithm":       {pw, func(o *xenc.EncryptOptions) { o.DigestAlgorithm = xmlsec.DigestSHA256 }},
+		"Password, 999 iterations":        {pw, func(o *xenc.EncryptOptions) { o.PBKDF2Iterations = 999 }},
+		"ECDH-ES, MGFAlgorithm":           {ec, func(o *xenc.EncryptOptions) { o.MGFAlgorithm = xmlsec.MGF1SHA256 }},
+		"ECDH-ES, RecipientKeyName":       {ec, func(o *xenc.EncryptOptions) { o.RecipientKeyName = "r" }},
+		"RSA-OAEP, KeyEncryptionKey":      {as4Opts(t), func(o *xenc.EncryptOptions) { o.KeyEncryptionKey = make([]byte, 16) }},
+		"RSA-OAEP, Password":              {as4Opts(t), func(o *xenc.EncryptOptions) { o.Password = []byte("pw") }},
+		"RSA-OAEP, RecipientDH":           {as4Opts(t), func(o *xenc.EncryptOptions) { o.RecipientDH = &xenc.DHPublicKey{} }},
+		"RSA-OAEP no Recipient, KEK":      {as4Opts(t), func(o *xenc.EncryptOptions) { o.Recipient, o.KeyEncryptionKey = nil, make([]byte, 16) }},
+		"RSA-OAEP, KeyAgreementAlgorithm": {as4Opts(t), func(o *xenc.EncryptOptions) { o.KeyAgreementAlgorithm = xmlsec.KeyAgreementECDHES }},
+	} {
+		t.Run(name, func(t *testing.T) {
+			opts := c.base
+			c.mod(&opts)
+			if ek, err := xenc.GenerateEncryptedKey(opts); err == nil || ek != nil {
+				t.Fatalf("accepted: %v", err)
+			}
+		})
+	}
+	// The data side refuses an iteration count without a Password too.
+	doc := covParse(t, `<r><a>x</a></r>`)
+	if _, err := xenc.EncryptElement(doc, doc.ChildElements()[0], make([]byte, 16), xenc.EncryptOptions{DataAlgorithm: xmlsec.EncAES128GCM, PBKDF2Iterations: xenc.MinPBKDF2Iterations}); err == nil {
+		t.Fatal("PBKDF2Iterations without Password accepted")
+	}
+}

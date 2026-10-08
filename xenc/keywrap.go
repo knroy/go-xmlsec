@@ -5,7 +5,6 @@ import (
 	"crypto/cipher"
 	"crypto/subtle"
 	"encoding/binary"
-	"errors"
 	"fmt"
 
 	"github.com/knroy/go-xml/xdm"
@@ -87,17 +86,10 @@ func keyWrap(ek *xdm.Node, key []byte, opts EncryptOptions) ([]byte, error) {
 	if !ok {
 		return nil, unsupported("key transport %q", opts.KeyTransportAlgorithm)
 	}
+	// GenerateEncryptedKey has refused more than one of these.
 	kek := opts.KeyEncryptionKey
-	keys := 0
-	for _, set := range []bool{opts.Recipient != nil, kek != nil, opts.RecipientDH != nil, len(opts.Password) > 0} {
-		if set {
-			keys++
-		}
-	}
 	var err error
 	switch {
-	case keys > 1:
-		return nil, errors.New("xenc: more than one of Recipient, RecipientDH, KeyEncryptionKey and Password")
 	case opts.Recipient != nil:
 		kek, err = agree(ek, opts.KeyTransportAlgorithm, size, opts)
 	case opts.RecipientDH != nil:

@@ -41,7 +41,10 @@ import (
 // The CipherReference always carries xmlsec.TransformAttachmentCiphertext, and
 // names the attachment by "cid:" and its ID percent-encoded per RFC 2392,
 // as DecryptAttachment and AttachmentSet.Lookup decode it. The
-// EncryptedData MimeType is the attachment's Content-Type, when it has one.
+// EncryptedData MimeType is the attachment's Content-Type, when it has one;
+// for Attachment-Content-Only without one, it is "text/plain;
+// charset=us-ascii", the Content-Type such a part has (SwA profile
+// sections 5.4.1 and 5.5.2).
 func EncryptAttachment(att *xmlsec.Attachment, sessionKey []byte, transform string, opts EncryptOptions) ([]byte, *xdm.Node, error) {
 	if att == nil {
 		return nil, nil, errors.New("xenc: no attachment")
@@ -75,7 +78,13 @@ func EncryptAttachment(att *xmlsec.Attachment, sessionKey []byte, transform stri
 	if err != nil {
 		return nil, nil, err
 	}
-	if mt := contentType(att); mt != "" {
+	mt := contentType(att)
+	if mt == "" && transform == xmlsec.TransformAttachmentContentOnly {
+		// SwA profile sections 5.5.2 step 4 and 5.4.1 rule 2: a part
+		// without a Content-Type has this one.
+		mt = defaultContentType
+	}
+	if mt != "" {
 		xmltree.SetAttr(ed, "", "", "MimeType", mt)
 	}
 	cd := element(ed, "CipherData")
@@ -86,6 +95,9 @@ func EncryptAttachment(att *xmlsec.Attachment, sessionKey []byte, transform stri
 	xmltree.SetAttr(tr, "", "", "Algorithm", xmlsec.TransformAttachmentCiphertext)
 	return ct, ed, nil
 }
+
+// defaultContentType is the Content-Type of a MIME part without one.
+const defaultContentType = "text/plain; charset=us-ascii"
 
 // cidEscape percent-encodes a Content-ID for a cid: URL (RFC 2392), the
 // URI encoding XML Encryption shares with XML Signature (section 3.3.1).
@@ -128,9 +140,9 @@ func contentType(att *xmlsec.Attachment) string {
 // a CipherReference. ciphertext is the attachment's raw MIME body.
 //
 // It returns the attachment as it was before encryption, identified by the
-// CipherReference's cid: URI. The CipherReference may carry no transform or
-// exactly xmlsec.TransformAttachmentCiphertext; XSLT and XPath are
-// xmlsec.ErrTransformRefused, any other transform
+// CipherReference's cid: URI. The CipherReference must carry exactly
+// xmlsec.TransformAttachmentCiphertext (SwA profile section 5.5.1); XSLT
+// and XPath are xmlsec.ErrTransformRefused, and no transform or any other
 // xmlsec.ErrUnsupportedAlgorithm. What replaces what in the received MIME part
 // depends on the EncryptedData Type (SwA profile section 5.5.3):
 //
@@ -138,8 +150,11 @@ func contentType(att *xmlsec.Attachment) string {
 //     MIMEHeaders holds only the Content-Type, from the MimeType attribute,
 //     when there is one.
 //   - Attachment-Complete: Body replaces the body and MIMEHeaders the
-//     part's headers of the same names. A decrypted header the profile does
-//     not list, or one present twice, is refused.
+//     part's headers of the same names. Decrypted headers that do not
+//     parse, one the profile does not list, or one present twice, are
+//     refused with the same generic error, wrapping
+//     xmlsec.ErrDecryptionFailed, that a wrong key or bad padding gives, so
+//     that a receiver is no oracle for the plaintext's format.
 func DecryptAttachment(el *xdm.Node, ciphertext []byte, sessionKey []byte, opts DecryptOptions) (*xmlsec.Attachment, error) {
 	if err := strictData(el, opts); err != nil {
 		return nil, err
@@ -169,8 +184,8 @@ func DecryptAttachment(el *xdm.Node, ciphertext []byte, sessionKey []byte, opts 
 	if err != nil {
 		return nil, err
 	}
-	if len(algs) > 1 || len(algs) == 1 && algs[0] != xmlsec.TransformAttachmentCiphertext {
-		return nil, unsupported("attachment CipherReference transforms %q: only %s is supported", algs, xmlsec.TransformAttachmentCiphertext)
+	if len(algs) != 1 || algs[0] != xmlsec.TransformAttachmentCiphertext {
+		return nil, unsupported("attachment CipherReference transforms %q: exactly %s is required", algs, xmlsec.TransformAttachmentCiphertext)
 	}
 	pt, err := open(alg, sessionKey, ciphertext)
 	if err != nil {
@@ -184,18 +199,18 @@ func DecryptAttachment(el *xdm.Node, ciphertext []byte, sessionKey []byte, opts 
 		return att, nil
 	}
 
+	// Every failure from here on is the generic decryption failure, as a
+	// wrong key gives: detail about the plaintext would be a format oracle
+	// (sections 6.1.1 and 6.7).
 	r := bytes.NewReader(pt)
 	br := bufio.NewReader(r)
 	h, err := textproto.NewReader(br).ReadMIMEHeader()
 	if err != nil {
-		return nil, malformed("decrypted MIME headers: %v", err)
+		return nil, errDecrypt
 	}
 	sel, err := swa.Selected(h)
-	if err != nil {
-		return nil, err
-	}
-	if len(sel) != len(h) {
-		return nil, malformed("decrypted MIME headers include one the SwA profile does not list")
+	if err != nil || len(sel) != len(h) {
+		return nil, errDecrypt
 	}
 	att.MIMEHeaders = make(map[string][]string, len(sel))
 	for k, v := range sel {

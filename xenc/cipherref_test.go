@@ -57,23 +57,34 @@ func TestEncryptAttachmentMimeType(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if ed.Attr("", "MimeType") != nil {
-				t.Fatal("MimeType emitted without a Content-Type")
+			// SwA profile sections 5.5.2 step 4 and 5.4.1 rule 2.
+			const def = "text/plain; charset=us-ascii"
+			if got := ed.AttrValue("MimeType"); got != def {
+				t.Fatalf("MimeType %q without a Content-Type", got)
 			}
 			pt, err := xenc.DecryptAttachment(reparse(t, ed), ct, key, xenc.DecryptOptions{})
-			if err != nil || !bytes.Equal(pt.Body, att.Body) || pt.MIMEHeaders != nil {
+			if err != nil || !bytes.Equal(pt.Body, att.Body) || pt.MIMEHeaders["Content-Type"][0] != def {
 				t.Fatalf("round trip %q, %v", pt, err)
+			}
+			// Attachment-Complete carries the headers inside: no default.
+			_, ed, err = xenc.EncryptAttachment(&xmlsec.Attachment{ID: "a@x"}, key, xmlsec.TransformAttachmentComplete, opts)
+			if err != nil || ed.Attr("", "MimeType") != nil {
+				t.Fatalf("Attachment-Complete MimeType: %v", err)
 			}
 		})
 	}
 }
+
+// attTransform is the xenc:Transforms the SwA profile requires on an
+// attachment's CipherReference (section 5.5.1).
+const attTransform = `<xenc:Transforms><ds:Transform xmlns:ds="` + xmlsec.NSDSig + `" Algorithm="` + xmlsec.TransformAttachmentCiphertext + `"/></xenc:Transforms>`
 
 func TestDecryptAttachmentErrors(t *testing.T) {
 	key := bytes.Repeat([]byte{1}, 16)
 	em := covEM(xmlsec.EncAES128GCM)
 	typ := `Type="` + xmlsec.TransformAttachmentContentOnly + `"`
 	ref := func(uri string) string {
-		return `<xenc:CipherData><xenc:CipherReference URI="` + uri + `"/></xenc:CipherData>`
+		return `<xenc:CipherData><xenc:CipherReference URI="` + uri + `">` + attTransform + `</xenc:CipherReference></xenc:CipherData>`
 	}
 	cases := []struct {
 		name string
@@ -182,7 +193,7 @@ func TestCipherReferenceCIDEncoding(t *testing.T) {
 }
 
 // Section 3.3.1 transforms on an attachment CipherReference: none, or the
-// SwA Attachment-Ciphertext-Transform alone.
+// SwA Attachment-Ciphertext-Transform alone, which the profile requires.
 func TestDecryptAttachmentTransforms(t *testing.T) {
 	key := bytes.Repeat([]byte{1}, 16)
 	ct := sealGCM(key, "body")
@@ -197,15 +208,15 @@ func TestDecryptAttachmentTransforms(t *testing.T) {
 		}
 		return s + `</xenc:Transforms>`
 	}
-	for _, ok := range []string{``, tr(xmlsec.TransformAttachmentCiphertext)} {
-		if got, err := xenc.DecryptAttachment(el(ok), ct, key, xenc.DecryptOptions{}); err != nil || string(got.Body) != "body" {
-			t.Fatalf("%s: %v", ok, err)
-		}
+	if got, err := xenc.DecryptAttachment(el(tr(xmlsec.TransformAttachmentCiphertext)), ct, key, xenc.DecryptOptions{}); err != nil || string(got.Body) != "body" {
+		t.Fatal(err)
 	}
 	for name, c := range map[string]struct {
 		transforms string
 		want       error
 	}{
+		"none":           {``, xmlsec.ErrUnsupportedAlgorithm},
+		"empty":          {tr(), xmlsec.ErrUnsupportedAlgorithm},
 		"XSLT":           {tr(xmlsec.TransformXSLT), xmlsec.ErrTransformRefused},
 		"XPath":          {`<xenc:Transforms><ds:Transform xmlns:ds="` + xmlsec.NSDSig + `" Algorithm="` + xmlsec.TransformXPath + `"><ds:XPath>1</ds:XPath></ds:Transform></xenc:Transforms>`, xmlsec.ErrTransformRefused},
 		"XPath after":    {tr(xmlsec.TransformAttachmentCiphertext, xmlsec.TransformXPathFilter2), xmlsec.ErrTransformRefused},
@@ -248,7 +259,7 @@ func sealGCM(key []byte, pt string) []byte {
 func TestDecryptAttachmentComplete(t *testing.T) {
 	key := bytes.Repeat([]byte{1}, 16)
 	el := covParse(t, covED(`Type="`+xmlsec.TransformAttachmentComplete+`"`,
-		covEM(xmlsec.EncAES128GCM)+`<xenc:CipherData><xenc:CipherReference URI="cid:a%40x"/></xenc:CipherData>`))
+		covEM(xmlsec.EncAES128GCM)+`<xenc:CipherData><xenc:CipherReference URI="cid:a%40x">`+attTransform+`</xenc:CipherReference></xenc:CipherData>`))
 
 	got, err := xenc.DecryptAttachment(el, sealGCM(key, "\r\nbody"), key, xenc.DecryptOptions{})
 	if err != nil || got.ID != "a@x" || string(got.Body) != "body" || len(got.MIMEHeaders) != 0 {
@@ -259,16 +270,42 @@ func TestDecryptAttachmentComplete(t *testing.T) {
 		t.Fatalf("folded header: %+v, %v", got, err)
 	}
 
-	for name, pt := range map[string]string{
-		"no empty line":   "Content-Type: text/plain\r\nbody",
-		"unlisted header": "Content-Type: text/plain\r\nContent-Transfer-Encoding: binary\r\n\r\nbody",
-		"header twice":    "Content-Type: text/plain\r\ncontent-type: text/xml\r\n\r\nbody",
-	} {
-		t.Run(name, func(t *testing.T) {
-			got, err := xenc.DecryptAttachment(el, sealGCM(key, pt), key, xenc.DecryptOptions{})
-			if !errors.Is(err, xmlsec.ErrMalformed) || got != nil {
-				t.Fatalf("got %+v, %v", got, err)
-			}
-		})
+}
+
+// Sections 6.1.1 and 6.7: once Attachment-Complete ciphertext decrypts,
+// nothing about the plaintext's format is told apart from a wrong key or,
+// for CBC, bad padding. Every failure is the one generic error.
+func TestDecryptAttachmentCompleteNoOracle(t *testing.T) {
+	alg := xmlsec.EncAES128CBC
+	key := cbcKey(alg)
+	el := covParse(t, covED(`Type="`+xmlsec.TransformAttachmentComplete+`"`,
+		covEM(alg)+`<xenc:CipherData><xenc:CipherReference URI="cid:a">`+attTransform+`</xenc:CipherReference></xenc:CipherData>`))
+	opts := xenc.DecryptOptions{AllowedDataAlgorithms: []string{alg}}
+	good := "Content-Type: text/plain\r\n\r\nbody"
+	if got, err := xenc.DecryptAttachment(el, cbcSeal(t, alg, key, []byte(good), -1), key, opts); err != nil || string(got.Body) != "body" {
+		t.Fatalf("%+v, %v", got, err)
+	}
+	cases := map[string]struct {
+		ct, key []byte
+	}{
+		"bad padding":     {cbcSeal(t, alg, key, []byte(good), 0), key},
+		"wrong key":       {cbcSeal(t, alg, key, []byte(good), -1), make([]byte, len(key))},
+		"bad header":      {cbcSeal(t, alg, key, []byte("Content-Type text/plain\r\n\r\nbody"), -1), key},
+		"no empty line":   {cbcSeal(t, alg, key, []byte("Content-Type: text/plain\r\nbody"), -1), key},
+		"unlisted header": {cbcSeal(t, alg, key, []byte("Content-Type: text/plain\r\nContent-Transfer-Encoding: binary\r\n\r\nbody"), -1), key},
+		"header twice":    {cbcSeal(t, alg, key, []byte("Content-Type: text/plain\r\ncontent-type: text/xml\r\n\r\nbody"), -1), key},
+	}
+	var first error
+	for name, c := range cases {
+		got, err := xenc.DecryptAttachment(el, c.ct, c.key, opts)
+		if got != nil || !errors.Is(err, xmlsec.ErrDecryptionFailed) {
+			t.Fatalf("%s: %+v, %v", name, got, err)
+		}
+		if first == nil {
+			first = err
+		}
+		if err != first || errors.Is(err, xmlsec.ErrMalformed) {
+			t.Fatalf("%s: %v differs from %v", name, err, first)
+		}
 	}
 }

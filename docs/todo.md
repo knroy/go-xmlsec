@@ -7,8 +7,9 @@ Security Profile 1.1.
 
 ## Required and not met
 
-None but the Basic Security Profile's R5620 and R5621 algorithm lists,
-deliberately not met (below). Every other MUST and every REQUIRED algorithm
+None but the Basic Security Profile's R5620 and R5621 algorithm lists and
+the odd-parity check of RFC 3217's Triple-DES key unwrap, deliberately not
+met (below). Every other MUST and every REQUIRED algorithm
 of these specifications is implemented. The weak algorithms among them are
 verification- and decryption-only opt-ins.
 
@@ -31,4 +32,8 @@ accepted. See [security.md](security.md#conformance) and the changelog.
 | PBKDF2 `OtherSource` salt (XML Encryption §5.4.2) | OPTIONAL | RFC 8018 defines no salt source algorithm: there is nothing to implement. |
 | EXI `EncryptedData` Type | OPTIONAL | Needs an EXI codec; the octets are returned, as §4.2 asks for an unknown Type. |
 | W3C vector AGRMNT.9 (ECDH-ES with PBKDF2) | Test vector | Its producer encoded the shared secret in a way the specification does not define; xmlsec1's own suite omits it. |
+| Finite-field DH groups under 2048 bits (XML Encryption §5.6.2) | MAY | Logjam-class weak groups; `xenc.MinDHBits` is 2048. |
+| Several keys in one `ds:KeyInfo`, such as an `EncryptedKey` per recipient (§3.5.1) | MAY | `FindEncryptedKey` and `FindDerivedKey` refuse a `KeyInfo` holding more than one key: which one is the caller's is the caller's to choose, by walking the `KeyInfo` itself. |
+| ConcatKDF `OtherInfo` that is not a whole number of octets (§5.4.1) | MAY | Hashes take octets. Parameters that are not whole octets are concatenated bitwise; only a total that is not refused. |
+| Odd parity of a `kw-tripledes` key (RFC 3217 §3.2 step 8) | MUST in RFC 3217 | xmlsec1 wraps random `des-192` keys without setting parity, DES ignores the parity bits, and a 24-octet wrapped key may be AES-192, which has none: checking it would refuse keys that decrypt correctly. |
 | Other token profiles (UsernameToken, SAML, Kerberos, REL) | Separate specifications | Out of scope. |

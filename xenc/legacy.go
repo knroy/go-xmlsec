@@ -126,6 +126,11 @@ func cmsUnwrap(b cipher.Block, ct []byte) ([]byte, error) {
 	cipher.NewCBCDecrypter(b, temp[:8]).CryptBlocks(wkcks, temp[8:])
 	wk, cks := wkcks[:len(wkcks)-8], wkcks[len(wkcks)-8:]
 	sum := sha1.Sum(wk) // #nosec G401 -- decryption-only legacy algorithm, opt-in, never in default set: the RFC 3217 CMS key checksum kw-tripledes defines
+	// RFC 3217 section 3.2 step 8 also checks the odd parity of each
+	// octet of a Triple-DES CEK. It is deliberately not checked: xmlsec1
+	// wraps random des-192 keys without setting parity, DES ignores the
+	// parity bits, so such a key decrypts correctly, and a 24-octet CEK
+	// may be an AES-192 key, which has no parity (section 5.7.1).
 	if subtle.ConstantTimeCompare(sum[:8], cks) != 1 {
 		return nil, errUnwrap
 	}

@@ -11,7 +11,6 @@ import (
 
 	"github.com/knroy/go-xml/xdm"
 	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/hashes"
 	"github.com/knroy/go-xmlsec/internal/xmltree"
 )
 
@@ -146,7 +145,7 @@ func agreeDH(ek *xdm.Node, keyAlg string, size int, opts EncryptOptions) ([]byte
 	if alg != xmlsec.KeyAgreementDHES && alg != xmlsec.KeyAgreementDH {
 		return nil, unsupported("key agreement %q with a Diffie-Hellman key", alg)
 	}
-	h, ok := hashes.Digest(opts.DigestAlgorithm)
+	h, ok := encDigest(opts.DigestAlgorithm)
 	if !ok {
 		return nil, unsupported("key derivation digest %q", opts.DigestAlgorithm)
 	}

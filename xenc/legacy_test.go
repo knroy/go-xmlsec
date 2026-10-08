@@ -156,7 +156,7 @@ func TestLegacyCBCFailuresIndistinguishable(t *testing.T) {
 			}
 			// The same holds for an attachment.
 			ed := covParse(t, covED(`Type="`+xmlsec.TransformAttachmentContentOnly+`"`, covEM(alg)+
-				`<xenc:CipherData><xenc:CipherReference URI="cid:a"/></xenc:CipherData>`))
+				`<xenc:CipherData><xenc:CipherReference URI="cid:a">`+attTransform+`</xenc:CipherReference></xenc:CipherData>`))
 			if _, err := xenc.DecryptAttachment(ed, cases["pad octet 0"].ct, key, xenc.DecryptOptions{AllowedDataAlgorithms: []string{alg}}); err != first {
 				t.Fatalf("attachment: %v", err)
 			}
@@ -467,6 +467,24 @@ func TestLegacyTripleDESKeyWrap(t *testing.T) {
 	}
 	if _, err := xenc.UnwrapEncryptedKey(covParse(t, covEK(xmlsec.KeyWrapTripleDES, `<xenc:KeySize>128</xenc:KeySize>`, cvOf(good))), kek, xenc.DecryptOptions{AllowedKeyWrapAlgorithms: list}); !errors.Is(err, xmlsec.ErrMalformed) {
 		t.Fatalf("KeySize: %v", err)
+	}
+}
+
+// The RFC 3217 section 3.4 example unwraps to its CEK. The odd parity of a
+// 24-octet CEK (section 3.2 step 8) is deliberately not checked: xmlsec1
+// wraps des-192 keys without setting it, and DES ignores it.
+func TestLegacyTripleDESKeyWrapRFC3217(t *testing.T) {
+	list := xenc.DecryptOptions{AllowedKeyWrapAlgorithms: []string{xmlsec.KeyWrapTripleDES}}
+	kek := unhex("255e 0d1c 07b6 46df b313 4cc8 43ba 8aa7 1f02 5b7c 0838 251f")
+	cek := unhex("2923 bf85 e06d d6ae 5291 49f1 f1ba e9ea b3a7 da3d 860d 3e98")
+	result := unhex("6901 0761 8ef0 92b3 b48c a179 6b23 4ae9 fa33 ebb4 1596 0403 7db5 d6a8 4eb3 aac2 768c 6327 75a4 67d4")
+	if got, err := xenc.UnwrapEncryptedKey(kwTDES(t, result), kek, list); err != nil || !bytes.Equal(got, cek) {
+		t.Fatalf("RFC 3217 example: %x, %v", got, err)
+	}
+	evenParity := slices.Clone(cek)
+	evenParity[0] ^= 1
+	if got, err := xenc.UnwrapEncryptedKey(kwTDES(t, cmsWrap(t, kek, evenParity)), kek, list); err != nil || !bytes.Equal(got, evenParity) {
+		t.Fatalf("parity-broken CEK: %x, %v", got, err)
 	}
 }
 

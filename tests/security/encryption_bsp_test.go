@@ -96,6 +96,7 @@ func TestDecryptionFailureIsGeneric(t *testing.T) {
 	}
 	kw := opts
 	kw.KeyTransportAlgorithm, kw.Recipient, kw.KeyEncryptionKey = xmlsec.KeyWrapAES128, nil, bytes.Repeat([]byte{1}, 16)
+	kw.MGFAlgorithm, kw.DigestAlgorithm = "", ""
 	wrapped, err := xenc.GenerateEncryptedKey(kw)
 	if err != nil {
 		t.Fatal(err)
