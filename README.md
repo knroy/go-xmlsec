@@ -8,7 +8,7 @@ v2;
 this library never serializes XML for a digest any other way. That matters,
 because a signature is only as correct as the canonical octets it covers.
 
-> **Status: v2, unreleased.** Module `github.com/knroy/go-xmlsec/v2`, on
+> **Status: v2.0.0.** Module `github.com/knroy/go-xmlsec/v2`, on
 > go-xml v2, whose parsed trees cannot be changed; the calls that add to a
 > document take an `xmlsec.Document`. Upgrading from v1:
 > [docs/migrating-to-v2.md](docs/migrating-to-v2.md). v1 continues on the

@@ -8,7 +8,7 @@ that line.
 
 | Check | Runs on | Fails when |
 |---|---|---|
-| `TestVersionIsReleasedAndDescribed` | every push and pull request | the constant is not a `1.N.N` triple; the newest released section of `CHANGELOG.md` (the first `## vX.Y.Z` heading, with only `## Unreleased` allowed above it) is not `## v` plus the constant; an `## Unreleased` heading sits below that section |
+| `TestVersionIsReleasedAndDescribed` | every push and pull request | the constant is not a `2.N.N` triple (`1.N.N` on the `v1` branch); the newest released section of `CHANGELOG.md` (the first `## vX.Y.Z` heading, with only `## Unreleased` allowed above it) is not `## v` plus the constant; an `## Unreleased` heading sits below that section |
 | `release.yml` | the tag push | the tag does not equal the constant; the changelog section is missing or empty |
 
 ## Compatibility and branches
@@ -23,10 +23,8 @@ fixes only, released from that branch by the same steps with a `1.N.N`
 constant. Its compatibility promise is unchanged: every exported name of
 `v1.0.0`.
 
-`TestVersionIsReleasedAndDescribed` enforces the major version. Until
-`v2.0.0` is cut it still requires 1: the release commit changes the test to
-require 2 and sets the constant to `2.0.0` together. A module version is
-permanent once the Go proxy has seen it.
+`TestVersionIsReleasedAndDescribed` enforces the major version: 2 here, 1 on
+the `v1` branch. A module version is permanent once the Go proxy has seen it.
 
 A security fix that can only be made by refusing input an earlier release
 accepted, such as a newly broken algorithm leaving a default set, is made in

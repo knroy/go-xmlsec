@@ -8,8 +8,8 @@ import (
 )
 
 func TestVersionIsReleasedAndDescribed(t *testing.T) {
-	if !regexp.MustCompile(`^1\.(0|[1-9]\d*)\.(0|[1-9]\d*)$`).MatchString(Version) {
-		t.Fatalf("Version %q is not a v1 release triple; see RELEASE.md", Version)
+	if !regexp.MustCompile(`^2\.(0|[1-9]\d*)\.(0|[1-9]\d*)$`).MatchString(Version) {
+		t.Fatalf("Version %q is not a v2 release triple; see RELEASE.md", Version)
 	}
 	log, err := os.ReadFile("../../CHANGELOG.md")
 	if err != nil {

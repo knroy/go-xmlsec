@@ -11,11 +11,11 @@ package version
 // commit, then push the tag. The constant is the source of truth and the tag
 // follows it. Two checks keep them together:
 //
-//   - TestVersionIsReleasedAndDescribed, in every CI run: this is a v1
+//   - TestVersionIsReleasedAndDescribed, in every CI run: this is a v2
 //     release triple, and the newest released section of CHANGELOG.md is
 //     for exactly it.
 //   - release.yml, on the tag push: the tag must equal this constant.
 //
-// The major version is 1: a breaking change to the API needs a new module
-// path, github.com/knroy/go-xmlsec/v2, not a new version of this one.
-const Version = "1.3.0"
+// The major version is 2: a breaking change to the API needs a new module
+// path, github.com/knroy/go-xmlsec/v3, not a new version of this one.
+const Version = "2.0.0"
