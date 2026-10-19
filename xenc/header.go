@@ -4,13 +4,14 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // EncryptHeader replaces block, a SOAP header block (a direct child of a
@@ -36,7 +37,7 @@ func EncryptHeader(doc, block, security *xdm.Node, sessionKey []byte, opts Encry
 	if err := checkTarget(doc, block); err != nil {
 		return nil, err
 	}
-	if !isSOAP(block.Parent, "Header") {
+	if !isSOAP(block.Parent(), "Header") {
 		return nil, errors.New("xenc: EncryptHeader needs a SOAP header block")
 	}
 	if security == nil || !security.IsElement(xmlsec.NSWSSE, "Security") || security == block || security.Root() != doc.Root() {
@@ -47,19 +48,25 @@ func EncryptHeader(doc, block, security *xdm.Node, sessionKey []byte, opts Encry
 	}
 	return replaceElement(doc, block, sessionKey, opts, func(ed *xdm.Node) (*xdm.Node, error) {
 		eh := nsElement(nil, "wsse11", xmlsec.NSWSSE11, "EncryptedHeader")
-		eh.AppendChild(ed)
-		// Declare against what is in scope where eh will sit; emitWith
-		// links it there properly.
-		eh.Parent = block.Parent
-		for _, a := range security.Attrs {
-			if (a.Name.URI == xmlsec.NSSOAP11 || a.Name.URI == xmlsec.NSSOAP12) &&
-				(a.Name.Local == "mustUnderstand" || a.Name.Local == "actor" || a.Name.Local == "role" || a.Name.Local == "relay") {
-				if err := xmltree.Declare(eh, a.Name.Prefix, a.Name.URI); err != nil {
+		for a := range security.Attrs() {
+			if (a.Name().URI == xmlsec.NSSOAP11 || a.Name().URI == xmlsec.NSSOAP12) &&
+				(a.Name().Local == "mustUnderstand" || a.Name().Local == "actor" || a.Name().Local == "role" || a.Name().Local == "relay") {
+				// Declared against what is in scope where eh will sit, and
+				// on eh itself.
+				need, err := xmltree.NeedsDeclaration(block.Parent(), a.Name().Prefix, a.Name().URI)
+				if a.Name().Prefix == "wsse11" {
+					err = fmt.Errorf("prefix %q already bound to %q", "wsse11", xmlsec.NSWSSE11)
+				}
+				if err != nil {
 					return nil, err
 				}
-				xmltree.SetAttr(eh, a.Name.Prefix, a.Name.URI, a.Name.Local, a.Value)
+				if need {
+					eh.AddNamespace(a.Name().Prefix, a.Name().URI)
+				}
+				xmltree.SetAttr(eh, a.Name().Prefix, a.Name().URI, a.Name().Local, a.Value())
 			}
 		}
+		eh.AppendCopy(ed)
 		return eh, nil
 	})
 }
@@ -97,13 +104,13 @@ func DecryptHeader(doc, eh *xdm.Node, sessionKey []byte, opts DecryptOptions) ([
 	if err := checkTarget(doc, eh); err != nil {
 		return nil, err
 	}
-	if !eh.IsElement(xmlsec.NSWSSE11, "EncryptedHeader") || !isSOAP(eh.Parent, "Header") {
+	if !eh.IsElement(xmlsec.NSWSSE11, "EncryptedHeader") || !isSOAP(eh.Parent(), "Header") {
 		return nil, malformed("not a wsse11:EncryptedHeader header block")
 	}
 	var ed *xdm.Node
-	for _, c := range eh.Children {
+	for c := range eh.Children() {
 		switch {
-		case c.Kind == xdm.KindText && strings.Trim(c.Value, " \t\r\n") == "":
+		case c.Kind() == xdm.KindText && strings.Trim(c.Value(), " \t\r\n") == "":
 		case ed == nil && c.IsElement(xmlsec.NSXEnc, "EncryptedData"):
 			ed = c
 		default:
@@ -121,19 +128,23 @@ func DecryptHeader(doc, eh *xdm.Node, sessionKey []byte, opts DecryptOptions) ([
 		return nil, err
 	}
 	nodes, err := parseIn(pt, eh)
-	if err != nil || len(nodes) != 1 || nodes[0].Kind != xdm.KindElement {
+	if err != nil || len(nodes) != 1 || nodes[0].Kind() != xdm.KindElement {
 		return nil, errDecrypt
 	}
 	// Declare on the block what eh's context binds, so it keeps its
 	// meaning under eh's parent.
 	block := nodes[0]
+	var e xmltree.Edits
+	e.ReplaceNode(eh, block)
 	ns := eh.InScopeNamespaces()
 	for _, p := range slices.Sorted(maps.Keys(ns)) {
-		if p != "xml" && ns[p] != "" && !slices.ContainsFunc(block.Namespaces, func(n *xdm.Node) bool { return n.Name.Local == p }) {
-			block.AddNamespace(p, ns[p])
+		declared := false
+		for q := range block.DeclaredNamespaces() {
+			declared = declared || q == p
+		}
+		if p != "xml" && ns[p] != "" && !declared {
+			e.Declare(block, p, ns[p])
 		}
 	}
-	kids := slices.Clone(eh.Parent.Children)
-	kids[slices.Index(kids, eh)] = block
-	return emitWith(doc, eh.Parent, kids, block)
+	return emit(doc, &e)
 }

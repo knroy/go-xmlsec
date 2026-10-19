@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/knroy/go-xml/xpath"
-	"github.com/knroy/go-xmlsec"
+	"github.com/knroy/go-xml/v2/xpath"
+	"github.com/knroy/go-xmlsec/v2"
 )
 
 func TestAllowed(t *testing.T) {
@@ -13,7 +13,7 @@ func TestAllowed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	x := tree.Root.Children[0].Children[0]
+	x := tree.Root.FirstChild().FirstChild()
 	for _, c := range []struct {
 		expr string
 		ns   map[string]string
@@ -36,7 +36,7 @@ func TestCompileAndLibrary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := tree.Root.Children[0]
+	r := tree.Root.FirstChild()
 	c, err := Compile(" count(self::p:r) = 1 and @xml:lang = 'en' and namespace-uri(here()) = 'urn:d' ", map[string]string{"p": "urn:d"})
 	if err != nil {
 		t.Fatal(err)
@@ -48,14 +48,14 @@ func TestCompileAndLibrary(t *testing.T) {
 
 	// here() outside the evaluated document.
 	other, _ := xmlsec.Parse([]byte(`<o/>`))
-	if _, err := c.EvalBool(xpath.NewContext(r, Library(other.Root.Children[0], tree.Root)).WithFocus(r, 1, 1)); !errors.Is(err, xmlsec.ErrMalformed) {
+	if _, err := c.EvalBool(xpath.NewContext(r, Library(other.Root.FirstChild(), tree.Root)).WithFocus(r, 1, 1)); !errors.Is(err, xmlsec.ErrMalformed) {
 		t.Fatalf("here() elsewhere: %v", err)
 	}
 
 	// An unprefixed name is in no namespace, as in XPath 1.0.
 	if c, err := Compile("self::a", nil); err != nil {
 		t.Fatal(err)
-	} else if ok, _ := c.EvalBool(xpath.NewContext(r, Library(r, tree.Root)).WithFocus(r.Children[0], 1, 1)); ok {
+	} else if ok, _ := c.EvalBool(xpath.NewContext(r, Library(r, tree.Root)).WithFocus(r.FirstChild(), 1, 1)); ok {
 		t.Fatal("self::a matched an element in urn:d")
 	}
 

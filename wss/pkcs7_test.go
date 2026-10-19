@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
 )
 
 // issue returns a certificate for cn signed by parent (self-signed when nil),
@@ -70,7 +70,7 @@ func TestPKCS7RoundTrip(t *testing.T) {
 		{"issuer without the root", []*x509.Certificate{inter}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			doc := parseDoc(t, env11)
+			doc := newDoc(t, env11)
 			h, err := NewHeader(doc, xmlsec.NSSOAP11, "", false)
 			if err != nil {
 				t.Fatal(err)
@@ -79,7 +79,7 @@ func TestPKCS7RoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			str, err := NewSecurityTokenReference(doc, id, "")
+			str, err := NewSecurityTokenReference(doc.Root(), id, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -90,7 +90,7 @@ func TestPKCS7RoundTrip(t *testing.T) {
 				"lenient": ResolveSecurityTokenReference,
 				"strict":  ResolveSecurityTokenReferenceStrict,
 			} {
-				got, err := resolve(doc, str)
+				got, err := resolve(doc.Root(), doc.Node(str))
 				if err != nil || !got.Equal(leaf) {
 					t.Fatalf("%s: got %v, %v; want the leaf", name, got, err)
 				}
@@ -194,7 +194,7 @@ func TestAddBinarySecurityTokenPKCS7Errors(t *testing.T) {
 		{"too many certificates", leaf, many},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			h, err := NewHeader(parseDoc(t, env11), xmlsec.NSSOAP11, "", false)
+			h, err := NewHeader(newDoc(t, env11), xmlsec.NSSOAP11, "", false)
 			if err != nil {
 				t.Fatal(err)
 			}

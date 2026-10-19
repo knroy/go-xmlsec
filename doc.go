@@ -11,10 +11,20 @@
 // that no peer accepts. Verification and decryption have conservative
 // default allow-lists, which a caller replaces by naming its own.
 //
+// # Documents
+//
+// A tree parsed by go-xml v2 cannot be changed. The calls that add to a
+// document (dsig.Sign with SignOptions.Parent, wss.NewHeader and its Header,
+// wss.AssignID) take a Document, from NewDocument(tree.Root), and each
+// change builds a new tree: Document.Root is the latest, and Document.Node
+// finds an earlier tree's node in it. Pass those to the functions that take
+// a tree, such as dsig.Verify or xenc.EncryptElement. docs/migrating-to-v2.md
+// covers the change from v1.
+//
 // # Canonicalization
 //
 // Canonicalization is not implemented here. It belongs to
-// github.com/knroy/go-xml/c14n, whose Algorithm constants are used directly:
+// github.com/knroy/go-xml/v2/c14n, whose Algorithm constants are used directly:
 //
 //	c14n.Exclusive10    // WS-Security, AS4
 //	c14n.Inclusive10    // enveloped document signatures such as SMP

@@ -5,7 +5,7 @@ package hashes
 import (
 	"crypto"
 
-	"github.com/knroy/go-xmlsec"
+	"github.com/knroy/go-xmlsec/v2"
 )
 
 var signatureHashes = map[string]crypto.Hash{

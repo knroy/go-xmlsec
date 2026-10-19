@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/xenc"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/xenc"
 )
 
 // covED is an xenc:EncryptedData with the given attributes and content.
@@ -80,7 +80,7 @@ func TestEncryptElementErrors(t *testing.T) {
 		{"target in another document", other.ChildElements()[0], key, xmlsec.EncAES128GCM, nil},
 		{"detached target", xmltree.Element(nil, "", "", "d"), key, xmlsec.EncAES128GCM, nil},
 		{"target is the document node", doc, key, xmlsec.EncAES128GCM, nil},
-		{"target is text", root.ChildElements()[0].Children[0], key, xmlsec.EncAES128GCM, nil},
+		{"target is text", root.ChildElements()[0].FirstChild(), key, xmlsec.EncAES128GCM, nil},
 		{"unknown algorithm", root.ChildElements()[0], key, "urn:x", xmlsec.ErrUnsupportedAlgorithm},
 		{"wrong session key length", root.ChildElements()[0], key[:8], xmlsec.EncAES128GCM, nil},
 		{"target with no canonical form", root.ChildElements()[1], key, xmlsec.EncAES128GCM, c14n.ErrRelativeNamespaceURI},
@@ -96,7 +96,7 @@ func TestEncryptElementErrors(t *testing.T) {
 			if out != nil {
 				t.Fatal("output returned with an error")
 			}
-			if len(root.ChildElements()) != 2 || root.ChildElements()[0].Name.Local != "a" {
+			if len(root.ChildElements()) != 2 || root.ChildElements()[0].Name().Local != "a" {
 				t.Fatal("document modified")
 			}
 		})
@@ -133,7 +133,7 @@ func TestNilInputs(t *testing.T) {
 func firstNamed(n *xdm.Node, local string) *xdm.Node {
 	var found *xdm.Node
 	xmltree.Walk(n.Root(), func(e *xdm.Node) {
-		if found == nil && e.Name.Local == local {
+		if found == nil && e.Name().Local == local {
 			found = e
 		}
 	})
@@ -224,8 +224,8 @@ func TestEncryptContent(t *testing.T) {
 	enc := covParse(t, string(out))
 	ebody := enc.ChildElements()[0]
 	// The Body keeps its attributes and holds only the EncryptedData.
-	if ebody.AttrValue("") != "" || len(ebody.Children) != 1 || !ebody.Children[0].IsElement(xmlsec.NSXEnc, "EncryptedData") ||
-		ebody.Children[0].AttrValue("Type") != xenc.TypeContent || ebody.Children[0].AttrValue("Id") != "ED-c" ||
+	if ebody.AttrValue("") != "" || ebody.NumChildren() != 1 || !ebody.FirstChild().IsElement(xmlsec.NSXEnc, "EncryptedData") ||
+		ebody.FirstChild().AttrValue("Type") != xenc.TypeContent || ebody.FirstChild().AttrValue("Id") != "ED-c" ||
 		!strings.Contains(string(out), `wsu:Id="b"`) {
 		t.Fatalf("encrypted:\n%s", out)
 	}
@@ -308,7 +308,7 @@ func TestEncryptElementSOAPGuard(t *testing.T) {
 	// The Envelope as document element is refused too, by the parent check
 	// or the guard, whichever comes first.
 	doc := covParse(t, `<S:Envelope xmlns:S="`+soap12+`"><S:Body/></S:Envelope>`)
-	if _, err := xenc.EncryptElement(doc.Parent, doc, key, as4Opts(t)); err == nil {
+	if _, err := xenc.EncryptElement(doc.Parent(), doc, key, as4Opts(t)); err == nil {
 		t.Fatal("Envelope encrypted")
 	}
 }
@@ -319,7 +319,7 @@ func TestDataIDMustBeNCName(t *testing.T) {
 	for _, id := range []string{"1a", "a:b", "a b", "#a"} {
 		opts := as4Opts(t)
 		opts.DataID = id
-		if _, err := xenc.EncryptElement(doc.Parent, doc.ChildElements()[0], key, opts); err == nil {
+		if _, err := xenc.EncryptElement(doc.Parent(), doc.ChildElements()[0], key, opts); err == nil {
 			t.Errorf("element %q accepted", id)
 		}
 		if _, _, err := xenc.EncryptAttachment(&xmlsec.Attachment{ID: "a"}, key, xmlsec.TransformAttachmentContentOnly, opts); err == nil {
@@ -333,7 +333,7 @@ func TestDataIDMustBeNCName(t *testing.T) {
 func TestDataEncryptionMethodChildren(t *testing.T) {
 	key := bytes.Repeat([]byte{7}, 16)
 	doc := covParse(t, `<r><a>x</a></r>`)
-	out, err := xenc.EncryptElement(doc.Parent, doc.ChildElements()[0], key, as4Opts(t))
+	out, err := xenc.EncryptElement(doc.Parent(), doc.ChildElements()[0], key, as4Opts(t))
 	if err != nil {
 		t.Fatal(err)
 	}

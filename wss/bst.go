@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // AddBinarySecurityToken adds a wsse:BinarySecurityToken carrying cert,
@@ -75,7 +75,7 @@ func (h *Header) addBinarySecurityToken(cert *x509.Certificate, chain []*x509.Ce
 		return "", fmt.Errorf("%w: BST ValueType %q", xmlsec.ErrUnsupportedAlgorithm, valueType)
 	}
 
-	id, err := idFor(h.doc, id)
+	id, err := idFor(h.doc.Root(), id)
 	if err != nil {
 		return "", err
 	}
@@ -124,8 +124,8 @@ func parseBinarySecurityToken(bst *xdm.Node) (*x509.Certificate, error) {
 	}
 	// SOAP Message Security 1.1.1 section 6.3: Base64Binary is the
 	// default. BSP R3029 requires it stated; the strict resolver checks.
-	if enc := bst.Attr("", "EncodingType"); enc != nil && enc.Value != xmlsec.BSTEncodingBase64 {
-		return nil, fmt.Errorf("%w: BST EncodingType %q", xmlsec.ErrUnsupportedKeyInfo, enc.Value)
+	if enc := bst.Attr("", "EncodingType"); enc != nil && enc.Value() != xmlsec.BSTEncodingBase64 {
+		return nil, fmt.Errorf("%w: BST EncodingType %q", xmlsec.ErrUnsupportedKeyInfo, enc.Value())
 	}
 	der, err := xmltree.Base64(bst)
 	if err != nil {

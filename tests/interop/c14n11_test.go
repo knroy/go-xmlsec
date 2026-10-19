@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
 )
 
 // Canonical XML 1.1 differs from 1.0 only on a document subset: it does not

@@ -17,11 +17,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/xenc"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/xenc"
 )
 
 func covCert(t *testing.T, pub, priv any) *x509.Certificate {
@@ -196,7 +196,7 @@ func TestEncryptedKeyComposition(t *testing.T) {
 
 	var order []string
 	for _, k := range ek.Element.ChildElements() {
-		order = append(order, k.Name.Local)
+		order = append(order, k.Name().Local)
 	}
 	if got := strings.Join(order, ","); got != "EncryptionMethod,KeyInfo,CipherData,ReferenceList" {
 		t.Fatalf("child order %s", got)
@@ -212,7 +212,7 @@ func TestEncryptedKeyComposition(t *testing.T) {
 
 	for name, el := range map[string]*xdm.Node{
 		"nil":            nil,
-		"text node":      {Kind: xdm.KindText, Value: "x"},
+		"text node":      xdm.NewNode(xdm.KindText, xdm.QName{}, "x"),
 		"already placed": ek.Element.ChildElements()[0],
 		"second KeyInfo": xmltree.Element(nil, "x", "urn:x", "Other"),
 	} {

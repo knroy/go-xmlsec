@@ -5,8 +5,8 @@ import (
 	"encoding/asn1"
 	"fmt"
 
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/certpath"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/certpath"
 )
 
 // PKCS#7 content types (RFC 2315 section 14).

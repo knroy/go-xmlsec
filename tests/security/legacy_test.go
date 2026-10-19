@@ -11,30 +11,33 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // resignWith replaces SignatureMethod, adding ds:HMACOutputLength when
 // outputLength is not "", and sets SignatureValue to sign over the canonical
 // SignedInfo: an authentic value, so only the algorithm policy decides.
-func resignWith(t *testing.T, doc *xdm.Node, method, outputLength string, sign func(canonical []byte) []byte) *xdm.Node {
+func resignWith(t *testing.T, doc *xdm.Node, method, outputLength string, sign func(canonical []byte) []byte) (*xdm.Node, *xdm.Node) {
 	t.Helper()
-	sig, si, _, value := elements(doc)
+	_, si, _, _ := elements(doc)
 	sm := si.ChildElements()[1]
-	sm.Attr("", "Algorithm").Value = method
 	if outputLength != "" {
-		xmltree.Text(xmltree.Element(sm, "ds", xmlsec.NSDSig, "HMACOutputLength"), outputLength)
+		hol := xmltree.Element(nil, "ds", xmlsec.NSDSig, "HMACOutputLength")
+		xmltree.Text(hol, outputLength)
+		doc, _ = xmltree.Rebuild(doc, &xmltree.Edits{Append: map[*xdm.Node][]*xdm.Node{sm: {hol}}})
 	}
+	sig, si, _, value := elements(doc)
+	si.ChildElements()[1].Attr("", "Algorithm").SetValue(method)
 	b, err := c14n.Bytes(si, c14n.Options{Algorithm: c14n.Exclusive10})
 	if err != nil {
 		t.Fatal(err)
 	}
-	value.Children[0].Value = base64.StdEncoding.EncodeToString(sign(b))
-	return sig
+	value.FirstChild().SetValue(base64.StdEncoding.EncodeToString(sign(b)))
+	return doc, sig
 }
 
 func macOf(h crypto.Hash, key []byte, octets int) func([]byte) []byte {
@@ -73,8 +76,7 @@ func TestLegacyAlgorithmsOnlyWhenNamed(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			doc := signEnveloped(t, `<r>x</r>`, kp, xmlsec.SigRSASHA256)
-			sig := resignWith(t, doc, c.method, "", c.sign)
+			doc, sig := resignWith(t, signEnveloped(t, `<r>x</r>`, kp, xmlsec.SigRSASHA256), c.method, "", c.sign)
 			if _, err := dsig.Verify(doc, sig, c.opts); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
 				t.Fatalf("empty allow-list: got %v", err)
 			}
@@ -110,8 +112,7 @@ func TestHMACNeverKeyedByCertificate(t *testing.T) {
 		{"raw key pinned", pub, dsig.VerifyOptions{PublicKey: kp.Certificate.PublicKey}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			doc := signEnveloped(t, `<r>x</r>`, kp, xmlsec.SigRSASHA256)
-			sig := resignWith(t, doc, xmlsec.SigHMACSHA256, "", macOf(crypto.SHA256, c.key, 32))
+			doc, sig := resignWith(t, signEnveloped(t, `<r>x</r>`, kp, xmlsec.SigRSASHA256), xmlsec.SigHMACSHA256, "", macOf(crypto.SHA256, c.key, 32))
 			c.opts.AllowedSignatureAlgorithms = []string{xmlsec.SigHMACSHA256}
 			if _, err := dsig.Verify(doc, sig, c.opts); !errors.Is(err, xmlsec.ErrUnsupportedKeyInfo) {
 				t.Fatalf("got %v", err)
@@ -159,8 +160,7 @@ func TestCVE20090217HMACTruncation(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.method[strings.LastIndex(c.method, "#")+1:]+"/"+strconv.Itoa(c.bits), func(t *testing.T) {
-			doc := signEnveloped(t, `<r>x</r>`, kp, xmlsec.SigRSASHA256)
-			sig := resignWith(t, doc, c.method, strconv.Itoa(c.bits), macOf(c.h, hmacSecret, c.bits/8))
+			doc, sig := resignWith(t, signEnveloped(t, `<r>x</r>`, kp, xmlsec.SigRSASHA256), c.method, strconv.Itoa(c.bits), macOf(c.h, hmacSecret, c.bits/8))
 			_, err := dsig.Verify(doc, sig, dsig.VerifyOptions{HMACKey: hmacSecret, AllowedSignatureAlgorithms: []string{c.method}})
 			switch {
 			case c.ok && err != nil:

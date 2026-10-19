@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"hash"
 
-	"github.com/knroy/go-xmlsec"
+	"github.com/knroy/go-xmlsec/v2"
 	"golang.org/x/text/unicode/norm"
 )
 

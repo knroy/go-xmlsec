@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/xenc"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/xenc"
 )
 
 var pbkdf2Allowed = xenc.DecryptOptions{AllowedKeyDerivationAlgorithms: []string{xmlsec.KeyDerivationPBKDF2}}

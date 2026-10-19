@@ -6,11 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 const manifestDoc = `<r><a xml:id="a">signed through the manifest</a><b xml:id="b">x</b></r>`
@@ -43,7 +43,7 @@ func signManifest(t *testing.T, refs []dsig.Reference, opts dsig.SignOptions, vi
 	if viaObject {
 		r = ref("#o")
 	}
-	if _, err := dsig.Sign(doc, newKey(t, rsaKey), dsig.SignOptions{
+	if _, err := signAt(&doc, newKey(t, rsaKey), dsig.SignOptions{
 		SignatureAlgorithm:        xmlsec.SigRSASHA256,
 		CanonicalizationAlgorithm: string(c14n.Exclusive10),
 		References:                []dsig.Reference{r},
@@ -175,6 +175,7 @@ func TestBuildManifestRefusals(t *testing.T) {
 		{"repeated Id", doc, []dsig.Reference{{URI: "#a", ID: "m", DigestAlgorithm: xmlsec.DigestSHA256, Transforms: excC14N}},
 			dsig.SignOptions{ManifestID: "m"}, xmlsec.ErrMalformed},
 		{"the Manifest's own Id", doc, []dsig.Reference{ref("#m")}, dsig.SignOptions{ManifestID: "m"}, xmlsec.ErrIDNotFound},
+		{"unknown digest", doc, []dsig.Reference{{URI: "#a", DigestAlgorithm: "urn:x", Transforms: excC14N}}, dsig.SignOptions{}, xmlsec.ErrUnsupportedAlgorithm},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -198,7 +199,7 @@ func TestManifestEnvelopedOutsideSignature(t *testing.T) {
 	r := ref("#m")
 	r.Type = xmlsec.TypeManifest
 	opts := dsig.VerifyOptions{IDAttributes: []xdm.QName{dsig.IDAttrDSig}}
-	if _, err := dsig.Sign(doc, newKey(t, rsaKey), dsig.SignOptions{
+	if _, err := signAt(&doc, newKey(t, rsaKey), dsig.SignOptions{
 		SignatureAlgorithm: xmlsec.SigRSASHA256, CanonicalizationAlgorithm: string(c14n.Exclusive10),
 		References: []dsig.Reference{r}, IDAttributes: opts.IDAttributes, Parent: xmltree.DocumentElement(doc),
 	}); err != nil {

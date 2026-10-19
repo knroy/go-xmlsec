@@ -5,19 +5,25 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // graft appends the element fragment, parsed on its own, to the document
-// element of doc: outside ds:SignedInfo, so the signature stays valid.
-func graft(t *testing.T, doc *xdm.Node, fragment string) {
+// element of a copy of doc: outside ds:SignedInfo, so the signature stays
+// valid. It returns the copy and sig's counterpart in it.
+func graft(t *testing.T, doc, sig *xdm.Node, fragment string) (*xdm.Node, *xdm.Node) {
 	t.Helper()
-	if fragment != "" {
-		xmltree.DocumentElement(doc).AppendChild(xmltree.DocumentElement(parse(t, []byte(fragment))))
+	if fragment == "" {
+		return doc, sig
 	}
+	var e xmltree.Edits
+	el := xmltree.DocumentElement(doc)
+	e.Insert(el, el.NumChildren(), xmltree.DocumentElement(parse(t, []byte(fragment))))
+	root, m := xmltree.Rebuild(doc, &e)
+	return root, m[sig]
 }
 
 // target is a ds or dsig11 element with wsu:Id "k" holding inner.
@@ -96,7 +102,7 @@ func TestRetrievalMethod(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			doc, sig := signedCovDoc(t, covKI(c.ki))
-			graft(t, doc, c.target)
+			doc, sig = graft(t, doc, sig, c.target)
 			cov, err := dsig.Verify(doc, sig, c.opts)
 			if !errors.Is(err, c.want) {
 				t.Fatalf("got %v, want %v", err, c.want)
@@ -110,7 +116,7 @@ func TestRetrievalMethod(t *testing.T) {
 	// DSAKeyValue, for a DSA signature.
 	k := &dsaKey().PublicKey
 	doc, sig := legacyDoc(t, sigMethod(xmlsec.SigDSASHA1, ""), xmlsec.DigestSHA256, retrievalMethod("#k", typDSA, ""), dsaSigner)
-	graft(t, doc, target(xmlsec.NSDSig, "DSAKeyValue", `<ds:P>`+b64(k.P.Bytes())+`</ds:P><ds:Q>`+b64(k.Q.Bytes())+`</ds:Q><ds:G>`+
+	doc, sig = graft(t, doc, sig, target(xmlsec.NSDSig, "DSAKeyValue", `<ds:P>`+b64(k.P.Bytes())+`</ds:P><ds:Q>`+b64(k.Q.Bytes())+`</ds:Q><ds:G>`+
 		b64(k.G.Bytes())+`</ds:G><ds:Y>`+b64(k.Y.Bytes())+`</ds:Y>`))
 	cov, err := dsig.Verify(doc, sig, dsig.VerifyOptions{AllowedSignatureAlgorithms: []string{xmlsec.SigDSASHA1}})
 	if err != nil || cov.KeyInfoForm != dsig.KeyInfoKeyValue {

@@ -6,12 +6,12 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xml/xpath"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/internal/xpathfilter"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xml/v2/xpath"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/internal/xpathfilter"
 )
 
 // XPathExpression is an XPath or XPath Filter 2.0 expression a verifier
@@ -87,7 +87,7 @@ func admitTransform(t *TransformSpec, opts VerifyOptions) error {
 	ns := map[string]string{}
 	for _, k := range kids {
 		if !k.IsElement(uri, local) || len(k.ChildElements()) > 0 {
-			return malformed("unexpected %s under ds:Transform %s", k.Name.Local, t.Algorithm)
+			return malformed("unexpected %s under ds:Transform %s", k.Name().Local, t.Algorithm)
 		}
 		e, ok := allowedExpression(k, opts.AllowedXPathExpressions)
 		if !ok {
@@ -220,13 +220,13 @@ func (s filtered) without(sig *xdm.Node) filtered {
 // the data's node set.
 func (d *data) member(n *xdm.Node) bool {
 	switch {
-	case d.stripComments && n.Kind == xdm.KindComment:
+	case d.stripComments && n.Kind() == xdm.KindComment:
 		return false
-	case n.Kind == xdm.KindNamespace:
+	case n.Kind() == xdm.KindNamespace:
 		if s, ok := d.ns.(c14n.NamespaceSet); ok {
-			return s.ContainsNamespace(n.Parent, n.Name.Local)
+			return s.ContainsNamespace(n.Parent(), n.Name().Local)
 		}
-		return d.ns.Contains(n.Parent)
+		return d.ns.Contains(n.Parent())
 	}
 	return d.ns.Contains(n)
 }
@@ -305,23 +305,23 @@ func (d *data) filter(t TransformSpec, sig *xdm.Node) error {
 			if !within(n, sig) {
 				d.cut = append(d.cut, n)
 			}
-		case n.Kind == xdm.KindNamespace:
-			out.ns[nsKey{n.Parent, n.Name.Local}] = true
+		case n.Kind() == xdm.KindNamespace:
+			out.ns[nsKey{n.Parent(), n.Name().Local}] = true
 		default:
 			out.nodes[n] = true
 		}
 	}
 	walk = func(n *xdm.Node) {
 		visit(n)
-		if n.Kind == xdm.KindElement {
+		if n.Kind() == xdm.KindElement {
 			for _, ns := range xpath.NamespaceNodesOf(n) {
 				visit(ns)
 			}
-			for _, a := range n.Attrs {
+			for a := range n.Attrs() {
 				visit(a)
 			}
 		}
-		for _, c := range n.Children {
+		for c := range n.Children() {
 			walk(c)
 		}
 	}
@@ -361,8 +361,8 @@ func selectFilter(expr string, ns map[string]string, lib xpath.FunctionLibrary, 
 		switch {
 		case !ok:
 			return s, malformed("XPath Filter 2.0 %q selects a non-node", expr)
-		case n.Kind == xdm.KindNamespace:
-			s.ns[nsKey{n.Parent, n.Name.Local}] = true
+		case n.Kind() == xdm.KindNamespace:
+			s.ns[nsKey{n.Parent(), n.Name().Local}] = true
 		default:
 			s.nodes[n] = true
 		}
@@ -373,12 +373,12 @@ func selectFilter(expr string, ns map[string]string, lib xpath.FunctionLibrary, 
 // expanded reports whether n is in the subtree expansion of s: in s, or
 // with an ancestor in s (section 3.4).
 func (s selection) expanded(n *xdm.Node) bool {
-	if n.Kind == xdm.KindNamespace && s.ns[nsKey{n.Parent, n.Name.Local}] {
+	if n.Kind() == xdm.KindNamespace && s.ns[nsKey{n.Parent(), n.Name().Local}] {
 		return true
 	}
 	// ponytail: an ancestor walk per node per filter, O(nodes x depth); mark
 	// subtrees top-down if deep documents ever make it show.
-	for ; n != nil; n = n.Parent {
+	for ; n != nil; n = n.Parent() {
 		if s.nodes[n] {
 			return true
 		}
@@ -389,7 +389,7 @@ func (s selection) expanded(n *xdm.Node) bool {
 // within reports whether x is top or one of its descendants, attributes and
 // namespace nodes included.
 func within(x, top *xdm.Node) bool {
-	for ; x != nil && top != nil; x = x.Parent {
+	for ; x != nil && top != nil; x = x.Parent() {
 		if x == top {
 			return true
 		}

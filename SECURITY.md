@@ -14,8 +14,10 @@ not a vendor with an on-call rotation; factor that in before depending on it.
 
 ## Supported versions
 
-The latest v1 release. Fixes are released as a new v1 minor or patch
-version, not backported.
+The latest v2 release (`github.com/knroy/go-xmlsec/v2`) and the
+latest v1 release (`github.com/knroy/go-xmlsec`, from the `v1` branch). Fixes
+are released as a new minor or patch version of each, not backported to
+older ones.
 
 ## What counts as a vulnerability
 

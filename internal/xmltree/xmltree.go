@@ -7,44 +7,57 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/knroy/go-xml/xdm"
+	"github.com/knroy/go-xml/v2/xdm"
 )
 
 // Element creates an element and, if parent is non-nil, appends it there.
+// Trees are built top-down: parent must still be open, and the element's
+// attributes go on before its children.
 func Element(parent *xdm.Node, prefix, uri, local string) *xdm.Node {
-	e := &xdm.Node{Kind: xdm.KindElement, Name: xdm.QName{Prefix: prefix, URI: uri, Local: local}}
-	if parent != nil {
-		parent.AppendChild(e)
+	name := xdm.QName{Prefix: prefix, URI: uri, Local: local}
+	if parent == nil {
+		return xdm.NewNode(xdm.KindElement, name, "")
 	}
-	return e
+	return parent.AppendElement(name)
 }
 
-// SetAttr sets an attribute, replacing any with the same expanded name.
+// SetAttr sets an attribute, replacing any with the same expanded name. A
+// new one must come before e's first child.
 func SetAttr(e *xdm.Node, prefix, uri, local, value string) {
 	if a := e.Attr(uri, local); a != nil {
-		a.Value = value
+		a.SetValue(value)
 		return
 	}
-	e.AddAttr(&xdm.Node{Name: xdm.QName{Prefix: prefix, URI: uri, Local: local}, Value: value})
+	e.AppendAttr(xdm.QName{Prefix: prefix, URI: uri, Local: local}, value)
 }
 
 // Text appends a text node.
 func Text(e *xdm.Node, s string) {
-	e.AppendChild(&xdm.Node{Kind: xdm.KindText, Value: s})
+	e.AppendText(s)
 }
 
 // Declare binds prefix to uri on e unless that binding is already in scope.
 // It refuses to shadow a different binding of the same prefix, which would
 // change the meaning of any descendant using it.
 func Declare(e *xdm.Node, prefix, uri string) error {
+	need, err := NeedsDeclaration(e, prefix, uri)
+	if need {
+		e.AddNamespace(prefix, uri)
+	}
+	return err
+}
+
+// NeedsDeclaration reports whether binding prefix to uri on e takes a
+// declaration, which is when prefix is not in scope there. A different
+// binding of prefix in scope is an error, as for Declare.
+func NeedsDeclaration(e *xdm.Node, prefix, uri string) (bool, error) {
 	if got, ok := e.LookupPrefix(prefix); ok && got != "" {
 		if got == uri {
-			return nil
+			return false, nil
 		}
-		return fmt.Errorf("prefix %q already bound to %q", prefix, got)
+		return false, fmt.Errorf("prefix %q already bound to %q", prefix, got)
 	}
-	e.AddNamespace(prefix, uri)
-	return nil
+	return true, nil
 }
 
 // DocumentElement returns the element child of n's document node, or nil.
@@ -53,11 +66,11 @@ func DocumentElement(n *xdm.Node) *xdm.Node {
 		return nil
 	}
 	root := n.Root()
-	if root.Kind == xdm.KindElement {
+	if root.Kind() == xdm.KindElement {
 		return root
 	}
-	for _, c := range root.Children {
-		if c.Kind == xdm.KindElement {
+	for c := range root.Children() {
+		if c.Kind() == xdm.KindElement {
 			return c
 		}
 	}
@@ -66,10 +79,10 @@ func DocumentElement(n *xdm.Node) *xdm.Node {
 
 // Walk calls f for every element in n's subtree, in document order.
 func Walk(n *xdm.Node, f func(*xdm.Node)) {
-	if n.Kind == xdm.KindElement {
+	if n.Kind() == xdm.KindElement {
 		f(n)
 	}
-	for _, c := range n.Children {
+	for c := range n.Children() {
 		Walk(c, f)
 	}
 }
@@ -91,23 +104,11 @@ func Base64(e *xdm.Node) ([]byte, error) {
 // or "".
 func AttrValue(e *xdm.Node, uri, local string) string {
 	if a := e.Attr(uri, local); a != nil {
-		return a.Value
+		return a.Value()
 	}
 	return ""
 }
 
 // Clone returns a detached deep copy of n: its attributes, namespace
 // declarations and descendants.
-func Clone(n *xdm.Node) *xdm.Node {
-	c := &xdm.Node{Kind: n.Kind, Name: n.Name, Value: n.Value}
-	for _, a := range n.Attrs {
-		c.AddAttr(&xdm.Node{Name: a.Name, Value: a.Value})
-	}
-	for _, ns := range n.Namespaces {
-		c.AddNamespace(ns.Name.Local, ns.Value)
-	}
-	for _, k := range n.Children {
-		c.AppendChild(Clone(k))
-	}
-	return c
-}
+func Clone(n *xdm.Node) *xdm.Node { return xdm.Copy(n) }

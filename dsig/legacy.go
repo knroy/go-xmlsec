@@ -12,9 +12,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/hashes"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/hashes"
 )
 
 // The algorithms of XML-DSig 1.1 section 6.1 outside the default sets
@@ -157,7 +157,7 @@ func parseDSAKeyValue(e *xdm.Node) (crypto.PublicKey, error) {
 			i++
 		}
 		if i == len(names) {
-			return nil, malformed("unexpected or out-of-order %s in ds:DSAKeyValue", k.Name.Local)
+			return nil, malformed("unexpected or out-of-order %s in ds:DSAKeyValue", k.Name().Local)
 		}
 		n, err := cryptoBinary(k)
 		if err != nil {

@@ -5,9 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/xenc"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/xenc"
 )
 
 func TestAddKeyReference(t *testing.T) {
@@ -55,14 +54,13 @@ func TestEncryptedKeyChain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	xmltree.SetAttr(data.Element, "", "", "Id", "dk")
 	if err := data.AddDataReference("ed"); err != nil {
 		t.Fatal(err)
 	}
 	if err := kek.AddKeyReference("dk"); err != nil {
 		t.Fatal(err)
 	}
-	doc := covParse(t, `<r xmlns="urn:example">`+dkString(t, data.Element)+dkString(t, kek.Element)+`<p>hello</p></r>`)
+	doc := covParse(t, `<r xmlns="urn:example">`+strings.Replace(dkString(t, data.Element), "<xenc:EncryptedKey ", `<xenc:EncryptedKey Id="dk" `, 1)+dkString(t, kek.Element)+`<p>hello</p></r>`)
 	out, err := xenc.EncryptElement(doc.Root(), firstNamed(doc, "p"), data.SessionKey, xenc.EncryptOptions{DataAlgorithm: xmlsec.EncAES128GCM, DataID: "ed"})
 	if err != nil {
 		t.Fatal(err)

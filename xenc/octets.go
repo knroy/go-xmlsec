@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net/url"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // EncryptOctets encrypts arbitrary octets, such as an image or a non-XML
@@ -32,7 +32,7 @@ func EncryptOctets(plaintext, sessionKey []byte, opts EncryptOptions) ([]byte, *
 		}
 	}
 	opts.CipherReferenceURI = ""
-	ed, err := newEncryptedData(opts.Type, opts)
+	ed, err := newEncryptedData(opts.Type, "", opts)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -41,11 +41,14 @@ func EncryptOctets(plaintext, sessionKey []byte, opts EncryptOptions) ([]byte, *
 		return nil, nil, err
 	}
 	cd := element(ed, "CipherData")
-	place(ed)
 	if uri == "" {
 		xmltree.Text(element(cd, "CipherValue"), base64.StdEncoding.EncodeToString(ct))
-		return nil, ed, nil
+		ct = nil
+	} else {
+		xmltree.SetAttr(element(cd, "CipherReference"), "", "", "URI", uri)
 	}
-	xmltree.SetAttr(element(cd, "CipherReference"), "", "", "URI", uri)
+	if err := addProperties(ed, opts); err != nil {
+		return nil, nil, err
+	}
 	return ct, ed, nil
 }

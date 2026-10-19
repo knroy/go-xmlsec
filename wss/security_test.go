@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 func parseDoc(t *testing.T, s string) *xdm.Node {
@@ -19,6 +19,12 @@ func parseDoc(t *testing.T, s string) *xdm.Node {
 		t.Fatal(err)
 	}
 	return tree.Root
+}
+
+// newDoc parses s into a Document.
+func newDoc(t *testing.T, s string) *xmlsec.Document {
+	t.Helper()
+	return xmlsec.NewDocument(parseDoc(t, s))
 }
 
 const (
@@ -40,7 +46,7 @@ func TestNewHeaderErrors(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if _, err := NewHeader(parseDoc(t, c.doc), c.ns, "", false); err == nil {
+			if _, err := NewHeader(newDoc(t, c.doc), c.ns, "", false); err == nil {
 				t.Fatal("accepted")
 			}
 		})
@@ -48,14 +54,14 @@ func TestNewHeaderErrors(t *testing.T) {
 }
 
 func TestNewHeaderSOAP12(t *testing.T) {
-	doc := parseDoc(t, env12)
+	doc := newDoc(t, env12)
 	h, err := NewHeader(doc, xmlsec.NSSOAP12, "urn:role", true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	sec := h.Element()
 	if !sec.IsElement(xmlsec.NSWSSE, "Security") {
-		t.Fatalf("Element() = %v", sec.Name)
+		t.Fatalf("Element() = %v", sec.Name())
 	}
 	if got := xmltree.AttrValue(sec, xmlsec.NSSOAP12, "role"); got != "urn:role" {
 		t.Errorf("role = %q", got)
@@ -66,7 +72,7 @@ func TestNewHeaderSOAP12(t *testing.T) {
 	if xmltree.AttrValue(sec, xmlsec.NSSOAP12, "actor") != "" {
 		t.Error("SOAP 1.2 header carries actor")
 	}
-	env := xmltree.DocumentElement(doc)
+	env := xmltree.DocumentElement(doc.Root())
 	if kids := env.ChildElements(); len(kids) != 2 || !kids[0].IsElement(xmlsec.NSSOAP12, "Header") {
 		t.Fatal("Header not inserted before Body")
 	}
@@ -76,6 +82,7 @@ func TestNewHeaderSOAP12(t *testing.T) {
 	if _, err := NewHeader(doc, xmlsec.NSSOAP12, "", false); err != nil {
 		t.Fatal(err)
 	}
+	env = xmltree.DocumentElement(doc.Root())
 	if n := len(env.ChildElements()); n != 2 {
 		t.Fatalf("%d children of Envelope, want existing Header reused", n)
 	}
@@ -88,7 +95,8 @@ func TestNewHeaderSOAP12(t *testing.T) {
 }
 
 func TestAppend(t *testing.T) {
-	h, err := NewHeader(parseDoc(t, env11), xmlsec.NSSOAP11, "", false)
+	doc := newDoc(t, env11)
+	h, err := NewHeader(doc, xmlsec.NSSOAP11, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,10 +104,10 @@ func TestAppend(t *testing.T) {
 	if err := h.Append(el); err != nil {
 		t.Fatal(err)
 	}
-	if el.Parent != h.Element() {
-		t.Fatal("not appended to Security")
+	if doc.Node(el).Parent() != h.Element() || el.Parent() != nil {
+		t.Fatal("copy not appended to Security")
 	}
-	if err := h.Append(el); err == nil {
+	if err := h.Append(doc.Node(el)); err == nil {
 		t.Fatal("already-parented element accepted")
 	}
 	if err := h.Append(nil); err == nil {
@@ -141,7 +149,7 @@ func TestHeaderNotFromNewHeader(t *testing.T) {
 func TestPrefixBoundElsewhere(t *testing.T) {
 	for name, src := range map[string]string{"wsu": envWSUClash, "wsse": envWSSEClash} {
 		t.Run(name, func(t *testing.T) {
-			doc := parseDoc(t, src)
+			doc := newDoc(t, src)
 			h, err := NewHeader(doc, xmlsec.NSSOAP11, "", false)
 			if err != nil {
 				t.Fatal(err)
@@ -154,7 +162,7 @@ func TestPrefixBoundElsewhere(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			out, err := c14n.Bytes(doc, c14n.Options{Algorithm: c14n.Inclusive10})
+			out, err := c14n.Bytes(doc.Root(), c14n.Options{Algorithm: c14n.Inclusive10})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -164,7 +172,7 @@ func TestPrefixBoundElsewhere(t *testing.T) {
 				if err != nil {
 					t.Fatalf("%s: %v\n%s", id, err, out)
 				}
-				if el.Parent == nil || !el.Parent.IsElement(xmlsec.NSWSSE, "Security") {
+				if el.Parent() == nil || !el.Parent().IsElement(xmlsec.NSWSSE, "Security") {
 					t.Fatalf("%s is not under wsse:Security:\n%s", id, out)
 				}
 			}
@@ -183,25 +191,25 @@ func TestNewHeaderDefaultNamespace(t *testing.T) {
 		{xmlsec.NSSOAP12, "role", "true", "env"},
 	} {
 		t.Run(c.prefix, func(t *testing.T) {
-			doc := parseDoc(t, `<Envelope xmlns="`+c.ns+`"><Body/></Envelope>`)
+			doc := newDoc(t, `<Envelope xmlns="`+c.ns+`"><Body/></Envelope>`)
 			if _, err := NewHeader(doc, c.ns, "urn:r", true); err != nil {
 				t.Fatal(err)
 			}
-			out, err := c14n.Bytes(doc, c14n.Options{Algorithm: c14n.Inclusive10})
+			out, err := c14n.Bytes(doc.Root(), c14n.Options{Algorithm: c14n.Inclusive10})
 			if err != nil {
 				t.Fatal(err)
 			}
 			env := xmltree.DocumentElement(parseDoc(t, string(out)))
 			hdr := env.ChildElements()[0]
-			if !hdr.IsElement(c.ns, "Header") || hdr.Name.Prefix != "" {
-				t.Fatalf("Header %v:\n%s", hdr.Name, out)
+			if !hdr.IsElement(c.ns, "Header") || hdr.Name().Prefix != "" {
+				t.Fatalf("Header %v:\n%s", hdr.Name(), out)
 			}
 			sec := hdr.ChildElements()[0]
 			if xmltree.AttrValue(sec, c.ns, "mustUnderstand") != c.mu || xmltree.AttrValue(sec, c.ns, c.actorAttr) != "urn:r" {
 				t.Fatalf("SOAP attributes lost:\n%s", out)
 			}
-			if a := sec.Attr(c.ns, "mustUnderstand"); a.Name.Prefix != c.prefix {
-				t.Errorf("prefix %q, want %q", a.Name.Prefix, c.prefix)
+			if a := sec.Attr(c.ns, "mustUnderstand"); a.Name().Prefix != c.prefix {
+				t.Errorf("prefix %q, want %q", a.Name().Prefix, c.prefix)
 			}
 		})
 	}
@@ -212,7 +220,7 @@ func TestNewHeaderDefaultNamespace(t *testing.T) {
 func TestNewHeaderSameRecipient(t *testing.T) {
 	const ult = "http://www.w3.org/2003/05/soap-envelope/role/ultimateReceiver"
 	for _, order := range [][2]string{{"", ult}, {ult, ""}, {ult, ult}} {
-		doc := parseDoc(t, env12)
+		doc := newDoc(t, env12)
 		if _, err := NewHeader(doc, xmlsec.NSSOAP12, order[0], false); err != nil {
 			t.Fatal(err)
 		}
@@ -220,7 +228,7 @@ func TestNewHeaderSameRecipient(t *testing.T) {
 			t.Errorf("%q then %q accepted", order[0], order[1])
 		}
 	}
-	doc := parseDoc(t, env11)
+	doc := newDoc(t, env11)
 	for _, actor := range []string{"", "http://schemas.xmlsoap.org/soap/actor/next", ult} {
 		if _, err := NewHeader(doc, xmlsec.NSSOAP11, actor, false); err != nil {
 			t.Errorf("SOAP 1.1 actor %q: %v", actor, err)
@@ -233,7 +241,7 @@ func TestNewHeaderSameRecipient(t *testing.T) {
 func childNames(h *Header) []string {
 	var out []string
 	for _, e := range h.Element().ChildElements() {
-		out = append(out, e.Name.Local+"#"+xmltree.AttrValue(e, xmlsec.NSWSU, "Id")+e.AttrValue("Id"))
+		out = append(out, e.Name().Local+"#"+xmltree.AttrValue(e, xmlsec.NSWSU, "Id")+e.AttrValue("Id"))
 	}
 	return out
 }
@@ -250,7 +258,7 @@ func usesToken(t *testing.T, ns, local, tokenID, data string) *xdm.Node {
 		if err != nil {
 			t.Fatal(err)
 		}
-		xmltree.Element(el, "ds", xmlsec.NSDSig, "KeyInfo").AppendChild(str)
+		xmltree.Element(el, "ds", xmlsec.NSDSig, "KeyInfo").AppendCopy(str)
 	}
 	if data != "" {
 		rl := xmltree.Element(el, "xenc", xmlsec.NSXEnc, "ReferenceList")
@@ -266,8 +274,7 @@ func usesToken(t *testing.T, ns, local, tokenID, data string) *xdm.Node {
 // EncryptedKey (decrypt), the signer's token, the Signature (verify). Each
 // token precedes the references to it (BSP R5205).
 func TestPrependOrder(t *testing.T) {
-	doc := parseDoc(t, env12)
-	h, err := NewHeader(doc, xmlsec.NSSOAP12, "", true)
+	h, err := NewHeader(newDoc(t, env12), xmlsec.NSSOAP12, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +307,7 @@ func TestPrependOrder(t *testing.T) {
 	}
 
 	// Without a timestamp, first is first.
-	h2, err := NewHeader(parseDoc(t, env11), xmlsec.NSSOAP11, "", false)
+	h2, err := NewHeader(newDoc(t, env11), xmlsec.NSSOAP11, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,17 +319,34 @@ func TestPrependOrder(t *testing.T) {
 	if got := childNames(h2); !slices.Equal(got, []string{"A#", "B#"}) {
 		t.Fatalf("got %v", got)
 	}
+	// A timestamp is found past leading non-element children.
+	h3, err := NewHeader(newDoc(t, env11), xmlsec.NSSOAP11, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h3.Append(xdm.NewNode(xdm.KindText, xdm.QName{}, " ")); err != nil {
+		t.Fatal(err)
+	}
+	if err := h3.Append(xmltree.Element(nil, "wsu", xmlsec.NSWSU, "Timestamp")); err != nil {
+		t.Fatal(err)
+	}
+	if err := h3.Prepend(usesToken(t, "urn:x", "A", "", "")); err != nil {
+		t.Fatal(err)
+	}
+	if got := childNames(h3); !slices.Equal(got, []string{"Timestamp#", "A#"}) || h3.Element().FirstChild().Kind() != xdm.KindText {
+		t.Fatalf("got %v", got)
+	}
 }
 
 func TestPrependRefusals(t *testing.T) {
-	h, err := NewHeader(parseDoc(t, env11), xmlsec.NSSOAP11, "", false)
+	h, err := NewHeader(newDoc(t, env11), xmlsec.NSSOAP11, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	parented := xmltree.Element(xmltree.Element(nil, "", "", "p"), "", "", "x")
 	for name, el := range map[string]*xdm.Node{
 		"nil":      nil,
-		"text":     {Kind: xdm.KindText, Value: "t"},
+		"text":     xdm.NewNode(xdm.KindText, xdm.QName{}, "t"),
 		"parented": parented,
 	} {
 		if err := h.Prepend(el); err == nil {

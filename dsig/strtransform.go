@@ -10,11 +10,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/wss"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/wss"
 )
 
 // The STR Dereference Transform, SOAP Message Security 1.1.1 section 8.3.
@@ -112,7 +112,7 @@ func resolveCertificate(str *xdm.Node, resolve func(*xdm.Node) (*x509.Certificat
 // without white space. WSS4J builds the same element, with wsse for an
 // unprefixed reference.
 func x509Token(str *xdm.Node, cert *x509.Certificate) *xdm.Node {
-	p := str.Name.Prefix
+	p := str.Name().Prefix
 	if p == "" {
 		p = "wsse"
 	}
@@ -192,7 +192,7 @@ func (d *data) digestSTR(w hash.Hash, t TransformSpec, only bool) error {
 // cause a fault; they do.
 func parseSTRTransform(spec TransformSpec) (TransformSpec, error) {
 	kids := spec.el.ChildElements()
-	if len(kids) != 1 || !kids[0].IsElement(xmlsec.NSWSSE, "TransformationParameters") || len(kids[0].Attrs) > 0 {
+	if len(kids) != 1 || !kids[0].IsElement(xmlsec.NSWSSE, "TransformationParameters") || kids[0].NumAttrs() > 0 {
 		return spec, malformed("the STR Dereference Transform must hold one wsse:TransformationParameters, without attributes (BSP R3065)")
 	}
 	params := kids[0].ChildElements()

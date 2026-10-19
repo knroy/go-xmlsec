@@ -8,11 +8,11 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // The XML Signature 1.1 structures beyond ds:SignedInfo: ds:Object in an
@@ -28,7 +28,7 @@ func objRef(uri string) dsig.Reference {
 
 func children(t *testing.T, s string) []*xdm.Node {
 	t.Helper()
-	return xmltree.DocumentElement(parse(t, []byte(s))).Children
+	return slices.Collect(xmltree.DocumentElement(parse(t, []byte(s))).Children())
 }
 
 func bytesOf(t *testing.T, doc *xdm.Node) []byte {
@@ -58,9 +58,7 @@ func TestPeersVerifyOurEnvelopingSignature(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc := &xdm.Node{Kind: xdm.KindDocument}
-	doc.AppendChild(sig)
-	signed := bytesOf(t, doc)
+	signed := bytesOf(t, docOf(sig))
 	tampered := bytes.Replace(signed, []byte("hello"), []byte("jello"), 1)
 
 	mustSantuario(t, "--id-attr", "Id", "verify", tempFile(t, "signed.xml", signed), kp.certPEM)
@@ -107,7 +105,8 @@ func TestSantuarioVerifiesOurManifest(t *testing.T) {
 	}
 	r := objRef("#m")
 	r.Type = xmlsec.TypeManifest
-	if _, err := dsig.Sign(doc, kp.provider, dsig.SignOptions{
+	d := xmlsec.NewDocument(doc)
+	if _, err := dsig.Sign(d, kp.provider, dsig.SignOptions{
 		SignatureAlgorithm:        xmlsec.SigRSASHA256,
 		CanonicalizationAlgorithm: string(c14n.Exclusive10),
 		KeyInfo:                   dsig.KeyInfoX509Data,
@@ -117,7 +116,7 @@ func TestSantuarioVerifiesOurManifest(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	signed := bytesOf(t, doc)
+	signed := bytesOf(t, d.Root())
 	mustSantuario(t, "--id-attr", "Id", "verify", tempFile(t, "signed.xml", signed), kp.certPEM)
 	ours := manifestDigest(t, signed)
 	// The Manifest's DigestValue, the last in the document.
@@ -166,7 +165,8 @@ func TestWeVerifySantuarioManifest(t *testing.T) {
 func TestPeersVerifyOurCanonicalizationPrefixes(t *testing.T) {
 	kp := newKeypair(t, rsaKey(t))
 	doc := parse(t, []byte(`<r xmlns:p="urn:example:p"><a xml:id="a">x</a></r>`))
-	if _, err := dsig.Sign(doc, kp.provider, dsig.SignOptions{
+	d := xmlsec.NewDocument(doc)
+	if _, err := dsig.Sign(d, kp.provider, dsig.SignOptions{
 		SignatureAlgorithm:        xmlsec.SigRSASHA256,
 		CanonicalizationAlgorithm: string(c14n.Exclusive10),
 		CanonicalizationPrefixes:  []string{"p"},
@@ -176,7 +176,7 @@ func TestPeersVerifyOurCanonicalizationPrefixes(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	signed := bytesOf(t, doc)
+	signed := bytesOf(t, d.Root())
 	if !bytes.Contains(signed, []byte(`PrefixList="p"`)) {
 		t.Fatalf("no PrefixList:\n%s", signed)
 	}

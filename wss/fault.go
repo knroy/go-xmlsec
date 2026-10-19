@@ -4,8 +4,8 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
 )
 
 // FaultCode maps an error from this module to the SOAP fault code of SOAP

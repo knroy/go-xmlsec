@@ -2,11 +2,12 @@ package xenc_test
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/xenc"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/xenc"
 )
 
 const resolveNS = `xmlns:xenc="` + xmlsec.NSXEnc + `" xmlns:ds="` + xmlsec.NSDSig + `" xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd"`
@@ -50,7 +51,7 @@ func TestFindEncryptedKey(t *testing.T) {
 				t.Fatal(err)
 			}
 			if ek.AttrValue("Id") != "want" && ek.AttrValue("Recipient") != "want" {
-				t.Fatalf("found %v", ek.Attrs)
+				t.Fatalf("found %v", slices.Collect(ek.Attrs()))
 			}
 		})
 	}
@@ -129,7 +130,7 @@ func TestFindEncryptedKeyOfEncryptedKey(t *testing.T) {
 				t.Fatal(err)
 			}
 			if ek.AttrValue("Id") != "want" && ek.AttrValue("Recipient") != "want" {
-				t.Fatalf("found %v", ek.Attrs)
+				t.Fatalf("found %v", slices.Collect(ek.Attrs()))
 			}
 		})
 	}
@@ -191,7 +192,7 @@ func TestFindDerivedKey(t *testing.T) {
 				t.Fatal(err)
 			}
 			if dk.AttrValue("Id") != "want" && dk.AttrValue("Recipient") != "want" {
-				t.Fatalf("found %v", dk.Attrs)
+				t.Fatalf("found %v", slices.Collect(dk.Attrs()))
 			}
 		})
 	}

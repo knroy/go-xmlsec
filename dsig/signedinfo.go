@@ -3,10 +3,10 @@ package dsig
 import (
 	"fmt"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // parsedSignature is a received ds:Signature, structurally validated.
@@ -53,7 +53,7 @@ func parseSignature(sig *xdm.Node, maxRefs int) (*parsedSignature, error) {
 			p.keyInfo = k
 		case k.IsElement(xmlsec.NSDSig, "Object"):
 		default:
-			return nil, malformed("unexpected %s in ds:Signature", k.Name.Local)
+			return nil, malformed("unexpected %s in ds:Signature", k.Name().Local)
 		}
 	}
 
@@ -89,10 +89,10 @@ func parseSignature(sig *xdm.Node, maxRefs int) (*parsedSignature, error) {
 func parseReference(r *xdm.Node) (parsedReference, error) {
 	ref := parsedReference{el: r, typ: r.AttrValue("Type")}
 	if !r.IsElement(xmlsec.NSDSig, "Reference") {
-		return ref, malformed("unexpected %s in ds:SignedInfo", r.Name.Local)
+		return ref, malformed("unexpected %s in ds:SignedInfo", r.Name().Local)
 	}
 	if uri := r.Attr("", "URI"); uri != nil {
-		ref.uri = uri.Value
+		ref.uri = uri.Value()
 	} else {
 		ref.omitted = true
 	}
@@ -105,7 +105,7 @@ func parseReference(r *xdm.Node) (parsedReference, error) {
 		}
 		for _, t := range ts {
 			if !t.IsElement(xmlsec.NSDSig, "Transform") {
-				return ref, malformed("unexpected %s in ds:Transforms", t.Name.Local)
+				return ref, malformed("unexpected %s in ds:Transforms", t.Name().Local)
 			}
 			spec, err := parseTransform(t)
 			if err != nil {
@@ -144,7 +144,7 @@ func parseTransform(t *xdm.Node) (TransformSpec, error) {
 			spec.InclusiveNamespacePrefixes != nil {
 			// Unknown children are refused rather than ignored: an XPath or
 			// XSLT transform carries its program as a child.
-			return spec, malformed("unexpected %s under %s", k.Name.Local, t.Name.Local)
+			return spec, malformed("unexpected %s under %s", k.Name().Local, t.Name().Local)
 		}
 		spec.InclusiveNamespacePrefixes = c14n.ParsePrefixList(k.AttrValue("PrefixList"))
 		if spec.InclusiveNamespacePrefixes == nil {

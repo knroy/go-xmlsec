@@ -11,18 +11,27 @@ that line.
 | `TestVersionIsReleasedAndDescribed` | every push and pull request | the constant is not a `1.N.N` triple; the newest released section of `CHANGELOG.md` (the first `## vX.Y.Z` heading, with only `## Unreleased` allowed above it) is not `## v` plus the constant; an `## Unreleased` heading sits below that section |
 | `release.yml` | the tag push | the tag does not equal the constant; the changelog section is missing or empty |
 
-## Compatibility within v1
+## Compatibility and branches
 
-`v1.0.0` promises every exported name. Within v1, a minor release may add API
+The current major version is v2, module path `github.com/knroy/go-xmlsec/v2`.
+`v2.0.0` promises every exported name. Within v2, a minor release may add API
 and a patch release only fixes; neither removes or changes anything exported.
-A breaking change needs the module path `github.com/knroy/go-xmlsec/v2`.
-`TestVersionIsReleasedAndDescribed` enforces the major version 1, so moving
-past it is a deliberate change to that test. A module version is permanent
-once the Go proxy has seen it.
+A breaking change needs the module path `github.com/knroy/go-xmlsec/v3`.
 
-A security fix that can only be made by refusing input v1 accepted, such as a
-newly broken algorithm leaving a default set, is made in a minor release and
-called out in the changelog: refusing an attack is not an API break.
+v1, module path `github.com/knroy/go-xmlsec`, continues on the `v1` branch for
+fixes only, released from that branch by the same steps with a `1.N.N`
+constant. Its compatibility promise is unchanged: every exported name of
+`v1.0.0`.
+
+`TestVersionIsReleasedAndDescribed` enforces the major version. Until
+`v2.0.0` is cut it still requires 1: the release commit changes the test to
+require 2 and sets the constant to `2.0.0` together. A module version is
+permanent once the Go proxy has seen it.
+
+A security fix that can only be made by refusing input an earlier release
+accepted, such as a newly broken algorithm leaving a default set, is made in
+a minor release and called out in the changelog: refusing an attack is not
+an API break.
 
 ## Steps
 
@@ -68,7 +77,7 @@ change.
 `go.mod` says `go 1.26.0`, a choice rather than an accident. Measured by
 building with older toolchains:
 
-* **Go 1.25** is the lowest possible: `go-xml` itself requires it (v1.6.0 still does).
+* **Go 1.25** is the lowest possible: `go-xml` itself requires it (v2.0.1 still does).
 * **Go 1.26** is required by one call, `rsa.EncryptOAEPWithOptions`
   (`xenc/keytransport.go`), the only standard library way to encrypt
   RSA-OAEP with an MGF digest different from the OAEP digest. A 1.25 build

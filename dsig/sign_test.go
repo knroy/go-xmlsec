@@ -12,12 +12,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/wss"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/wss"
 )
 
 // covSigner replaces the Sign method of a real signer.
@@ -34,20 +34,20 @@ type covOpaqueSigner struct{ crypto.Signer }
 // document, the token's wsu:Id and the Body's wsu:Id.
 func covTokenDoc(t *testing.T, key xmlsec.KeyProvider) (doc *xdm.Node, tokID, bodyID string) {
 	t.Helper()
-	doc = parse(t, []byte(envelope))
-	body := xmltree.DocumentElement(doc).ChildElements()[1]
+	d := xmlsec.NewDocument(parse(t, []byte(envelope)))
+	body := xmltree.DocumentElement(d.Root()).ChildElements()[1]
 	var err error
-	if bodyID, err = wss.AssignID(doc, body); err != nil {
+	if bodyID, err = wss.AssignID(d, body); err != nil {
 		t.Fatal(err)
 	}
-	hdr, err := wss.NewHeader(doc, xmlsec.NSSOAP12, "", false)
+	hdr, err := wss.NewHeader(d, xmlsec.NSSOAP12, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if tokID, err = hdr.AddBinarySecurityToken(key.Certificate, nil, xmlsec.BSTValueTypeX509v3); err != nil {
 		t.Fatal(err)
 	}
-	return doc, tokID, bodyID
+	return d.Root(), tokID, bodyID
 }
 
 func TestSignErrors(t *testing.T) {
@@ -200,7 +200,7 @@ func TestSignErrors(t *testing.T) {
 			if c.mod != nil {
 				c.mod(&opts)
 			}
-			sig, err := dsig.Sign(doc, c.key, opts)
+			sig, err := signAt(&doc, c.key, opts)
 			if err == nil || c.want != nil && !errors.Is(err, c.want) {
 				t.Fatalf("got %v, want %v", err, c.want)
 			}
@@ -223,7 +223,7 @@ func TestSignEnvelopedErrors(t *testing.T) {
 		c14n string
 		want error // nil: any error
 	}{
-		{"no document element", &xdm.Node{Kind: xdm.KindDocument}, covExc, xmlsec.ErrMalformed},
+		{"no document element", xdm.NewNode(xdm.KindDocument, xdm.QName{}, ""), covExc, xmlsec.ErrMalformed},
 		{"unknown canonicalization", parse(t, []byte(`<r/>`)), "urn:x", xmlsec.ErrUnsupportedAlgorithm},
 		{"ds prefix bound elsewhere", parse(t, []byte(`<r xmlns:ds="urn:other"/>`)), covExc, nil},
 		{"ec prefix bound elsewhere", parse(t, []byte(`<r xmlns:ec="urn:other"/>`)), covExc, nil},
@@ -250,8 +250,8 @@ func TestSignEnvelopedErrors(t *testing.T) {
 func covSignAndPlace(t *testing.T, key xmlsec.KeyProvider, ki dsig.KeyInfoForm, atts xmlsec.AttachmentSet,
 	refs func(bodyID string) []dsig.Reference) []byte {
 	t.Helper()
-	doc := parse(t, []byte(envelope))
-	body := xmltree.DocumentElement(doc).ChildElements()[1]
+	doc := xmlsec.NewDocument(parse(t, []byte(envelope)))
+	body := xmltree.DocumentElement(doc.Root()).ChildElements()[1]
 	bodyID, err := wss.AssignID(doc, body)
 	if err != nil {
 		t.Fatal(err)
@@ -274,7 +274,7 @@ func covSignAndPlace(t *testing.T, key xmlsec.KeyProvider, ki dsig.KeyInfoForm, 
 	if err := hdr.Append(sig); err != nil {
 		t.Fatal(err)
 	}
-	return serialize(t, doc)
+	return serialize(t, doc.Root())
 }
 
 // An exclusive PrefixList is emitted, read back, and changes what is
@@ -356,7 +356,7 @@ func TestSignEmptyTokenID(t *testing.T) {
 	doc := parse(t, []byte(`<r xmlns:wsu="`+xmlsec.NSWSU+`"><wsse:BinarySecurityToken xmlns:wsse="`+xmlsec.NSWSSE+`" wsu:Id=""`+
 		` EncodingType="`+xmlsec.BSTEncodingBase64+`" ValueType="`+xmlsec.BSTValueTypeX509v3+`">`+
 		base64.StdEncoding.EncodeToString(key.Certificate.Raw)+`</wsse:BinarySecurityToken></r>`))
-	_, err := dsig.Sign(doc, key, dsig.SignOptions{
+	_, err := signAt(&doc, key, dsig.SignOptions{
 		SignatureAlgorithm:        xmlsec.SigRSASHA256,
 		CanonicalizationAlgorithm: covExc,
 		References: []dsig.Reference{{URI: "cid:att-1@example.com", DigestAlgorithm: xmlsec.DigestSHA256,
@@ -387,13 +387,18 @@ func TestSignInPlace(t *testing.T) {
 		KeyInfo: dsig.KeyInfoX509Data,
 		Parent:  sec,
 	}
-	sig, err := dsig.Sign(doc, key, opts)
+	d := xmlsec.NewDocument(doc)
+	sig, err := dsig.Sign(d, key, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sig.Parent != sec {
-		t.Fatal("signature not placed under Parent")
+	if sig.Parent() != d.Node(sec) || sig.Root() != d.Root() {
+		t.Fatal("signature not placed under Parent in the Document's tree")
 	}
+	if findSignature(doc) != nil {
+		t.Fatal("the parsed tree changed")
+	}
+	doc = d.Root()
 	verifyOpts := dsig.VerifyOptions{Certificate: key.Certificate, AllowedCanonicalizationAlgorithms: []string{incl}}
 	if cov, err := dsig.Verify(doc, sig, verifyOpts); err != nil || !cov.Covers("body") {
 		t.Fatalf("in memory: %v", err)
@@ -406,6 +411,31 @@ func TestSignInPlace(t *testing.T) {
 	re := parse(t, out)
 	if _, err := dsig.Verify(re, findSignature(re), verifyOpts); err != nil {
 		t.Fatalf("after reparse: %v", err)
+	}
+}
+
+// In place, the signature declares only what parent does not already bind
+// so: no ds or dsig11 declaration repeated, and none of parent's own
+// bindings copied onto it.
+func TestSignInPlaceDeclarations(t *testing.T) {
+	key := newKey(t, rsaKey)
+	doc := parse(t, []byte(`<r xmlns:ds="`+xmlsec.NSDSig+`" xmlns:dsig11="`+xmlsec.NSDSig11+`" xmlns:p="urn:p"><a xml:id="a"/></r>`))
+	sig, err := signAt(&doc, key, dsig.SignOptions{
+		SignatureAlgorithm: xmlsec.SigRSASHA256, CanonicalizationAlgorithm: string(c14n.Exclusive10),
+		References: []dsig.Reference{ref("#a")}, KeyInfo: dsig.KeyInfoDEREncodedKeyValue,
+		Parent: xmltree.DocumentElement(doc),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	xmltree.Walk(sig, func(e *xdm.Node) {
+		for p := range e.DeclaredNamespaces() {
+			t.Errorf("%s declares %q", e.Name().Local, p)
+		}
+	})
+	d := parse(t, serialize(t, doc))
+	if _, err := dsig.Verify(d, findSignature(d), dsig.VerifyOptions{PublicKey: &rsaKey.PublicKey}); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -428,16 +458,28 @@ func TestSignInPlaceRefusals(t *testing.T) {
 		"parent not an element":      {doc, doc},
 		"no document":                {nil, root},
 	} {
-		if _, err := dsig.Sign(c.doc, key, base(c.doc, c.parent, "")); !errors.Is(err, xmlsec.ErrMalformed) {
+		var d *xmlsec.Document
+		if c.doc != nil {
+			d = xmlsec.NewDocument(c.doc)
+		}
+		if _, err := dsig.Sign(d, key, base(c.doc, c.parent, "")); !errors.Is(err, xmlsec.ErrMalformed) {
 			t.Errorf("%s: got %v", name, err)
 		}
 	}
+	// A Document not made by NewDocument is refused.
+	if _, err := dsig.Sign(&xmlsec.Document{}, key, base(doc, root, "")); !errors.Is(err, xmlsec.ErrMalformed) {
+		t.Errorf("zero Document: got %v", err)
+	}
 	// A failure after placing the signature leaves the document unchanged.
 	before := serialize(t, doc)
-	if _, err := dsig.Sign(doc, key, base(doc, root, "#nope")); !errors.Is(err, xmlsec.ErrIDNotFound) {
+	d := xmlsec.NewDocument(doc)
+	if _, err := dsig.Sign(d, key, base(doc, root, "#nope")); !errors.Is(err, xmlsec.ErrIDNotFound) {
 		t.Fatalf("got %v", err)
 	}
-	if after := serialize(t, doc); !bytes.Equal(after, before) {
+	if d.Root() != doc {
+		t.Fatal("a failed Sign replaced the Document's tree")
+	}
+	if after := serialize(t, d.Root()); !bytes.Equal(after, before) {
 		t.Fatalf("a failed Sign changed the document:\n%s", after)
 	}
 }
@@ -449,7 +491,7 @@ func TestCanonicalizationPrefixes(t *testing.T) {
 	key := newKey(t, rsaKey)
 	for _, prefixes := range [][]string{nil, {"p", ""}} {
 		doc := parse(t, []byte(`<r xmlns:p="urn:p"><a xml:id="a">x</a></r>`))
-		_, err := dsig.Sign(doc, key, dsig.SignOptions{
+		_, err := signAt(&doc, key, dsig.SignOptions{
 			SignatureAlgorithm:        xmlsec.SigRSASHA256,
 			CanonicalizationAlgorithm: string(c14n.Exclusive10),
 			CanonicalizationPrefixes:  prefixes,
@@ -484,7 +526,7 @@ func TestCanonicalizationPrefixes(t *testing.T) {
 		"inclusive":    {c14n.Inclusive10, []string{"p"}, xmltree.DocumentElement(doc)},
 		"not a prefix": {c14n.Exclusive10, []string{"a b"}, xmltree.DocumentElement(doc)},
 	} {
-		_, err := dsig.Sign(doc, key, dsig.SignOptions{
+		_, err := signAt(&doc, key, dsig.SignOptions{
 			SignatureAlgorithm: xmlsec.SigRSASHA256, CanonicalizationAlgorithm: string(c.alg),
 			CanonicalizationPrefixes: c.prefixes, Parent: c.parent,
 			References: []dsig.Reference{{URI: "", DigestAlgorithm: xmlsec.DigestSHA256,
@@ -497,7 +539,7 @@ func TestCanonicalizationPrefixes(t *testing.T) {
 
 	// The ec prefix of the PrefixList element may not shadow another.
 	doc = parse(t, []byte(`<r xmlns:ec="urn:other"><a xml:id="a"/></r>`))
-	if _, err := dsig.Sign(doc, key, dsig.SignOptions{
+	if _, err := signAt(&doc, key, dsig.SignOptions{
 		SignatureAlgorithm: xmlsec.SigRSASHA256, CanonicalizationAlgorithm: string(c14n.Exclusive10),
 		CanonicalizationPrefixes: []string{"p"}, Parent: xmltree.DocumentElement(doc), References: []dsig.Reference{ref("#a")},
 	}); err == nil || !strings.Contains(err.Error(), "already bound") {
@@ -511,7 +553,7 @@ func TestSignOmittedURI(t *testing.T) {
 	key := newKey(t, rsaKey)
 	omitted := dsig.Reference{OmitURI: true, DigestAlgorithm: xmlsec.DigestSHA256}
 	doc := parse(t, []byte(`<r><a xml:id="a"/></r>`))
-	_, err := dsig.Sign(doc, key, dsig.SignOptions{
+	_, err := signAt(&doc, key, dsig.SignOptions{
 		SignatureAlgorithm: xmlsec.SigRSASHA256, CanonicalizationAlgorithm: string(c14n.Exclusive10),
 		References: []dsig.Reference{ref("#a"), omitted}, OmittedURIData: []byte("known"),
 		Parent: xmltree.DocumentElement(doc),
@@ -541,7 +583,7 @@ func TestSignOmittedURI(t *testing.T) {
 		"with a URI": {[]dsig.Reference{{OmitURI: true, URI: "#a", DigestAlgorithm: xmlsec.DigestSHA256}}, []byte("x")},
 		"enveloped":  {[]dsig.Reference{{OmitURI: true, DigestAlgorithm: xmlsec.DigestSHA256, Transforms: []dsig.TransformSpec{{Algorithm: xmlsec.TransformEnvelopedSignature}}}}, []byte("x")},
 	} {
-		_, err := dsig.Sign(doc, key, dsig.SignOptions{
+		_, err := signAt(&doc, key, dsig.SignOptions{
 			SignatureAlgorithm: xmlsec.SigRSASHA256, CanonicalizationAlgorithm: string(c14n.Exclusive10),
 			References: c.refs, OmittedURIData: c.data,
 		})
@@ -567,7 +609,11 @@ func TestSignDetachedSelfReference(t *testing.T) {
 		if edit != nil {
 			edit(&opts)
 		}
-		return dsig.Sign(doc, key, opts)
+		var d *xmlsec.Document
+		if doc != nil {
+			d = xmlsec.NewDocument(doc)
+		}
+		return dsig.Sign(d, key, opts)
 	}
 	const placed = `<root xmlns:foo="urn:foo" xml:lang="en"><hdr/></root>`
 	refused := map[string][]dsig.TransformSpec{
@@ -609,7 +655,7 @@ func TestSignDetachedSelfReference(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		xmltree.DocumentElement(doc).ChildElements()[0].AppendChild(sig)
+		doc = appendChild(xmltree.DocumentElement(doc).ChildElements()[0], sig)
 		d := parse(t, serialize(t, doc))
 		if _, err := dsig.Verify(d, findSignature(d), dsig.VerifyOptions{Certificate: key.Certificate}); err != nil {
 			t.Errorf("%s, placed: %v", name, err)
@@ -661,8 +707,8 @@ func TestSignDetachedEmbeddedToken(t *testing.T) {
 	str.AddNamespace("wsse", xmlsec.NSWSSE)
 	str.AddNamespace("wsu", xmlsec.NSWSU)
 	xmltree.SetAttr(str, "wsu", xmlsec.NSWSU, "Id", "str")
-	xmltree.Element(str, "wsse", xmlsec.NSWSSE, "Embedded").AppendChild(xmltree.Clone(tok))
-	_, err = dsig.Sign(doc, key, dsig.SignOptions{
+	xmltree.Element(str, "wsse", xmlsec.NSWSSE, "Embedded").AppendCopy(tok)
+	_, err = signAt(&doc, key, dsig.SignOptions{
 		SignatureAlgorithm: xmlsec.SigRSASHA256, CanonicalizationAlgorithm: string(c14n.Exclusive10),
 		KeyInfo: dsig.KeyInfoSecurityTokenReference, KeyInfoElement: str,
 		References: []dsig.Reference{{URI: "#" + bodyID, Transforms: excC14N, DigestAlgorithm: xmlsec.DigestSHA256},

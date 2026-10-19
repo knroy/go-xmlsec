@@ -21,7 +21,7 @@ are generated per run, except the golden-file key and the PKCS#7 fixtures.
 
 | Layer | Where | Runs |
 |---|---|---|
-| Unit and conformance | `*_test.go` beside each package, named after the source file they test; `internal/swa` holds the SwA MIME header and content canonicalization, and `internal/xpathfilter` the XPath allow-list matching and compilation `dsig` and `xenc` share | every push, Linux, macOS and Windows, under `-race` |
+| Unit and conformance | `*_test.go` beside each package, named after the source file they test; `internal/swa` holds the SwA MIME header and content canonicalization, `internal/xpathfilter` the XPath allow-list matching and compilation `dsig` and `xenc` share, and `internal/xmltree` the tree rebuilding behind `xmlsec.Document` (`TestEdits`, `TestDoc`; `TestDocument` in the root package) | every push, Linux, macOS and Windows, under `-race` |
 | Differential against `xmlsec1`, Apache Santuario and WSS4J | `tests/interop`, build tag `interop`, run by `tests/interop.sh` | every push, Linux |
 | Security regressions | `tests/security`: XXE, external fetches, key substitution, algorithm confusion, comment truncation, encryption downgrade, transform programs outside the allow-list and prefix rebinding, Diffie-Hellman small-subgroup and weak-group attacks, PBKDF2 iteration bounds, Basic Security Profile refusals before the private key is used, one generic decryption error, key descriptions and key resolvers, token reference retargeting, signature confirmation replay | every push, all three systems; a local HTTP listener proves nothing is fetched |
 | Fuzzing | `FuzzVerify`, `FuzzDecryptEncryptedKey`, `FuzzDecryptData` | nightly, one hour per target |
@@ -431,11 +431,12 @@ known-answer test.
 ## Canonicalization
 
 Every digest and signature this library computes is over octets from
-`go-xml/c14n`, pinned at v1.6.0. It is tested in go-xml, not here, and its
+`go-xml/c14n` (`github.com/knroy/go-xml/v2`), pinned at v2.0.1. It is tested in go-xml, not here, and its
 figures are published only in that module's
-[docs/c14n.md](https://github.com/knroy/go-xml/blob/v1.6.0/docs/c14n.md#conformance-and-verification),
+[docs/c14n.md](https://github.com/knroy/go-xml/blob/v2.0.1/docs/c14n.md#conformance-and-verification),
 not in the conformance table of its README, where its sibling packages
-report theirs. At v1.6.0:
+report theirs. At v2.0.1, the same figures as at v1.6.0, the previous pin;
+go-xml's changelog lists no change to canonical output between them:
 
 | Check | Result |
 |---|---|

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/xenc"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/xenc"
 )
 
 var strict = xenc.DecryptOptions{StrictBSP: true}
@@ -127,8 +127,7 @@ func TestStrictBSPAttachment(t *testing.T) {
 	key := bytes.Repeat([]byte{7}, 16)
 	att := &xmlsec.Attachment{ID: "a", Body: []byte("body")}
 	opts := as4Opts(t)
-	opts.DataKeyInfo = covParse(t, strRef("#k"))
-	opts.DataKeyInfo.Parent = nil
+	opts.DataKeyInfo = xdm.Copy(covParse(t, strRef("#k")))
 	ct, ed, err := xenc.EncryptAttachment(att, key, xmlsec.TransformAttachmentContentOnly, opts)
 	if err != nil {
 		t.Fatal(err)

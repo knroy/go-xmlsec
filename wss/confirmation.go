@@ -5,9 +5,9 @@ import (
 	"encoding/base64"
 	"fmt"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // AddSignatureConfirmation adds a wsse11:SignatureConfirmation to a response
@@ -41,7 +41,7 @@ func (h *Header) addSignatureConfirmation(value []byte, id string) (string, erro
 	if err := h.check(); err != nil {
 		return "", err
 	}
-	id, err := idFor(h.doc, id)
+	id, err := idFor(h.doc.Root(), id)
 	if err != nil {
 		return "", err
 	}
@@ -133,7 +133,7 @@ func CheckSignatureConfirmations(security *xdm.Node, sent [][]byte) error {
 		if a == nil {
 			return fmt.Errorf("%w: a wsse11:SignatureConfirmation without a Value answers a signed request", xmlsec.ErrSignatureInvalid)
 		}
-		v, err := base64.StdEncoding.DecodeString(a.Value)
+		v, err := base64.StdEncoding.DecodeString(a.Value())
 		if err != nil || len(v) == 0 {
 			return fmt.Errorf("%w: wsse11:SignatureConfirmation Value is not base64", xmlsec.ErrMalformed)
 		}

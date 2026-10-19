@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // Transform chains that end in octets: an attachment's SwA canonical form;
@@ -134,7 +134,7 @@ func TestSwASignatureTransforms(t *testing.T) {
 func TestBase64OfNodeSet(t *testing.T) {
 	key := newKey(t, rsaKey)
 	doc := parse(t, []byte(`<r xmlns:wsu="`+xmlsec.NSWSU+`"><d wsu:Id="d">aGVs<!-- c -->bG8<i>h</i></d></r>`))
-	sig, err := dsig.Sign(doc, key, dsig.SignOptions{
+	sig, err := signAt(&doc, key, dsig.SignOptions{
 		SignatureAlgorithm:        xmlsec.SigRSASHA256,
 		CanonicalizationAlgorithm: string(c14n.Exclusive10),
 		References: []dsig.Reference{{URI: "#d", DigestAlgorithm: xmlsec.DigestSHA256,
@@ -172,7 +172,7 @@ func TestXPointerReferences(t *testing.T) {
 		if uri == "" || uri == "#xpointer(/)" {
 			ts = append(ts, dsig.TransformSpec{Algorithm: xmlsec.TransformEnvelopedSignature})
 		}
-		if _, err := dsig.Sign(doc, key, dsig.SignOptions{
+		if _, err := signAt(&doc, key, dsig.SignOptions{
 			SignatureAlgorithm:        xmlsec.SigRSASHA256,
 			CanonicalizationAlgorithm: string(c14n.Inclusive10),
 			References: []dsig.Reference{{URI: uri, DigestAlgorithm: xmlsec.DigestSHA256,
@@ -215,7 +215,7 @@ func TestXPointerReferences(t *testing.T) {
 				t.Fatal(err)
 			}
 			if c.wantID == "" && !cov.WholeDocumentSigned ||
-				c.wantID != "" && (!cov.Covers(c.wantID) || len(cov.SignedElements) != 1 || cov.SignedElements[0].Name.Local != "d") {
+				c.wantID != "" && (!cov.Covers(c.wantID) || len(cov.SignedElements) != 1 || cov.SignedElements[0].Name().Local != "d") {
 				t.Fatalf("coverage %+v", cov)
 			}
 			_, err = verify(edit(t, doc, "<!-- "+c.comment+" -->", "<!-- changed -->"), c.ids...)
@@ -235,7 +235,7 @@ func TestXPointerReferences(t *testing.T) {
 	}
 	// Any other XPointer is refused when verifying too.
 	sig := findSignature(doc)
-	sig.ChildElements()[0].ChildElements()[2].Attr("", "URI").Value = "#xpointer(id('d')/..)"
+	sig.ChildElements()[0].ChildElements()[2].Attr("", "URI").SetValue("#xpointer(id('d')/..)")
 	resignSI(t, sig, c14n.Inclusive10)
 	if _, err := verify(doc); !errors.Is(err, xmlsec.ErrMalformed) {
 		t.Fatalf("XPointer expression: %v", err)
@@ -263,7 +263,7 @@ func TestExternalReferences(t *testing.T) {
 	key := newKey(t, rsaKey)
 	sign := func(refs []dsig.Reference, r xmlsec.URIResolver) ([]byte, error) {
 		doc := parse(t, []byte(`<r/>`))
-		_, err := dsig.Sign(doc, key, dsig.SignOptions{
+		_, err := signAt(&doc, key, dsig.SignOptions{
 			SignatureAlgorithm: xmlsec.SigRSASHA256, CanonicalizationAlgorithm: string(c14n.Exclusive10),
 			References: refs, KeyInfo: dsig.KeyInfoX509Data, ResolveURI: r, Parent: xmltree.DocumentElement(doc),
 		})
@@ -357,7 +357,7 @@ func TestBaseURI(t *testing.T) {
 		ResolveURI: resolve, BaseURI: base,
 	}
 	doc := parse(t, []byte(`<r xml:base="http://evil.invalid/"><a xml:id="a"/></r>`))
-	sig, err := dsig.Sign(doc, key, opts)
+	sig, err := signAt(&doc, key, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,7 +365,7 @@ func TestBaseURI(t *testing.T) {
 	if !slices.Equal(calls, want) {
 		t.Fatalf("resolver called with %v", calls)
 	}
-	xmltree.DocumentElement(doc).AppendChild(sig)
+	doc = appendChild(xmltree.DocumentElement(doc), sig)
 	signed := serialize(t, doc)
 	if !strings.Contains(string(signed), `URI="data.bin"`) {
 		t.Fatalf("the relative URI is not kept:\n%s", signed)
@@ -385,7 +385,7 @@ func TestBaseURI(t *testing.T) {
 	}
 	for _, c := range []struct{ base, uri string }{{"dir/", "data.bin"}, {base, "%zz"}} {
 		opts.BaseURI, opts.References = c.base, []dsig.Reference{{URI: c.uri, DigestAlgorithm: xmlsec.DigestSHA256}}
-		if _, err := dsig.Sign(parse(t, []byte(`<r/>`)), key, opts); !errors.Is(err, xmlsec.ErrMalformed) {
+		if _, err := dsig.Sign(xmlsec.NewDocument(parse(t, []byte(`<r/>`))), key, opts); !errors.Is(err, xmlsec.ErrMalformed) {
 			t.Fatalf("sign %q against %q: %v", c.uri, c.base, err)
 		}
 	}
@@ -394,7 +394,7 @@ func TestBaseURI(t *testing.T) {
 // XML-DSig 6.6.4: the enveloped-signature transform applies only to a node
 // set from the original document, never to one parsed from octets.
 func TestEnvelopedOnReparsedOctets(t *testing.T) {
-	_, err := dsig.Sign(parse(t, []byte(`<r/>`)), newKey(t, rsaKey), dsig.SignOptions{
+	_, err := dsig.Sign(xmlsec.NewDocument(parse(t, []byte(`<r/>`))), newKey(t, rsaKey), dsig.SignOptions{
 		SignatureAlgorithm: xmlsec.SigRSASHA256, CanonicalizationAlgorithm: string(c14n.Exclusive10),
 		References: []dsig.Reference{{URI: "http://example.invalid/doc.xml", DigestAlgorithm: xmlsec.DigestSHA256,
 			Transforms: []dsig.TransformSpec{{Algorithm: xmlsec.TransformXPath, XPath: "true()"},
@@ -412,7 +412,7 @@ func TestBase64TransformIgnoresNonAlphabet(t *testing.T) {
 	want := sha256.Sum256([]byte("ABCDEF"))
 	for _, body := range []string{"QUJDREVG", "QUJD REVG", "QUJD!REVG", "QU JD*RE-VG ", "QUJD&#9;REVG"} {
 		doc := parse(t, []byte(`<r><o xml:id="o">`+body+`</o></r>`))
-		sig, err := dsig.Sign(doc, newKey(t, rsaKey), dsig.SignOptions{
+		sig, err := signAt(&doc, newKey(t, rsaKey), dsig.SignOptions{
 			SignatureAlgorithm: xmlsec.SigRSASHA256, CanonicalizationAlgorithm: string(c14n.Exclusive10),
 			References: []dsig.Reference{{URI: "#o", DigestAlgorithm: xmlsec.DigestSHA256, Transforms: []dsig.TransformSpec{{Algorithm: xmlsec.TransformBase64}}}},
 			Parent:     xmltree.DocumentElement(doc),
@@ -430,7 +430,7 @@ func TestBase64TransformIgnoresNonAlphabet(t *testing.T) {
 	}
 	// Data after the pad is still malformed.
 	doc := parse(t, []byte(`<r><o xml:id="o">QUJD=REVG</o></r>`))
-	if _, err := dsig.Sign(doc, newKey(t, rsaKey), dsig.SignOptions{
+	if _, err := signAt(&doc, newKey(t, rsaKey), dsig.SignOptions{
 		SignatureAlgorithm: xmlsec.SigRSASHA256, CanonicalizationAlgorithm: string(c14n.Exclusive10),
 		References: []dsig.Reference{{URI: "#o", DigestAlgorithm: xmlsec.DigestSHA256, Transforms: []dsig.TransformSpec{{Algorithm: xmlsec.TransformBase64}}}},
 		Parent:     xmltree.DocumentElement(doc),

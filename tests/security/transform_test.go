@@ -7,11 +7,11 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 const transformDoc = `<r xmlns:x="urn:x"><a>pay 10</a><x:note>n</x:note></r>`
@@ -41,6 +41,16 @@ func signTransform(t *testing.T, kp xmlsec.KeyProvider, ts ...dsig.TransformSpec
 	}
 	sig, _, _, _ = elements(parsed.Root)
 	return parsed.Root, sig
+}
+
+// replaceChildren returns a copy of el's document in which kids replace el's
+// children, and the map from each original node to its copy.
+func replaceChildren(el *xdm.Node, kids ...*xdm.Node) (*xdm.Node, map[*xdm.Node]*xdm.Node) {
+	e := &xmltree.Edits{Append: map[*xdm.Node][]*xdm.Node{el: kids}}
+	for c := range el.Children() {
+		e.ReplaceNode(c)
+	}
+	return xmltree.Rebuild(el, e)
 }
 
 // An attacker-supplied expression or stylesheet that is not in the caller's
@@ -82,15 +92,15 @@ func TestAttackerProgramRefusedBeforeEvaluation(t *testing.T) {
 	t.Run("XSLT", func(t *testing.T) {
 		// Signing runs the stylesheet, which fails on document(); the
 		// attacker's message is built by hand from a benign one instead.
-		doc, sig := signTransform(t, attacker, dsig.TransformSpec{Algorithm: xmlsec.TransformXSLT, Stylesheet: xmltree.DocumentElement(benign.Root)})
+		_, sig := signTransform(t, attacker, dsig.TransformSpec{Algorithm: xmlsec.TransformXSLT, Stylesheet: xmltree.DocumentElement(benign.Root)})
 		var tr *xdm.Node
 		xmltree.Walk(sig, func(e *xdm.Node) {
 			if e.IsElement(xmlsec.NSDSig, "Transform") && e.AttrValue("Algorithm") == xmlsec.TransformXSLT {
 				tr = e
 			}
 		})
-		tr.Children = nil
-		tr.AppendChild(xmltree.DocumentElement(evil.Root))
+		doc, m := replaceChildren(tr, xmltree.DocumentElement(evil.Root))
+		sig = m[sig]
 		for _, opts := range []dsig.VerifyOptions{
 			{Certificate: victim.Certificate},
 			{Certificate: victim.Certificate, AllowedXSLTStylesheets: []*xdm.Node{xmltree.DocumentElement(benign.Root)}},
@@ -176,8 +186,7 @@ func TestAllowedXSLTFetchesNothing(t *testing.T) {
 		doc, _ := signTransform(t, kp, dsig.TransformSpec{Algorithm: xmlsec.TransformXSLT, Stylesheet: benign})
 		xmltree.Walk(doc, func(e *xdm.Node) {
 			if e.IsElement(xmlsec.NSDSig, "Transform") && e.AttrValue("Algorithm") == xmlsec.TransformXSLT {
-				e.Children = nil
-				e.AppendChild(xmltree.DocumentElement(s.Root))
+				doc, _ = replaceChildren(e, xmltree.DocumentElement(s.Root))
 			}
 		})
 		sig := resign(t, doc, xmlsec.SigRSASHA256, func(d []byte) []byte {

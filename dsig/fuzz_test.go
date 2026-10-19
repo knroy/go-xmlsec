@@ -12,13 +12,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/hashes"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/wss"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/hashes"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/wss"
 )
 
 // must panics on err. It is for fuzz setup only: the helpers in
@@ -40,8 +40,8 @@ func fuzzKey() xmlsec.KeyProvider {
 // fuzzSigned returns a WS-Security detached signature, as signAS4 builds,
 // and an enveloped one, as signEnveloped builds.
 func fuzzSigned(key xmlsec.KeyProvider) (detached, enveloped []byte) {
-	doc := must(xmlsec.Parse([]byte(envelope))).Root
-	env := xmltree.DocumentElement(doc)
+	doc := xmlsec.NewDocument(must(xmlsec.Parse([]byte(envelope))).Root)
+	env := xmltree.DocumentElement(doc.Root())
 	msgID := must(wss.AssignID(doc, env.ChildElements()[0].ChildElements()[0]))
 	bodyID := must(wss.AssignID(doc, env.ChildElements()[1]))
 	hdr := must(wss.NewHeader(doc, xmlsec.NSSOAP12, "", true))
@@ -63,7 +63,7 @@ func fuzzSigned(key xmlsec.KeyProvider) (detached, enveloped []byte) {
 	if err := hdr.Append(sig); err != nil {
 		panic(err)
 	}
-	detached = must(c14n.Bytes(doc, c14n.Options{Algorithm: c14n.Inclusive10WithComments}))
+	detached = must(c14n.Bytes(doc.Root(), c14n.Options{Algorithm: c14n.Inclusive10WithComments}))
 	return detached, fuzzEnveloped(key, dsig.KeyInfoX509Data)
 }
 
@@ -84,18 +84,19 @@ func fuzzEnveloped(key xmlsec.KeyProvider, form dsig.KeyInfoForm) []byte {
 	}))
 }
 
-// resign recomputes ds:SignatureValue over sig's SignedInfo as it stands, so
-// that a mutated document still passes the signature check and the fuzzer
-// reaches reference dereferencing and transforms. It reports whether it
-// could.
-func resign(sig *xdm.Node) bool {
+// resign recomputes ds:SignatureValue over sig's SignedInfo as it stands, in
+// a copy of sig's document, so that a mutated document still passes the
+// signature check and the fuzzer reaches reference dereferencing and
+// transforms. It returns the copy's root and signature, and reports whether
+// it could.
+func resign(sig *xdm.Node) (*xdm.Node, *xdm.Node, bool) {
 	kids := sig.ChildElements()
 	if len(kids) < 2 || !kids[0].IsElement(xmlsec.NSDSig, "SignedInfo") {
-		return false
+		return nil, nil, false
 	}
 	si := kids[0].ChildElements()
 	if len(si) < 2 {
-		return false
+		return nil, nil, false
 	}
 	opts := c14n.Options{Algorithm: c14n.Algorithm(si[0].AttrValue("Algorithm"))}
 	if in := si[0].ChildElements(); len(in) == 1 {
@@ -103,19 +104,23 @@ func resign(sig *xdm.Node) bool {
 	}
 	h, ok := hashes.Signature(si[1].AttrValue("Algorithm"))
 	if !ok || !strings.Contains(si[1].AttrValue("Algorithm"), "#rsa-") {
-		return false
+		return nil, nil, false
 	}
 	w := h.New()
 	if _, err := c14n.DigestNodeSet(w, c14n.Subtree(kids[0]), opts); err != nil {
-		return false
+		return nil, nil, false
 	}
 	v, err := rsa.SignPKCS1v15(nil, rsaKey, crypto.Hash(h), w.Sum(nil))
 	if err != nil {
-		return false
+		return nil, nil, false
 	}
-	kids[1].Children = nil
-	xmltree.Text(kids[1], base64.StdEncoding.EncodeToString(v))
-	return true
+	var e xmltree.Edits
+	for c := range kids[1].Children() {
+		e.ReplaceNode(c)
+	}
+	e.Insert(kids[1], kids[1].NumChildren(), xdm.NewNode(xdm.KindText, xdm.QName{}, base64.StdEncoding.EncodeToString(v)))
+	root, m := xmltree.Rebuild(sig, &e)
+	return root, m[sig], true
 }
 
 const fuzzSigOpen = `<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#">`
@@ -183,8 +188,9 @@ func FuzzVerify(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		root := tree.Root
 		verify := func(opts dsig.VerifyOptions) {
-			cov, err := dsig.Verify(tree.Root, sig, opts)
+			cov, err := dsig.Verify(root, sig, opts)
 			if err == nil && (cov == nil || len(cov.References) == 0) {
 				t.Fatalf("verified with coverage %+v", cov)
 			}
@@ -192,7 +198,8 @@ func FuzzVerify(f *testing.F) {
 		verify(dsig.VerifyOptions{})
 		verify(dsig.VerifyOptions{Attachments: atts})
 		verify(dsig.VerifyOptions{Certificate: key.Certificate, Attachments: atts})
-		if resign(sig) {
+		var ok bool
+		if root, sig, ok = resign(sig); ok {
 			verify(dsig.VerifyOptions{Certificate: key.Certificate, Attachments: atts})
 		}
 	})

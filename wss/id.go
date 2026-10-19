@@ -7,9 +7,9 @@ import (
 	"io"
 	"slices"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // randReader is replaced by tests that need deterministic IDs.
@@ -49,8 +49,8 @@ func FindByID(doc *xdm.Node, id string, extra ...xdm.QName) (*xdm.Node, error) {
 	var found *xdm.Node
 	n := 0
 	xmltree.Walk(doc.Root(), func(e *xdm.Node) {
-		for _, a := range e.Attrs {
-			if a.Value == id && (isDefaultID(a.Name) || slices.ContainsFunc(extra, a.Name.Equal)) {
+		for a := range e.Attrs() {
+			if a.Value() == id && (isDefaultID(a.Name()) || slices.ContainsFunc(extra, a.Name().Equal)) {
 				found = e
 				n++
 			}
@@ -82,7 +82,7 @@ func FindByID(doc *xdm.Node, id string, extra ...xdm.QName) (*xdm.Node, error) {
 //
 // Generated IDs are "id-" plus 32 hex characters from crypto/rand, unique
 // within the document. The prefix keeps the value an NCName.
-func AssignID(doc *xdm.Node, el *xdm.Node) (string, error) {
+func AssignID(doc *xmlsec.Document, el *xdm.Node) (string, error) {
 	return assignID(doc, el, "")
 }
 
@@ -93,7 +93,7 @@ func AssignID(doc *xdm.Node, el *xdm.Node) (string, error) {
 // that no counted ID attribute in doc already carries
 // (xmlsec.ErrAmbiguousID). An element that already has an ID keeps it, and
 // that ID is returned, as with AssignID.
-func AssignIDWith(doc *xdm.Node, el *xdm.Node, id string) (string, error) {
+func AssignIDWith(doc *xmlsec.Document, el *xdm.Node, id string) (string, error) {
 	if id == "" {
 		return "", fmt.Errorf("%w: AssignIDWith needs an ID", xmlsec.ErrMalformed)
 	}
@@ -101,47 +101,104 @@ func AssignIDWith(doc *xdm.Node, el *xdm.Node, id string) (string, error) {
 }
 
 // assignID is AssignID with id, or a minted ID when id is empty.
-func assignID(doc *xdm.Node, el *xdm.Node, id string) (string, error) {
-	if el == nil || el.Kind != xdm.KindElement {
+func assignID(doc *xmlsec.Document, el *xdm.Node, id string) (string, error) {
+	d := xmltree.DocOf(doc)
+	if d == nil {
+		return "", fmt.Errorf("%w: AssignID needs a Document", xmlsec.ErrMalformed)
+	}
+	if el == nil || el.Kind() != xdm.KindElement {
 		return "", fmt.Errorf("%w: AssignID needs an element", xmlsec.ErrMalformed)
 	}
-	unqualified := false
-	switch el.Name.URI {
-	case xmlsec.NSDSig, xmlsec.NSDSig11, xmlsec.NSXEnc, xmlsec.NSXEnc11:
-		unqualified = true
+	if el = d.Node(el); el == nil {
+		return "", fmt.Errorf("%w: AssignID: the element is not in the document", xmlsec.ErrMalformed)
 	}
+	if got, ok := existingID(el); ok {
+		return got, nil
+	}
+	id, err := idFor(d.Root(), id)
+	if err != nil {
+		return "", err
+	}
+	e, err := idEdits(el, id)
+	if err != nil {
+		return "", err
+	}
+	// el is in the latest tree, so the edit needs no rekeying.
+	root, m := xmltree.Rebuild(d.Root(), &e)
+	d.Commit(root, m)
+	return id, nil
+}
+
+// WithID is AssignID for an element that is not in a document, such as a
+// wsse:SecurityTokenReference for dsig.SignOptions.KeyInfoElement that a
+// reference through the STR Dereference Transform names. It returns a copy
+// of el, a detached element, carrying the ID as AssignID would set it, and
+// the ID: id, which must be an NCName, or a minted one when id is empty. An
+// element that already has an ID is returned as it is, with that ID. With
+// no document to search, uniqueness is the caller's: a duplicate is refused
+// on verification, with xmlsec.ErrAmbiguousID.
+func WithID(el *xdm.Node, id string) (*xdm.Node, string, error) {
+	if el == nil || el.Kind() != xdm.KindElement || el.Parent() != nil {
+		return nil, "", fmt.Errorf("%w: WithID needs a detached element", xmlsec.ErrMalformed)
+	}
+	if got, ok := existingID(el); ok {
+		return el, got, nil
+	}
+	id, err := idFor(el, id)
+	if err != nil {
+		return nil, "", err
+	}
+	e, err := idEdits(el, id)
+	if err != nil {
+		return nil, "", err
+	}
+	c, _ := xmltree.Rebuild(el, &e)
+	return c, id, nil
+}
+
+// unqualifiedID reports whether el's ID is the unqualified Id its XML
+// Signature or XML Encryption schema defines, rather than wsu:Id.
+func unqualifiedID(el *xdm.Node) bool {
+	switch el.Name().URI {
+	case xmlsec.NSDSig, xmlsec.NSDSig11, xmlsec.NSXEnc, xmlsec.NSXEnc11:
+		return true
+	}
+	return false
+}
+
+// existingID returns the ID el already carries, if any.
+func existingID(el *xdm.Node) (string, bool) {
 	a := el.Attr(xmlsec.NSWSU, "Id")
 	if a == nil {
 		// SOAP Message Security 1.1.1 section 4: an element MUST NOT carry
 		// both a wsu:Id and an xml:id, so an xml:id is the element's ID.
 		a = el.Attr(xdm.NSXML, "id")
 	}
-	if unqualified {
+	if unqualifiedID(el) {
 		a = el.Attr("", "Id")
 	}
-	if a != nil {
-		return a.Value, nil
+	if a == nil {
+		return "", false
 	}
-	id, err := idFor(doc, id)
-	if err != nil {
-		return "", err
-	}
-	if unqualified {
-		xmltree.SetAttr(el, "", "", "Id", id)
-		return id, nil
-	}
-	if err := setWSUID(el, id); err != nil {
-		return "", err
-	}
-	return id, nil
+	return a.Value(), true
 }
 
-func setWSUID(el *xdm.Node, id string) error {
-	if err := xmltree.Declare(el, "wsu", xmlsec.NSWSU); err != nil {
-		return err
+// idEdits are the edits that give el the ID id.
+func idEdits(el *xdm.Node, id string) (xmltree.Edits, error) {
+	var e xmltree.Edits
+	if unqualifiedID(el) {
+		e.SetAttr(el, xdm.QName{Local: "Id"}, id)
+		return e, nil
 	}
-	xmltree.SetAttr(el, "wsu", xmlsec.NSWSU, "Id", id)
-	return nil
+	need, err := xmltree.NeedsDeclaration(el, "wsu", xmlsec.NSWSU)
+	if err != nil {
+		return e, err
+	}
+	if need {
+		e.Declare(el, "wsu", xmlsec.NSWSU)
+	}
+	e.SetAttr(el, xdm.QName{Prefix: "wsu", URI: xmlsec.NSWSU, Local: "Id"}, id)
+	return e, nil
 }
 
 // idFor returns id for a new element of doc, checked, or a minted ID when
@@ -165,9 +222,9 @@ func usedIDs(doc *xdm.Node) map[string]bool {
 	used := map[string]bool{}
 	if doc != nil {
 		xmltree.Walk(doc.Root(), func(e *xdm.Node) {
-			for _, a := range e.Attrs {
-				if isAnyID(a.Name) {
-					used[a.Value] = true
+			for a := range e.Attrs() {
+				if isAnyID(a.Name()) {
+					used[a.Value()] = true
 				}
 			}
 		})

@@ -2,11 +2,10 @@ package xenc
 
 import (
 	"fmt"
-	"slices"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // AddKeyReference adds an xenc:KeyReference to the EncryptedKey's
@@ -21,21 +20,25 @@ func (ek *EncryptedKey) AddKeyReference(id string) error {
 	if !xdm.IsNCName(id) {
 		return fmt.Errorf("xenc: key reference %q is not an NCName", id)
 	}
-	var list *xdm.Node
+	ek.addReference("KeyReference", id)
+	return nil
+}
+
+// addReference adds an xenc:DataReference or xenc:KeyReference (local) to
+// "#"+id to ek's xenc:ReferenceList, creating the list in its schema place
+// if there is none. ek.Element becomes a new element.
+func (ek *EncryptedKey) addReference(local, id string) {
+	ref := element(nil, local)
+	xmltree.SetAttr(ref, "", "", "URI", "#"+id)
 	for _, k := range ek.Element.ChildElements() {
 		if k.IsElement(xmlsec.NSXEnc, "ReferenceList") {
-			list = k
+			var e xmltree.Edits
+			e.Insert(k, k.NumChildren(), ref)
+			ek.Element, _ = xmltree.Rebuild(ek.Element, &e)
+			return
 		}
 	}
-	if list == nil {
-		list = element(ek.Element, "ReferenceList")
-		// Schema order: ReferenceList before CarriedKeyName.
-		kids := ek.Element.Children
-		if i := slices.IndexFunc(kids, func(n *xdm.Node) bool { return n.IsElement(xmlsec.NSXEnc, "CarriedKeyName") }); i >= 0 {
-			copy(kids[i+1:], kids[i:len(kids)-1])
-			kids[i] = list
-		}
-	}
-	xmltree.SetAttr(element(list, "KeyReference"), "", "", "URI", "#"+id)
-	return nil
+	list := element(nil, "ReferenceList")
+	list.AppendCopy(ref)
+	ek.Element = withChild(ek.Element, list)
 }

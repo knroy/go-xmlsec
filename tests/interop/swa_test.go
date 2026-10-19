@@ -10,13 +10,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/wss"
-	"github.com/knroy/go-xmlsec/xenc"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/wss"
+	"github.com/knroy/go-xmlsec/v2/xenc"
 )
 
 // swaPart is an attachment as a MIME part: headers in wire order, then body.
@@ -101,7 +101,7 @@ func swaFiles(t *testing.T, parts []swaPart) []string {
 // cid: with transform, keyed by a binary security token.
 func swaSigned(t *testing.T, kp keypair, transform string) []byte {
 	t.Helper()
-	doc := parse(t, []byte(envelope))
+	doc := xmlsec.NewDocument(parse(t, []byte(envelope)))
 	hdr, err := wss.NewHeader(doc, xmlsec.NSSOAP12, "", true)
 	if err != nil {
 		t.Fatal(err)
@@ -129,7 +129,7 @@ func swaSigned(t *testing.T, kp keypair, transform string) []byte {
 	if err := hdr.Append(sig); err != nil {
 		t.Fatal(err)
 	}
-	b, err := c14n.Bytes(doc, c14n.Options{Algorithm: c14n.Inclusive10})
+	b, err := c14n.Bytes(doc.Root(), c14n.Options{Algorithm: c14n.Inclusive10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestWSS4JDecryptsOurAttachmentEncryption(t *testing.T) {
 	recipient := newKeypair(t, rsaKey(t))
 	for _, typ := range []string{xmlsec.TransformAttachmentContentOnly, xmlsec.TransformAttachmentComplete} {
 		t.Run(typ[strings.Index(typ, "#")+1:], func(t *testing.T) {
-			doc := parse(t, []byte(envelope))
+			doc := xmlsec.NewDocument(parse(t, []byte(envelope)))
 			hdr, err := wss.NewHeader(doc, xmlsec.NSSOAP12, "", true)
 			if err != nil {
 				t.Fatal(err)
@@ -232,7 +232,7 @@ func TestWSS4JDecryptsOurAttachmentEncryption(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			str, err := wss.NewSecurityTokenReference(doc, tokenID, xmlsec.BSTValueTypeX509v3)
+			str, err := wss.NewSecurityTokenReference(doc.Root(), tokenID, xmlsec.BSTValueTypeX509v3)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -262,7 +262,7 @@ func TestWSS4JDecryptsOurAttachmentEncryption(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			soap, err := c14n.Bytes(doc, c14n.Options{Algorithm: c14n.Inclusive10})
+			soap, err := c14n.Bytes(doc.Root(), c14n.Options{Algorithm: c14n.Inclusive10})
 			if err != nil {
 				t.Fatal(err)
 			}

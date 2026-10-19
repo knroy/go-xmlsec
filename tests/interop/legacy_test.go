@@ -16,9 +16,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
 )
 
 // dsaKeyPEM writes a fresh (1024, 160) DSA key in the OpenSSL traditional

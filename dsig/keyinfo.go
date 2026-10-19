@@ -10,10 +10,10 @@ import (
 	"math/big"
 	"strings"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/wss"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/wss"
 )
 
 // xmlsec.NSDSig11 is the XML Signature 1.1 namespace of dsig11:ECKeyValue,
@@ -117,7 +117,7 @@ func (c *keyContext) resolveForms(forms []*xdm.Node, keyName string, hopped bool
 			pub, err := parseDEREncodedKeyValue(k, c.dsaAlg)
 			return resolvedKey{pub: pub, form: KeyInfoDEREncodedKeyValue}, err
 		case hopped && (k.IsElement(xmlsec.NSDSig11, "KeyInfoReference") || k.IsElement(xmlsec.NSDSig, "RetrievalMethod")):
-			return resolvedKey{}, fmt.Errorf("%w: %s in a ds:KeyInfo reached by reference", xmlsec.ErrUnsupportedKeyInfo, k.Name.Local)
+			return resolvedKey{}, fmt.Errorf("%w: %s in a ds:KeyInfo reached by reference", xmlsec.ErrUnsupportedKeyInfo, k.Name().Local)
 		case k.IsElement(xmlsec.NSDSig11, "KeyInfoReference"):
 			tc, target, err := c.keyInfoReference(k)
 			if err != nil {
@@ -130,7 +130,7 @@ func (c *keyContext) resolveForms(forms []*xdm.Node, keyName string, hopped bool
 	}
 	for _, k := range forms {
 		if !k.IsElement(xmlsec.NSDSig, "X509Data") {
-			return resolvedKey{}, fmt.Errorf("%w: %s", xmlsec.ErrUnsupportedKeyInfo, k.Name.Local)
+			return resolvedKey{}, fmt.Errorf("%w: %s", xmlsec.ErrUnsupportedKeyInfo, k.Name().Local)
 		}
 	}
 	return c.x509Key(forms)
@@ -148,29 +148,29 @@ func (c *keyContext) keyInfoReference(ref *xdm.Node) (*keyContext, *xdm.Node, er
 	if uri == nil || len(ref.ChildElements()) > 0 {
 		return nil, nil, malformed("dsig11:KeyInfoReference must have a URI and no children")
 	}
-	if !strings.HasPrefix(uri.Value, "#") {
-		b, err := c.fetch("dsig11:KeyInfoReference", uri.Value)
+	if !strings.HasPrefix(uri.Value(), "#") {
+		b, err := c.fetch("dsig11:KeyInfoReference", uri.Value())
 		if err != nil {
 			return nil, nil, err
 		}
 		tree, err := xmlsec.Parse(b)
 		if err != nil {
-			return nil, nil, fmt.Errorf("%w: dsig11:KeyInfoReference %q: %w", xmlsec.ErrMalformed, uri.Value, err)
+			return nil, nil, fmt.Errorf("%w: dsig11:KeyInfoReference %q: %w", xmlsec.ErrMalformed, uri.Value(), err)
 		}
 		target := xmltree.DocumentElement(tree.Root)
 		if !target.IsElement(xmlsec.NSDSig, "KeyInfo") {
-			return nil, nil, malformed("dsig11:KeyInfoReference %q is %s, not ds:KeyInfo", uri.Value, target.Name.Local)
+			return nil, nil, malformed("dsig11:KeyInfoReference %q is %s, not ds:KeyInfo", uri.Value(), target.Name().Local)
 		}
 		tc := *c
 		tc.doc = tree.Root
 		return &tc, target, nil
 	}
-	target, err := c.sameDocument("dsig11:KeyInfoReference", uri.Value)
+	target, err := c.sameDocument("dsig11:KeyInfoReference", uri.Value())
 	if err != nil {
 		return nil, nil, err
 	}
 	if !target.IsElement(xmlsec.NSDSig, "KeyInfo") {
-		return nil, nil, malformed("dsig11:KeyInfoReference %q names %s, not ds:KeyInfo", uri.Value, target.Name.Local)
+		return nil, nil, malformed("dsig11:KeyInfoReference %q names %s, not ds:KeyInfo", uri.Value(), target.Name().Local)
 	}
 	return c, target, nil
 }
@@ -226,7 +226,7 @@ func parseKeyValue(kv *xdm.Node, dsaKeyValue bool) (crypto.PublicKey, error) {
 	case dsaKeyValue && k.IsElement(xmlsec.NSDSig, "DSAKeyValue"):
 		return parseDSAKeyValue(k)
 	}
-	return nil, fmt.Errorf("%w: {%s}%s in ds:KeyValue", xmlsec.ErrUnsupportedKeyInfo, kids[0].Name.URI, kids[0].Name.Local)
+	return nil, fmt.Errorf("%w: {%s}%s in ds:KeyValue", xmlsec.ErrUnsupportedKeyInfo, kids[0].Name().URI, kids[0].Name().Local)
 }
 
 func parseRSAKeyValue(e *xdm.Node) (crypto.PublicKey, error) {
@@ -254,7 +254,7 @@ func parseRSAKeyValue(e *xdm.Node) (crypto.PublicKey, error) {
 func cryptoBinary(e *xdm.Node) (*big.Int, error) {
 	b, err := xmltree.Base64(e)
 	if err != nil || len(b) == 0 {
-		return nil, malformed("ds:%s is not a base64 integer", e.Name.Local)
+		return nil, malformed("ds:%s is not a base64 integer", e.Name().Local)
 	}
 	return new(big.Int).SetBytes(b), nil
 }
@@ -268,7 +268,7 @@ func parseECKeyValue(e *xdm.Node) (crypto.PublicKey, error) {
 		return nil, malformed("dsig11:ECKeyValue must hold a curve, then dsig11:PublicKey")
 	}
 	if !kids[0].IsElement(xmlsec.NSDSig11, "NamedCurve") {
-		return nil, fmt.Errorf("%w: %s in dsig11:ECKeyValue; only a named curve is accepted", xmlsec.ErrUnsupportedKeyInfo, kids[0].Name.Local)
+		return nil, fmt.Errorf("%w: %s in dsig11:ECKeyValue; only a named curve is accepted", xmlsec.ErrUnsupportedKeyInfo, kids[0].Name().Local)
 	}
 	uri := xmltree.AttrValue(kids[0], "", "URI")
 	var curve elliptic.Curve

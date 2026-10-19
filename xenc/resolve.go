@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/idref"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/idref"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // idAttr is the Id attribute of XML Encryption elements, which counts as an
@@ -139,7 +139,7 @@ func inKeyInfo(el, ki *xdm.Node, k keyKind) (*xdm.Node, error) {
 	case k == encryptedKeyKind && c.IsElement(xmlsec.NSWSSE, "SecurityTokenReference"):
 		return strEncryptedKey(el, c)
 	}
-	return nil, fmt.Errorf("%w: %s in the ds:KeyInfo of an xenc:%s", xmlsec.ErrUnsupportedKeyInfo, c.Name.Local, el.Name.Local)
+	return nil, fmt.Errorf("%w: %s in the ds:KeyInfo of an xenc:%s", xmlsec.ErrUnsupportedKeyInfo, c.Name().Local, el.Name().Local)
 }
 
 // retrieve resolves rm, a ds:RetrievalMethod, to the key element of kind k
@@ -157,7 +157,7 @@ func retrieve(el, rm *xdm.Node, k keyKind) (*xdm.Node, error) {
 		return nil, err
 	}
 	if !t.IsElement(k.ns, k.local) {
-		return nil, malformed("ds:RetrievalMethod %q names a %s, not a %s", uri, t.Name.Local, k.local)
+		return nil, malformed("ds:RetrievalMethod %q names a %s, not a %s", uri, t.Name().Local, k.local)
 	}
 	return t, nil
 }
@@ -167,7 +167,7 @@ func retrieve(el, rm *xdm.Node, k keyKind) (*xdm.Node, error) {
 func byReference(el *xdm.Node, ref string, k keyKind) (*xdm.Node, error) {
 	id := el.AttrValue("Id")
 	if id == "" {
-		return nil, fmt.Errorf("%w: an xenc:%s with neither ds:KeyInfo nor Id", xmlsec.ErrUnsupportedKeyInfo, el.Name.Local)
+		return nil, fmt.Errorf("%w: an xenc:%s with neither ds:KeyInfo nor Id", xmlsec.ErrUnsupportedKeyInfo, el.Name().Local)
 	}
 	// el must be the only element carrying its ID, or a reference could
 	// mean another.

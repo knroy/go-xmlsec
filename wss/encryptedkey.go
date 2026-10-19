@@ -5,9 +5,9 @@ import (
 	"encoding/base64"
 	"fmt"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // NewEncryptedKeyReference builds a wsse:SecurityTokenReference to the
@@ -63,14 +63,14 @@ func MatchEncryptedKeySHA1(str, ek *xdm.Node) bool {
 	if str == nil || !str.IsElement(xmlsec.NSWSSE, "SecurityTokenReference") {
 		return false
 	}
-	if tt := str.Attr(xmlsec.NSWSSE11, "TokenType"); tt != nil && tt.Value != valueTypeEncryptedKey {
+	if tt := str.Attr(xmlsec.NSWSSE11, "TokenType"); tt != nil && tt.Value() != valueTypeEncryptedKey {
 		return false
 	}
 	kids := str.ChildElements()
 	if len(kids) != 1 || !kids[0].IsElement(xmlsec.NSWSSE, "KeyIdentifier") || kids[0].AttrValue("ValueType") != valueTypeEncryptedKeySHA1 {
 		return false
 	}
-	if enc := kids[0].Attr("", "EncodingType"); enc != nil && enc.Value != xmlsec.BSTEncodingBase64 {
+	if enc := kids[0].Attr("", "EncodingType"); enc != nil && enc.Value() != xmlsec.BSTEncodingBase64 {
 		return false
 	}
 	got, err := xmltree.Base64(kids[0])

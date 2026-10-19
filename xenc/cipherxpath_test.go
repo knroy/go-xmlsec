@@ -6,9 +6,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/xenc"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/xenc"
 )
 
 const repNS = "http://www.example.org/repository"

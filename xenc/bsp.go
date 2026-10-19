@@ -1,8 +1,8 @@
 package xenc
 
 import (
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
 )
 
 // strictKey applies the Basic Security Profile rules of
@@ -29,7 +29,7 @@ func strictData(el *xdm.Node, opts DecryptOptions) error {
 	if !opts.StrictBSP || el == nil || !el.IsElement(xmlsec.NSXEnc, "EncryptedData") {
 		return nil
 	}
-	if el.Parent != nil && isSOAP(el.Parent, "Header") {
+	if el.Parent() != nil && isSOAP(el.Parent(), "Header") {
 		return malformed("xenc:EncryptedData as a SOAP header block (BSP R3228)")
 	}
 	if keyInfo(el) == nil {
@@ -48,7 +48,7 @@ func strictKeyInfo(el *xdm.Node) error {
 		return nil
 	}
 	if kids := ki.ChildElements(); len(kids) != 1 || !kids[0].IsElement(xmlsec.NSWSSE, "SecurityTokenReference") {
-		return malformed("the ds:KeyInfo of an %s must hold exactly one wsse:SecurityTokenReference (BSP R5424, R5426)", el.Name.Local)
+		return malformed("the ds:KeyInfo of an %s must hold exactly one wsse:SecurityTokenReference (BSP R5424, R5426)", el.Name().Local)
 	}
 	return nil
 }

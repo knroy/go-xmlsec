@@ -7,9 +7,9 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // Object is a ds:Object that Sign emits in the signature, after
@@ -60,7 +60,7 @@ func isURI(s string) bool {
 // checkContent refuses a content node Sign cannot copy.
 func checkContent(what string, content []*xdm.Node) error {
 	for _, n := range content {
-		if n == nil || n.Kind < xdm.KindElement || n.Kind == xdm.KindAttribute || n.Kind > xdm.KindPI {
+		if n == nil || n.Kind() < xdm.KindElement || n.Kind() == xdm.KindAttribute || n.Kind() > xdm.KindPI {
 			return fmt.Errorf("%w: %s content must be elements, text, comments or processing instructions", xmlsec.ErrMalformed, what)
 		}
 	}
@@ -95,11 +95,11 @@ func checkObjects(opts SignOptions) error {
 		}
 		elements := 0
 		for _, n := range p.Content {
-			if n.Kind != xdm.KindElement {
+			if n.Kind() != xdm.KindElement {
 				continue
 			}
-			if n.Name.URI == "" || n.Name.URI == xmlsec.NSDSig {
-				return fmt.Errorf("%w: SignatureProperty content %s must be in a namespace other than XML Signature's", xmlsec.ErrMalformed, n.Name.Local)
+			if n.Name().URI == "" || n.Name().URI == xmlsec.NSDSig {
+				return fmt.Errorf("%w: SignatureProperty content %s must be in a namespace other than XML Signature's", xmlsec.ErrMalformed, n.Name().Local)
 			}
 			elements++
 		}
@@ -145,11 +145,11 @@ func setOptional(e *xdm.Node, name, value string) {
 // admitted every node.
 func copyContent(parent *xdm.Node, content []*xdm.Node) {
 	for _, n := range content {
-		if n.Kind == xdm.KindElement {
+		if n.Kind() == xdm.KindElement {
 			copyStylesheet(parent, n) // copies any element with its in-scope bindings
 			continue
 		}
-		parent.AppendChild(&xdm.Node{Kind: n.Kind, Name: n.Name, Value: n.Value})
+		parent.AppendShallowCopy(n)
 	}
 }
 
@@ -161,15 +161,15 @@ func copyContent(parent *xdm.Node, content []*xdm.Node) {
 // references, as a schema-aware processor would count them, without
 // IDAttrDSig and so without every unqualified Id in the document.
 func ownID(sig, e *xdm.Node) bool {
-	if sig == nil || e.Name.URI != xmlsec.NSDSig {
+	if sig == nil || e.Name().URI != xmlsec.NSDSig {
 		return false
 	}
-	p := e.Parent
-	switch e.Name.Local {
+	p := e.Parent()
+	switch e.Name().Local {
 	case "Object", "KeyInfo":
 		return p == sig
 	case "Manifest", "SignatureProperties":
-		return p != nil && p.IsElement(xmlsec.NSDSig, "Object") && p.Parent == sig
+		return p != nil && p.IsElement(xmlsec.NSDSig, "Object") && p.Parent() == sig
 	case "SignatureProperty":
 		return p != nil && p.IsElement(xmlsec.NSDSig, "SignatureProperties") && ownID(sig, p)
 	}
@@ -188,8 +188,8 @@ func findID(doc, sig *xdm.Node, id string, extra []xdm.QName) (*xdm.Node, error)
 	var found *xdm.Node
 	n := 0
 	visit := func(e *xdm.Node) {
-		for _, a := range e.Attrs {
-			if a.Value == id && (slices.ContainsFunc(counted, a.Name.Equal) || a.Name.Equal(dsigID) && ownID(sig, e)) {
+		for a := range e.Attrs() {
+			if a.Value() == id && (slices.ContainsFunc(counted, a.Name().Equal) || a.Name().Equal(dsigID) && ownID(sig, e)) {
 				found = e
 				n++
 			}

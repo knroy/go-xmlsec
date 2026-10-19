@@ -4,22 +4,23 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 func TestAssignIDErrors(t *testing.T) {
-	doc := parseDoc(t, envWSUClash)
-	body := xmltree.DocumentElement(doc).ChildElements()[0]
+	doc := newDoc(t, envWSUClash)
+	body := xmltree.DocumentElement(doc.Root()).ChildElements()[0]
 	if _, err := AssignID(doc, body); err == nil {
 		t.Fatal("wsu prefix bound to another URI accepted")
 	}
-	if body.Attr(xmlsec.NSWSU, "Id") != nil {
+	if doc.Node(body) != body || body.Attr(xmlsec.NSWSU, "Id") != nil {
 		t.Fatal("wsu:Id set despite the error")
 	}
 }
@@ -31,12 +32,12 @@ func TestRandomnessFailure(t *testing.T) {
 	randReader = failReader{}
 	t.Cleanup(func() { randReader = old })
 
-	doc := parseDoc(t, env11)
+	doc := newDoc(t, env11)
 	h, err := NewHeader(doc, xmlsec.NSSOAP11, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := xmltree.DocumentElement(doc).ChildElements()[1]
+	body := xmltree.DocumentElement(doc.Root()).ChildElements()[1]
 	calls := map[string]func() error{
 		"AssignID": func() error { _, err := AssignID(doc, body); return err },
 		"AddBinarySecurityToken": func() error {
@@ -79,12 +80,12 @@ func TestNewIDSkipsCollision(t *testing.T) {
 // schemas define, never wsu:Id (BSP R3003, R3004); everything else wsu:Id.
 func TestAssignIDSignatureAndEncryption(t *testing.T) {
 	for _, ns := range []string{xmlsec.NSDSig, xmlsec.NSDSig11, xmlsec.NSXEnc, xmlsec.NSXEnc11} {
-		doc := parseDoc(t, `<r xmlns:x="`+ns+`" xmlns:wsu="`+xmlsec.NSWSU+`">`+
+		doc := newDoc(t, `<r xmlns:x="`+ns+`" xmlns:wsu="`+xmlsec.NSWSU+`">`+
 			`<x:New/><x:HasId Id="given"/><x:HasWSUId wsu:Id="w"/></r>`)
-		kids := xmltree.DocumentElement(doc).ChildElements()
+		kids := xmltree.DocumentElement(doc.Root()).ChildElements()
 		id, err := AssignID(doc, kids[0])
-		if err != nil || kids[0].AttrValue("Id") != id || kids[0].Attr(xmlsec.NSWSU, "Id") != nil {
-			t.Fatalf("%s: %q, %v, attrs %v", ns, id, err, kids[0].Attrs)
+		if k := doc.Node(kids[0]); err != nil || k.AttrValue("Id") != id || k.Attr(xmlsec.NSWSU, "Id") != nil {
+			t.Fatalf("%s: %q, %v, attrs %v", ns, id, err, slices.Collect(k.Attrs()))
 		}
 		if again, _ := AssignID(doc, kids[0]); again != id {
 			t.Errorf("%s: not idempotent: %q", ns, again)
@@ -93,10 +94,10 @@ func TestAssignIDSignatureAndEncryption(t *testing.T) {
 			t.Errorf("%s: existing Id: %q", ns, got)
 		}
 		// A wsu:Id on such an element is not the ID a reference may use.
-		if got, _ := AssignID(doc, kids[2]); got == "w" || kids[2].AttrValue("Id") != got {
+		if got, _ := AssignID(doc, kids[2]); got == "w" || doc.Node(kids[2]).AttrValue("Id") != got {
 			t.Errorf("%s: wsu:Id reused: %q", ns, got)
 		}
-		if _, err := FindByID(doc, id, xdm.QName{Local: "Id"}); err != nil {
+		if _, err := FindByID(doc.Root(), id, xdm.QName{Local: "Id"}); err != nil {
 			t.Errorf("%s: dsig.IDAttrDSig does not resolve it: %v", ns, err)
 		}
 	}
@@ -104,19 +105,25 @@ func TestAssignIDSignatureAndEncryption(t *testing.T) {
 
 // Nil or wrong-kind input from a failed lookup is an error, never a panic.
 func TestNilInputs(t *testing.T) {
-	doc := parseDoc(t, env11)
-	text := &xdm.Node{Kind: xdm.KindText, Value: "t"}
+	doc := newDoc(t, env11)
+	text := xdm.NewNode(xdm.KindText, xdm.QName{}, "t")
+	foreign := xmltree.DocumentElement(parseDoc(t, env11))
 	checks := map[string]error{}
 	_, checks["FindByID(nil)"] = FindByID(nil, "x")
 	_, checks["AssignID(nil)"] = AssignID(doc, nil)
 	_, checks["AssignID(text)"] = AssignID(doc, text)
+	_, checks["AssignID(nil document)"] = AssignID(nil, foreign)
+	_, checks["AssignID(foreign)"] = AssignID(doc, foreign)
 	_, checks["ParseBinarySecurityToken(nil)"] = ParseBinarySecurityToken(nil)
-	_, checks["ResolveSecurityTokenReference(doc, nil)"] = ResolveSecurityTokenReference(doc, nil)
+	_, checks["ResolveSecurityTokenReference(doc, nil)"] = ResolveSecurityTokenReference(doc.Root(), nil)
 	_, checks["ResolveSecurityTokenReference(nil, nil)"] = ResolveSecurityTokenReference(nil, nil)
 	_, checks["NewHeader(nil)"] = NewHeader(nil, xmlsec.NSSOAP11, "", false)
 	for name, err := range checks {
 		if err == nil {
 			t.Errorf("%s: accepted", name)
+		}
+		if strings.HasPrefix(name, "AssignID") && !errors.Is(err, xmlsec.ErrMalformed) {
+			t.Errorf("%s: %v, want ErrMalformed", name, err)
 		}
 	}
 }
@@ -125,19 +132,19 @@ func TestNilInputs(t *testing.T) {
 // wsu:Id and an xml:id, so AssignID returns an existing xml:id and adds
 // nothing.
 func TestAssignIDKeepsXMLID(t *testing.T) {
-	doc := parseDoc(t, env11)
-	b := xmltree.DocumentElement(doc).ChildElements()[0].ChildElements()[1]
+	doc := newDoc(t, env11)
+	b := xmltree.DocumentElement(doc.Root()).ChildElements()[0].ChildElements()[1]
 	id, err := AssignID(doc, b)
-	if err != nil || id != "y" || b.Attr(xmlsec.NSWSU, "Id") != nil {
-		t.Fatalf("AssignID: %q, %v, attributes %v", id, err, b.Attrs)
+	if err != nil || id != "y" || doc.Node(b) != b || b.Attr(xmlsec.NSWSU, "Id") != nil {
+		t.Fatalf("AssignID: %q, %v, attributes %v", id, err, slices.Collect(b.Attrs()))
 	}
 }
 
 // The explicit-ID variants take the caller's ID, check it, and keep an ID
 // an element already has, exactly as the minting functions do.
 func TestExplicitIDs(t *testing.T) {
-	doc := parseDoc(t, env11)
-	body := xmltree.DocumentElement(doc).ChildElements()[0]
+	doc := newDoc(t, env11)
+	body := xmltree.DocumentElement(doc.Root()).ChildElements()[0]
 	a, b := body.ChildElements()[0], body.ChildElements()[1]
 	for _, c := range []struct {
 		name string
@@ -160,7 +167,7 @@ func TestExplicitIDs(t *testing.T) {
 	if id, err := AssignIDWith(doc, b, "other"); err != nil || id != "y" {
 		t.Fatalf("existing xml:id: %q, %v", id, err)
 	}
-	if id, err := AssignIDWith(doc, body, "body-1"); err != nil || id != "body-1" || body.Attr(xmlsec.NSWSU, "Id") == nil || body.Attr(xmlsec.NSWSU, "Id").Value != "body-1" {
+	if id, err := AssignIDWith(doc, body, "body-1"); err != nil || id != "body-1" || xmltree.AttrValue(doc.Node(body), xmlsec.NSWSU, "Id") != "body-1" {
 		t.Fatalf("AssignIDWith: %q, %v", id, err)
 	}
 
@@ -187,8 +194,43 @@ func TestExplicitIDs(t *testing.T) {
 		if got, err := add(name); err != nil || got != name {
 			t.Errorf("%s: %q, %v", name, got, err)
 		}
-		if _, err := FindByID(doc, name); err != nil {
+		if _, err := FindByID(doc.Root(), name); err != nil {
 			t.Errorf("%s: the element does not carry its ID: %v", name, err)
 		}
+	}
+}
+
+func TestWithID(t *testing.T) {
+	str := NewEncryptedKeyReference("ek-1")
+	c, id, err := WithID(str, "str-1")
+	if err != nil || id != "str-1" || xmltree.AttrValue(c, xmlsec.NSWSU, "Id") != "str-1" || str.Attr(xmlsec.NSWSU, "Id") != nil {
+		t.Fatalf("WithID = %v, %q, %v", c, id, err)
+	}
+	if again, got, err := WithID(c, "other"); err != nil || again != c || got != "str-1" {
+		t.Fatalf("an element with an ID: %v, %q, %v", again, got, err)
+	}
+	if _, id, err := WithID(NewEncryptedKeyReference("ek-1"), ""); err != nil || !strings.HasPrefix(id, "id-") {
+		t.Fatalf("minted: %q, %v", id, err)
+	}
+
+	ed := xdm.NewNode(xdm.KindElement, xdm.QName{Prefix: "xenc", URI: xmlsec.NSXEnc, Local: "EncryptedData"}, "")
+	if c, _, err := WithID(ed, "ed-1"); err != nil || xmltree.AttrValue(c, "", "Id") != "ed-1" {
+		t.Fatalf("xenc element: %v", err)
+	}
+
+	clash := xdm.NewNode(xdm.KindElement, xdm.QName{Local: "x"}, "")
+	clash.AddNamespace("wsu", "urn:other")
+	for name, el := range map[string]*xdm.Node{
+		"nil":      nil,
+		"text":     xdm.NewNode(xdm.KindText, xdm.QName{}, "t"),
+		"attached": c.FirstChild(),
+		"clash":    clash,
+	} {
+		if _, _, err := WithID(el, "a"); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	if _, _, err := WithID(NewEncryptedKeyReference("ek-1"), "1bad"); !errors.Is(err, xmlsec.ErrMalformed) {
+		t.Fatalf("non-NCName: %v", err)
 	}
 }

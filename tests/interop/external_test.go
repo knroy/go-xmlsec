@@ -8,10 +8,10 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // externalURI is never fetched: each side serves it from a local copy, the
@@ -67,14 +67,15 @@ func TestSantuarioVerifiesOurExternalReference(t *testing.T) {
 			if transform != "" {
 				ref.Transforms = []dsig.TransformSpec{{Algorithm: transform}}
 			}
-			if _, err := dsig.Sign(doc, kp.provider, dsig.SignOptions{
+			d := xmlsec.NewDocument(doc)
+			if _, err := dsig.Sign(d, kp.provider, dsig.SignOptions{
 				SignatureAlgorithm: xmlsec.SigRSASHA256, CanonicalizationAlgorithm: string(c14n.Exclusive10),
 				References: []dsig.Reference{ref}, KeyInfo: dsig.KeyInfoX509Data,
 				Parent: xmltree.DocumentElement(doc), ResolveURI: serveExternal,
 			}); err != nil {
 				t.Fatal(err)
 			}
-			signed, err := c14n.Bytes(doc, c14n.Options{Algorithm: c14n.Inclusive10})
+			signed, err := c14n.Bytes(d.Root(), c14n.Options{Algorithm: c14n.Inclusive10})
 			if err != nil {
 				t.Fatal(err)
 			}

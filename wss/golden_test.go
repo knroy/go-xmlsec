@@ -45,13 +45,13 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/wss"
-	"github.com/knroy/go-xmlsec/xenc"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/wss"
+	"github.com/knroy/go-xmlsec/v2/xenc"
 )
 
 var update = flag.Bool("update", false, "rewrite testdata/golden; review the diff before committing")
@@ -179,7 +179,7 @@ func goldenAttachments(t *testing.T) xmlsec.AttachmentSet {
 }
 
 type signedEnvelope struct {
-	doc                  *xdm.Node
+	doc                  *xmlsec.Document
 	hdr                  *wss.Header
 	key                  xmlsec.KeyProvider
 	priv                 *rsa.PrivateKey
@@ -193,11 +193,11 @@ type signedEnvelope struct {
 func signGoldenEnvelope(t *testing.T) signedEnvelope {
 	t.Helper()
 	fixedIDs(t)
-	s := signedEnvelope{doc: parseDoc(t, []byte(goldenEnvelope)), atts: goldenAttachments(t)}
+	s := signedEnvelope{doc: xmlsec.NewDocument(parseDoc(t, []byte(goldenEnvelope))), atts: goldenAttachments(t)}
 	s.key, s.priv = goldenKey(t)
-	s.body = mustFind(t, s.doc, xmlsec.NSSOAP12, "Body")
+	s.body = mustFind(t, s.doc.Root(), xmlsec.NSSOAP12, "Body")
 	var err error
-	if s.msgID, err = wss.AssignID(s.doc, mustFind(t, s.doc, "urn:example:eb", "Messaging")); err != nil {
+	if s.msgID, err = wss.AssignID(s.doc, mustFind(t, s.doc.Root(), "urn:example:eb", "Messaging")); err != nil {
 		t.Fatal(err)
 	}
 	if s.bodyID, err = wss.AssignID(s.doc, s.body); err != nil {
@@ -261,7 +261,7 @@ func verifyGoldenEnvelope(t *testing.T, received []byte, s signedEnvelope) {
 // a SecurityTokenReference.
 func TestGoldenSignedEnvelopeTwoAttachments(t *testing.T) {
 	s := signGoldenEnvelope(t)
-	out, err := c14n.Bytes(s.doc, c14n.Options{Algorithm: c14n.Inclusive10WithComments})
+	out, err := c14n.Bytes(s.doc.Root(), c14n.Options{Algorithm: c14n.Inclusive10WithComments})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +297,7 @@ func TestGoldenSignedEncryptedEnvelope(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer clear(ek.SessionKey)
-	str, err := wss.NewSecurityTokenReference(s.doc, s.tokID, xmlsec.BSTValueTypeX509v3)
+	str, err := wss.NewSecurityTokenReference(s.doc.Root(), s.tokID, xmlsec.BSTValueTypeX509v3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +308,7 @@ func TestGoldenSignedEncryptedEnvelope(t *testing.T) {
 	if err := s.hdr.Prepend(ek.Element); err != nil {
 		t.Fatal(err)
 	}
-	out, err := xenc.EncryptElement(s.doc, s.body.ChildElements()[0], ek.SessionKey, opts)
+	out, err := xenc.EncryptElement(s.doc.Root(), s.doc.Node(s.body).ChildElements()[0], ek.SessionKey, opts)
 	if err != nil {
 		t.Fatal(err)
 	}

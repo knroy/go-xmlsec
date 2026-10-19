@@ -8,11 +8,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/xenc"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/xenc"
 )
 
 // The ds:KeyInfo forms of XML Encryption 1.1 sections 3.5 and 5.6 beyond
@@ -203,24 +203,23 @@ func TestEncryptedKeyChainWithXmlsec1(t *testing.T) {
 		if err := dataEK.SetKeyInfo(kekEK.Element); err != nil {
 			t.Fatal(err)
 		}
-		xmltree.SetAttr(dataEK.Element, "", "", "Id", "dk")
+		var e xmltree.Edits
+		e.SetAttr(dataEK.Element, xdm.QName{Local: "Id"}, "dk")
+		dk, _ := xmltree.Rebuild(dataEK.Element, &e)
 
 		doc := parse(t, []byte(envelope))
-		find(doc, "http://www.w3.org/2003/05/soap-envelope", "Header").AppendChild(dataEK.Element)
+		hdr := find(doc, "http://www.w3.org/2003/05/soap-envelope", "Header")
+		doc, _ = xmltree.Rebuild(doc, &xmltree.Edits{Append: map[*xdm.Node][]*xdm.Node{hdr: {dk}}})
 		out, err := xenc.EncryptElement(doc, find(doc, "urn:example:p", "Payload"), dataEK.SessionKey, xenc.EncryptOptions{DataAlgorithm: xmlsec.EncAES128GCM})
 		if err != nil {
 			t.Fatal(err)
 		}
 		// The EncryptedData's KeyInfo names the data key's EncryptedKey.
 		edoc := parse(t, out)
-		ed := find(edoc, xmlsec.NSXEnc, "EncryptedData")
-		ki := xmltree.Element(nil, "ds", xmlsec.NSDSig, "KeyInfo")
-		ki.AddNamespace("ds", xmlsec.NSDSig)
-		rm := xmltree.Element(ki, "ds", xmlsec.NSDSig, "RetrievalMethod")
+		rm := xmltree.Element(nil, "ds", xmlsec.NSDSig, "RetrievalMethod")
 		xmltree.SetAttr(rm, "", "", "Type", xenc.TypeEncryptedKey)
 		xmltree.SetAttr(rm, "", "", "URI", "#dk")
-		ed.AppendChild(ki)
-		ed.Children = []*xdm.Node{ed.Children[0], ki, ed.Children[1]}
+		edoc, _ = withKeyInfo(find(edoc, xmlsec.NSXEnc, "EncryptedData"), rm)
 		chain := mustC14N(t, edoc)
 
 		o := filepath.Join(t.TempDir(), "xmlsec1.xml")

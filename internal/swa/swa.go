@@ -20,8 +20,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xmlsec"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xmlsec/v2"
 )
 
 // Headers are the MIME headers Attachment-Complete covers (section 5.3.2),

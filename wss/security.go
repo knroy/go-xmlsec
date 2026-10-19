@@ -3,18 +3,19 @@ package wss
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // Header wraps a wsse:Security element under construction. Make one with
 // NewHeader: the methods of a nil or zero Header return an error, and its
 // Element is nil.
 type Header struct {
-	doc *xdm.Node
+	doc *xmltree.Doc
 	el  *xdm.Node
 }
 
@@ -25,6 +26,9 @@ func (h *Header) check() error {
 	}
 	return nil
 }
+
+// sec returns the wsse:Security element in the document's latest tree.
+func (h *Header) sec() *xdm.Node { return h.doc.Node(h.el) }
 
 // NewHeader creates a wsse:Security element in the SOAP header of doc,
 // creating the SOAP Header if there is none.
@@ -44,12 +48,17 @@ func (h *Header) check() error {
 // 1.1 and env for SOAP 1.2.
 //
 // Elements are added ahead of the existing content, as WS-Security
-// specifies; see Prepend.
-func NewHeader(doc *xdm.Node, soapNS string, actor string, mustUnderstand bool) (*Header, error) {
+// specifies; see Prepend. Each addition changes doc: its Root is then the
+// message with the header as it stands.
+func NewHeader(doc *xmlsec.Document, soapNS string, actor string, mustUnderstand bool) (*Header, error) {
 	if soapNS != xmlsec.NSSOAP11 && soapNS != xmlsec.NSSOAP12 {
 		return nil, fmt.Errorf("wss: unknown SOAP namespace %q", soapNS)
 	}
-	env := xmltree.DocumentElement(doc)
+	d := xmltree.DocOf(doc)
+	if d == nil {
+		return nil, errors.New("wss: NewHeader needs a Document")
+	}
+	env := xmltree.DocumentElement(d.Root())
 	if env == nil || !env.IsElement(soapNS, "Envelope") {
 		return nil, errors.New("wss: document element is not a SOAP Envelope")
 	}
@@ -57,24 +66,23 @@ func NewHeader(doc *xdm.Node, soapNS string, actor string, mustUnderstand bool) 
 	var hdr *xdm.Node
 	if kids := env.ChildElements(); len(kids) > 0 && kids[0].IsElement(soapNS, "Header") {
 		hdr = kids[0]
-	} else {
-		hdr = xmltree.Element(env, env.Name.Prefix, soapNS, "Header")
-		// AppendChild is the only way to link a node into the tree; move it
-		// to the front, where the SOAP Header belongs.
-		copy(env.Children[1:], env.Children[:len(env.Children)-1])
-		env.Children[0] = hdr
-	}
-
-	if len(securityHeaders(hdr, soapNS, actor)) > 0 {
-		return nil, fmt.Errorf("wss: a wsse:Security header for actor %q already exists", actor)
+		if len(securityHeaders(hdr, soapNS, actor)) > 0 {
+			return nil, fmt.Errorf("wss: a wsse:Security header for actor %q already exists", actor)
+		}
 	}
 	actorAttr := actorAttribute(soapNS)
 
-	// Built detached and attached last, so its own namespace declarations
+	// Built detached and placed last, so its own namespace declarations
 	// cannot conflict with an ancestor's.
-	sec := xmltree.Element(nil, "wsse", xmlsec.NSWSSE, "Security")
+	var newHdr, sec *xdm.Node
+	if hdr == nil {
+		newHdr = xmltree.Element(nil, env.Name().Prefix, soapNS, "Header")
+		sec = xmltree.Element(newHdr, "wsse", xmlsec.NSWSSE, "Security")
+	} else {
+		sec = xmltree.Element(nil, "wsse", xmlsec.NSWSSE, "Security")
+	}
 	sec.AddNamespace("wsse", xmlsec.NSWSSE)
-	p := env.Name.Prefix
+	p := env.Name().Prefix
 	if p == "" {
 		p = "soap"
 		if soapNS == xmlsec.NSSOAP12 {
@@ -92,8 +100,17 @@ func NewHeader(doc *xdm.Node, soapNS string, actor string, mustUnderstand bool) 
 	if actor != "" {
 		xmltree.SetAttr(sec, p, soapNS, actorAttr, actor)
 	}
-	hdr.AppendChild(sec)
-	return &Header{doc: doc, el: sec}, nil
+	var e xmltree.Edits
+	if hdr == nil {
+		// The SOAP Header comes first in the Envelope.
+		e.Insert(env, 0, newHdr)
+	} else {
+		e.Insert(hdr, hdr.NumChildren(), sec)
+	}
+	// env and hdr are in the latest tree, so the edit needs no rekeying.
+	root, m := xmltree.Rebuild(d.Root(), &e)
+	d.Commit(root, m)
+	return &Header{doc: d, el: m[sec]}, nil
 }
 
 // Prepend places an already-constructed element, such as a ds:Signature, an
@@ -123,20 +140,21 @@ func (h *Header) Prepend(el *xdm.Node) error {
 	if err := h.check(); err != nil {
 		return err
 	}
-	if el == nil || el.Kind != xdm.KindElement || el.Parent != nil {
+	if el == nil || el.Kind() != xdm.KindElement || el.Parent() != nil {
 		return errors.New("wss: Prepend needs a detached element")
 	}
 	tokens := refs(el, xmlsec.NSWSSE, "Reference")
+	kids := slices.Collect(h.sec().Children())
 	i := h.front()
-	for j, c := range h.el.Children {
+	for j, c := range kids {
 		if hasAnyID(c, tokens) {
 			i = max(i, j+1)
 		}
 	}
 	data := refs(el, xmlsec.NSXEnc, "DataReference")
-	for _, c := range h.el.Children[:i] {
+	for _, c := range kids[:i] {
 		if hasAnyID(c, data) {
-			return fmt.Errorf("wss: %s would follow an xenc:EncryptedData it lists", el.Name.Local)
+			return fmt.Errorf("wss: %s would follow an xenc:EncryptedData it lists", el.Name().Local)
 		}
 	}
 	h.insert(i, el)
@@ -150,42 +168,45 @@ func (h *Header) Append(el *xdm.Node) error {
 	if err := h.check(); err != nil {
 		return err
 	}
-	if el == nil || el.Parent != nil {
+	if el == nil || el.Parent() != nil {
 		return errors.New("wss: Append needs a detached node")
 	}
-	h.el.AppendChild(el)
+	h.insert(h.sec().NumChildren(), el)
 	return nil
 }
 
-// Element returns the wsse:Security element, or nil for a nil or zero
-// Header.
+// Element returns the wsse:Security element in the document's latest tree,
+// or nil for a nil or zero Header.
 func (h *Header) Element() *xdm.Node {
-	if h == nil {
+	if h == nil || h.el == nil {
 		return nil
 	}
-	return h.el
+	return h.sec()
 }
 
 // front returns where a prepended element goes: first, or after a leading
 // wsu:Timestamp.
 func (h *Header) front() int {
-	for i, c := range h.el.Children {
-		if c.Kind == xdm.KindElement {
+	i := 0
+	for c := range h.sec().Children() {
+		if c.Kind() == xdm.KindElement {
 			if c.IsElement(xmlsec.NSWSU, "Timestamp") {
 				return i + 1
 			}
 			break
 		}
+		i++
 	}
 	return 0
 }
 
-// insert links el as the i'th child of the header.
+// insert places a copy of el as the i'th child of the header. Node maps el
+// to the copy.
 func (h *Header) insert(i int, el *xdm.Node) {
-	h.el.AppendChild(el)
-	kids := h.el.Children
-	copy(kids[i+1:], kids[i:len(kids)-1])
-	kids[i] = el
+	var e xmltree.Edits
+	e.Insert(h.sec(), i, el)
+	root, m := xmltree.Rebuild(h.doc.Root(), &e)
+	h.doc.Commit(root, m)
 }
 
 // refs returns the local IDs that the URI of each ns:local element inside el
@@ -203,8 +224,8 @@ func refs(el *xdm.Node, ns, local string) map[string]bool {
 // hasAnyID reports whether n carries one of ids as its wsu:Id, xml:id or
 // unqualified Id.
 func hasAnyID(n *xdm.Node, ids map[string]bool) bool {
-	for _, a := range n.Attrs {
-		if isAnyID(a.Name) && ids[a.Value] {
+	for a := range n.Attrs() {
+		if isAnyID(a.Name()) && ids[a.Value()] {
 			return true
 		}
 	}

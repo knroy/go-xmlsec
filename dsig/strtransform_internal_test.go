@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xmlsec"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xmlsec/v2"
 )
 
 // The STR Dereference Transform's output: Exclusive C14N with the default
@@ -30,7 +30,7 @@ func TestSTROctets(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		tok := tree.Root.Children[0].Children[0]
+		tok := tree.Root.FirstChild().FirstChild()
 		got, err := strOctets(tok, c.alg, c.prefixes)
 		if err != nil || string(got) != c.want {
 			t.Errorf("%s: %s, %v; want %s", c.name, got, err, c.want)
@@ -42,7 +42,7 @@ func TestSTROctets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := strOctets(tree.Root.Children[0].Children[0], string(c14n.Exclusive10), nil); !errors.Is(err, c14n.ErrRelativeNamespaceURI) {
+	if _, err := strOctets(tree.Root.FirstChild().FirstChild(), string(c14n.Exclusive10), nil); !errors.Is(err, c14n.ErrRelativeNamespaceURI) {
 		t.Fatalf("relative namespace: %v", err)
 	}
 }

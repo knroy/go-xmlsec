@@ -7,8 +7,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // DecryptAndReplace decrypts ed, an xenc:EncryptedData of Type Element or
@@ -43,16 +44,16 @@ func DecryptAndReplace(doc, ed *xdm.Node, key []byte, opts DecryptOptions) ([]by
 	}
 	// A plaintext of the wrong shape is a decryption failure like a wrong
 	// key: with CBC data, which of the two it was is a padding oracle.
-	nodes, err := parseIn(pt, ed.Parent)
+	nodes, err := parseIn(pt, ed.Parent())
 	if err != nil {
 		return nil, errDecrypt
 	}
-	if (typ == TypeElement || ed.Parent.Kind == xdm.KindDocument) && (len(nodes) != 1 || nodes[0].Kind != xdm.KindElement) {
+	if (typ == TypeElement || ed.Parent().Kind() == xdm.KindDocument) && (len(nodes) != 1 || nodes[0].Kind() != xdm.KindElement) {
 		return nil, errDecrypt
 	}
-	kids := slices.Clone(ed.Parent.Children)
-	i := slices.Index(kids, ed)
-	return emitWith(doc, ed.Parent, slices.Replace(kids, i, i+1, nodes...), nodes...)
+	var e xmltree.Edits
+	e.ReplaceNode(ed, nodes...)
+	return emit(doc, &e)
 }
 
 // attrEscaper escapes a namespace URI for a double-quoted attribute.
@@ -82,5 +83,5 @@ func parseIn(plaintext []byte, parent *xdm.Node) ([]*xdm.Node, error) {
 	}
 	// The plaintext cannot close the wrapper and leave one document
 	// element: w is the only child.
-	return tree.Root.Children[0].Children, nil
+	return slices.Collect(tree.Root.FirstChild().Children()), nil
 }

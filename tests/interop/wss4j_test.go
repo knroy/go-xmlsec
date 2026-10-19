@@ -8,13 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/wss"
-	"github.com/knroy/go-xmlsec/xenc"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/wss"
+	"github.com/knroy/go-xmlsec/v2/xenc"
 )
 
 // WSS4J, the WS-Security engine phase4 and most Java stacks are built on,
@@ -24,8 +24,8 @@ import (
 // on, so a header WSS4J would warn about fails here. Acceptance criterion 6.
 func TestWSS4JProcessesOurSecurityHeader(t *testing.T) {
 	kp := newKeypair(t, rsaKey(t))
-	doc := parse(t, []byte(envelope))
-	body := xmltree.DocumentElement(doc).ChildElements()[1]
+	doc := xmlsec.NewDocument(parse(t, []byte(envelope)))
+	body := xmltree.DocumentElement(doc.Root()).ChildElements()[1]
 
 	bodyID, err := wss.AssignID(doc, body)
 	if err != nil {
@@ -60,7 +60,7 @@ func TestWSS4JProcessesOurSecurityHeader(t *testing.T) {
 	if err := hdr.Append(sig); err != nil {
 		t.Fatal(err)
 	}
-	signed, err := c14n.Bytes(doc, c14n.Options{Algorithm: c14n.Inclusive10})
+	signed, err := c14n.Bytes(doc.Root(), c14n.Options{Algorithm: c14n.Inclusive10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,8 +106,8 @@ func TestWSS4JProcessesSignThenEncrypt(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			signer, recipient := newKeypair(t, rsaKey(t)), newKeypair(t, rsaKey(t))
-			doc := parse(t, []byte(envelope))
-			body := xmltree.DocumentElement(doc).ChildElements()[1]
+			doc := xmlsec.NewDocument(parse(t, []byte(envelope)))
+			body := xmltree.DocumentElement(doc.Root()).ChildElements()[1]
 			payload := body.ChildElements()[0]
 
 			bodyID, err := wss.AssignID(doc, body)
@@ -149,7 +149,7 @@ func TestWSS4JProcessesSignThenEncrypt(t *testing.T) {
 			case "bst":
 				var tok string
 				if tok, err = hdr.AddBinarySecurityToken(recipient.provider.Certificate, nil, xmlsec.BSTValueTypeX509v3); err == nil {
-					str, err = wss.NewSecurityTokenReference(doc, tok, "")
+					str, err = wss.NewSecurityTokenReference(doc.Root(), tok, "")
 				}
 			case "ski":
 				str, err = wss.NewKeyIdentifierReference(recipient.provider.Certificate)
@@ -190,13 +190,13 @@ func TestWSS4JProcessesSignThenEncrypt(t *testing.T) {
 			}
 			var order []string
 			for _, e := range hdr.Element().ChildElements() {
-				order = append(order, e.Name.Local)
+				order = append(order, e.Name().Local)
 			}
 			if !slices.Equal(order, wantOrder) {
 				t.Fatalf("header order %v, want %v", order, wantOrder)
 			}
 
-			out, err := xenc.EncryptElement(doc, payload, ek.SessionKey, opts)
+			out, err := xenc.EncryptElement(doc.Root(), doc.Node(payload), ek.SessionKey, opts)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -256,8 +256,8 @@ func TestWSS4JProcessesSignThenEncrypt(t *testing.T) {
 // that replaced the payload. Acceptance criterion 4.
 func TestWSS4JDecryptsOurEncryption(t *testing.T) {
 	recipient := newKeypair(t, rsaKey(t))
-	doc := parse(t, []byte(envelope))
-	payload := xmltree.DocumentElement(doc).ChildElements()[1].ChildElements()[0]
+	doc := xmlsec.NewDocument(parse(t, []byte(envelope)))
+	payload := xmltree.DocumentElement(doc.Root()).ChildElements()[1].ChildElements()[0]
 
 	hdr, err := wss.NewHeader(doc, xmlsec.NSSOAP12, "", true)
 	if err != nil {
@@ -274,7 +274,7 @@ func TestWSS4JDecryptsOurEncryption(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	str, err := wss.NewSecurityTokenReference(doc, tokenID, xmlsec.BSTValueTypeX509v3)
+	str, err := wss.NewSecurityTokenReference(doc.Root(), tokenID, xmlsec.BSTValueTypeX509v3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +287,7 @@ func TestWSS4JDecryptsOurEncryption(t *testing.T) {
 	if err := hdr.Append(ek.Element); err != nil {
 		t.Fatal(err)
 	}
-	encrypted, err := xenc.EncryptElement(doc, payload, ek.SessionKey, opts)
+	encrypted, err := xenc.EncryptElement(doc.Root(), doc.Node(payload), ek.SessionKey, opts)
 	if err != nil {
 		t.Fatal(err)
 	}

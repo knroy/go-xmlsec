@@ -4,9 +4,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/idref"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/idref"
 )
 
 // ReferencedData returns the xenc:EncryptedData elements that list, an
@@ -32,7 +32,7 @@ func ReferencedData(list *xdm.Node) ([]*xdm.Node, error) {
 			continue
 		}
 		if !r.IsElement(xmlsec.NSXEnc, "DataReference") {
-			return nil, malformed("%s in an xenc:ReferenceList", r.Name.Local)
+			return nil, malformed("%s in an xenc:ReferenceList", r.Name().Local)
 		}
 		uri := r.AttrValue("URI")
 		id, ok := strings.CutPrefix(uri, "#")
@@ -49,7 +49,7 @@ func ReferencedData(list *xdm.Node) ([]*xdm.Node, error) {
 			}
 		}
 		if !t.IsElement(xmlsec.NSXEnc, "EncryptedData") {
-			return nil, malformed("xenc:DataReference %q names a %s, not an xenc:EncryptedData", uri, t.Name.Local)
+			return nil, malformed("xenc:DataReference %q names a %s, not an xenc:EncryptedData", uri, t.Name().Local)
 		}
 		if slices.Contains(out, t) {
 			return nil, malformed("xenc:DataReference %q listed twice", uri)

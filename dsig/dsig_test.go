@@ -14,13 +14,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xml/xdmbuild"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/wss"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xml/v2/xdmbuild"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/wss"
 )
 
 func newKey(t *testing.T, signer crypto.Signer) xmlsec.KeyProvider {
@@ -57,6 +57,31 @@ func parse(t *testing.T, b []byte) *xdm.Node {
 		t.Fatal(err)
 	}
 	return tree.Root
+}
+
+// signAt signs within *doc, through a Document, and points *doc at the tree
+// as signed: a new one when opts.Parent placed the signature.
+func signAt(doc **xdm.Node, key xmlsec.KeyProvider, opts dsig.SignOptions) (*xdm.Node, error) {
+	d := xmlsec.NewDocument(*doc)
+	sig, err := dsig.Sign(d, key, opts)
+	*doc = d.Root()
+	return sig, err
+}
+
+// appendChild returns the root of a copy of parent's tree with a copy of n
+// appended to parent.
+func appendChild(parent, n *xdm.Node) *xdm.Node {
+	var e xmltree.Edits
+	e.Insert(parent, parent.NumChildren(), n)
+	root, _ := xmltree.Rebuild(parent, &e)
+	return root
+}
+
+// rebuilt applies e to a copy of doc's tree and returns the copy's root and
+// n's counterpart in it.
+func rebuilt(doc, n *xdm.Node, e *xmltree.Edits) (*xdm.Node, *xdm.Node) {
+	root, m := xmltree.Rebuild(doc, e)
+	return root, m[n]
 }
 
 func findSignature(doc *xdm.Node) *xdm.Node {
@@ -105,17 +130,18 @@ func attachments(t *testing.T, body string) xmlsec.AttachmentSet {
 func signAS4(t *testing.T, key xmlsec.KeyProvider) (signed []byte, msgID, bodyID string) {
 	t.Helper()
 	doc := parse(t, []byte(envelope))
+	d := xmlsec.NewDocument(doc)
 	env := xmltree.DocumentElement(doc)
 	msg, body := env.ChildElements()[0].ChildElements()[0], env.ChildElements()[1]
 
 	var err error
-	if msgID, err = wss.AssignID(doc, msg); err != nil {
+	if msgID, err = wss.AssignID(d, msg); err != nil {
 		t.Fatal(err)
 	}
-	if bodyID, err = wss.AssignID(doc, body); err != nil {
+	if bodyID, err = wss.AssignID(d, body); err != nil {
 		t.Fatal(err)
 	}
-	hdr, err := wss.NewHeader(doc, xmlsec.NSSOAP12, "", true)
+	hdr, err := wss.NewHeader(d, xmlsec.NSSOAP12, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +149,7 @@ func signAS4(t *testing.T, key xmlsec.KeyProvider) (signed []byte, msgID, bodyID
 	if err != nil {
 		t.Fatal(err)
 	}
-	sig, err := dsig.Sign(doc, key, dsig.SignOptions{
+	sig, err := dsig.Sign(d, key, dsig.SignOptions{
 		SignatureAlgorithm:        xmlsec.SigRSASHA256,
 		CanonicalizationAlgorithm: string(c14n.Exclusive10),
 		References: []dsig.Reference{
@@ -142,7 +168,7 @@ func signAS4(t *testing.T, key xmlsec.KeyProvider) (signed []byte, msgID, bodyID
 	if err := hdr.Append(sig); err != nil {
 		t.Fatal(err)
 	}
-	return serialize(t, doc), msgID, bodyID
+	return serialize(t, d.Root()), msgID, bodyID
 }
 
 func verifyAS4(t *testing.T, signed []byte, att string) (*dsig.Coverage, error) {
@@ -303,7 +329,7 @@ func TestConformance_S_03_SMPEnvelopedSignature(t *testing.T) {
 	signed := signEnveloped(t, newKey(t, rsaKey), xmlsec.SigRSASHA256, xmlsec.DigestSHA256)
 	doc := parse(t, signed)
 	sig := findSignature(doc)
-	if sig.Parent != xmltree.DocumentElement(doc) || sig != xmltree.DocumentElement(doc).ChildElements()[1] {
+	if sig.Parent() != xmltree.DocumentElement(doc) || sig != xmltree.DocumentElement(doc).ChildElements()[1] {
 		t.Fatal("signature is not the last child element of the document element")
 	}
 	cov, err := dsig.Verify(doc, sig, dsig.VerifyOptions{
@@ -472,7 +498,7 @@ func TestSignRefusals(t *testing.T) {
 			opts := base
 			opts.References = ref(xmlsec.TransformEnvelopedSignature, string(c14n.Exclusive10))
 			c.mod(&opts)
-			_, err := dsig.Sign(doc, key, opts)
+			_, err := dsig.Sign(xmlsec.NewDocument(doc), key, opts)
 			if !errors.Is(err, c.want) {
 				t.Fatalf("got %v, want %v", err, c.want)
 			}

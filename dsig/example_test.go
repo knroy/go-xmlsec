@@ -10,10 +10,10 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/wss"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/wss"
 )
 
 // exampleKey stands in for a key loaded from PEM, a PKCS#11 token or a
@@ -93,8 +93,8 @@ func Example_wsSecurity() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	doc := tree.Root
-	body := doc.ChildElements()[0].ChildElements()[0]
+	doc := xmlsec.NewDocument(tree.Root)
+	body := tree.Root.ChildElements()[0].ChildElements()[0]
 
 	bodyID, err := wss.AssignID(doc, body)
 	if err != nil {
@@ -127,10 +127,12 @@ func Example_wsSecurity() {
 	}
 
 	// A receiver checks the signature, then that it covers the body.
-	cov, err := dsig.Verify(doc, sig, dsig.VerifyOptions{Certificate: key.Certificate})
+	// The header placed a copy of sig; doc.Node finds it, and the body as
+	// it now stands.
+	cov, err := dsig.Verify(doc.Root(), doc.Node(sig), dsig.VerifyOptions{Certificate: key.Certificate})
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println("body signed:", cov.Covers(bodyID) && cov.SignedElements[0] == body)
+	fmt.Println("body signed:", cov.Covers(bodyID) && cov.SignedElements[0] == doc.Node(body))
 	// Output: body signed: true
 }

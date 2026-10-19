@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/xenc"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/xenc"
 )
 
 // fuzzOpts is as4Opts for fuzz setup, which has no *testing.T. Encryption
@@ -38,7 +38,7 @@ func fuzzBytes(el *xdm.Node) []byte {
 func fuzzFirst(doc *xdm.Node, local string) *xdm.Node {
 	var found *xdm.Node
 	xmltree.Walk(doc, func(e *xdm.Node) {
-		if found == nil && e.Name.Local == local {
+		if found == nil && e.Name().Local == local {
 			found = e
 		}
 	})

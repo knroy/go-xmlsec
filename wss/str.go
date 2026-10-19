@@ -13,9 +13,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // newSTR returns an empty, detached wsse:SecurityTokenReference.
@@ -198,9 +198,9 @@ func ResolveSecurityTokenReferenceStrict(doc, str *xdm.Node) (*x509.Certificate,
 // reference is in a later child; elsewhere, tok precedes str in document
 // order.
 func checkTokenOrder(doc, str, tok *xdm.Node) error {
-	sec := str.Parent
+	sec := str.Parent()
 	for sec != nil && !sec.IsElement(xmlsec.NSWSSE, "Security") {
-		sec = sec.Parent
+		sec = sec.Parent()
 	}
 	if sec == nil {
 		pos := map[*xdm.Node]int{}
@@ -212,10 +212,11 @@ func checkTokenOrder(doc, str, tok *xdm.Node) error {
 	}
 	// The child of the header that holds the reference.
 	step := str
-	for step.Parent != sec {
-		step = step.Parent
+	for step.Parent() != sec {
+		step = step.Parent()
 	}
-	if tok.Parent != sec || slices.Index(sec.Children, step) <= slices.Index(sec.Children, tok) {
+	kids := slices.Collect(sec.Children())
+	if tok.Parent() != sec || slices.Index(kids, step) <= slices.Index(kids, tok) {
 		return fmt.Errorf("%w: the token must precede the reference in the same wsse:Security (BSP R5205, R3066)", xmlsec.ErrMalformed)
 	}
 	return nil
@@ -260,7 +261,7 @@ func ReferencedToken(doc, str *xdm.Node, extra ...xdm.QName) (*xdm.Node, error) 
 	case err != nil:
 		return nil, err
 	case tok.IsElement(xmlsec.NSWSSE, "SecurityTokenReference"), tok.IsElement(xmlsec.NSWSSE, "Embedded"), tok.IsElement(xmlsec.NSDSig, "KeyInfo"):
-		return nil, fmt.Errorf("%w: a wsse:SecurityTokenReference names %s, not a token (BSP R3057, R3064, R3211)", xmlsec.ErrMalformed, tok.Name.Local)
+		return nil, fmt.Errorf("%w: a wsse:SecurityTokenReference names %s, not a token (BSP R3057, R3064, R3211)", xmlsec.ErrMalformed, tok.Name().Local)
 	}
 	return tok, nil
 }
@@ -302,7 +303,7 @@ func MatchSecurityTokenReference(str *xdm.Node, cert *x509.Certificate) bool {
 	case k.IsElement(xmlsec.NSWSSE, "KeyIdentifier"):
 		// EncodingType is optional in SOAP Message Security; absent means
 		// the Base64Binary its ValueTypes use.
-		if enc := k.Attr("", "EncodingType"); enc != nil && enc.Value != xmlsec.BSTEncodingBase64 {
+		if enc := k.Attr("", "EncodingType"); enc != nil && enc.Value() != xmlsec.BSTEncodingBase64 {
 			return false
 		}
 		v, err := xmltree.Base64(k)

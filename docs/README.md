@@ -8,6 +8,9 @@
   security assessment and its results, and what a caller must still do.
 * **[Testing](testing.md)** — what runs, the conformance test IDs, how to run
   any of it, and what is not tested yet.
+* **[Migrating to v2](migrating-to-v2.md)** — for go-xmlsec v1 users: the
+  module path, go-xml v2's frozen trees, `xmlsec.Document`, and before/after
+  code for every changed call.
 * **[TODO](todo.md)** — open work against the specifications: none, and what
   is deliberately not met, and why.
 * **[CHANGELOG.md](../CHANGELOG.md)** — every change, with the commit.

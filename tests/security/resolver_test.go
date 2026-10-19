@@ -11,12 +11,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/xenc"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/xenc"
 )
 
 // An external reference reaches the caller's resolver only once the
@@ -30,7 +30,8 @@ func TestResolverCalledOnlyForAuthenticSignatures(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := []byte("payload")
-	if _, err := dsig.Sign(tree.Root, signer, dsig.SignOptions{
+	d := xmlsec.NewDocument(tree.Root)
+	if _, err := dsig.Sign(d, signer, dsig.SignOptions{
 		SignatureAlgorithm: xmlsec.SigRSASHA256, CanonicalizationAlgorithm: string(c14n.Exclusive10),
 		References: []dsig.Reference{{URI: uri, DigestAlgorithm: xmlsec.DigestSHA256}},
 		KeyInfo:    dsig.KeyInfoX509Data, Parent: xmltree.DocumentElement(tree.Root),
@@ -38,7 +39,7 @@ func TestResolverCalledOnlyForAuthenticSignatures(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	signed, err := c14n.Bytes(tree.Root, c14n.Options{Algorithm: c14n.Inclusive10})
+	signed, err := c14n.Bytes(d.Root(), c14n.Options{Algorithm: c14n.Inclusive10})
 	if err != nil {
 		t.Fatal(err)
 	}

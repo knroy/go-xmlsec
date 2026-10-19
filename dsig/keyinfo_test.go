@@ -15,12 +15,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/wss"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/wss"
 )
 
 var (
@@ -283,7 +283,7 @@ func signedCovDoc(t *testing.T, sigContent string) (doc, sig *xdm.Node) {
 	if _, err := c14n.Digest(h, xmltree.DocumentElement(doc).ChildElements()[0], c14n.Options{Algorithm: c14n.Exclusive10}); err != nil {
 		t.Fatal(err)
 	}
-	sig.ChildElements()[0].ChildElements()[2].ChildElements()[2].Children[0].Value = base64.StdEncoding.EncodeToString(h.Sum(nil))
+	sig.ChildElements()[0].ChildElements()[2].ChildElements()[2].FirstChild().SetValue(base64.StdEncoding.EncodeToString(h.Sum(nil)))
 	resignSI(t, sig, c14n.Exclusive10)
 	return doc, sig
 }
@@ -386,12 +386,12 @@ func TestPinnedKeyIgnoresUnsupportedKeyInfo(t *testing.T) {
 // the Basic Security Profile's reference rules enforced.
 func TestSecurityTokenReferencePKCS7(t *testing.T) {
 	key := newKey(t, rsaKey)
-	doc := parse(t, []byte(envelope))
-	bodyID, err := wss.AssignID(doc, xmltree.DocumentElement(doc).ChildElements()[1])
+	d := xmlsec.NewDocument(parse(t, []byte(envelope)))
+	bodyID, err := wss.AssignID(d, xmltree.DocumentElement(d.Root()).ChildElements()[1])
 	if err != nil {
 		t.Fatal(err)
 	}
-	hdr, err := wss.NewHeader(doc, xmlsec.NSSOAP12, "", false)
+	hdr, err := wss.NewHeader(d, xmlsec.NSSOAP12, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,7 +399,7 @@ func TestSecurityTokenReferencePKCS7(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sig, err := dsig.Sign(doc, key, dsig.SignOptions{
+	sig, err := dsig.Sign(d, key, dsig.SignOptions{
 		SignatureAlgorithm:        xmlsec.SigRSASHA256,
 		CanonicalizationAlgorithm: string(c14n.Exclusive10),
 		References:                []dsig.Reference{{URI: "#" + bodyID, Transforms: excC14N, DigestAlgorithm: xmlsec.DigestSHA256}},
@@ -412,7 +412,7 @@ func TestSecurityTokenReferencePKCS7(t *testing.T) {
 	if err := hdr.Append(sig); err != nil {
 		t.Fatal(err)
 	}
-	doc = parse(t, serialize(t, doc))
+	doc := parse(t, serialize(t, d.Root()))
 	opts := as4Allow
 	opts.StrictSecurityTokenReference = true
 	cov, err := dsig.Verify(doc, findSignature(doc), opts)

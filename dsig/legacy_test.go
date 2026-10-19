@@ -20,10 +20,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
 )
 
 var dsaKey = sync.OnceValue(func() *dsa.PrivateKey {
@@ -84,12 +84,12 @@ func legacyDoc(t *testing.T, sm, digestAlg, keyInfo string, sign func(si []byte)
 	if _, err := c14n.Digest(h, doc.ChildElements()[0].ChildElements()[0], c14n.Options{Algorithm: c14n.Exclusive10}); err != nil {
 		t.Fatal(err)
 	}
-	si.ChildElements()[2].ChildElements()[2].Children[0].Value = b64(h.Sum(nil))
+	si.ChildElements()[2].ChildElements()[2].FirstChild().SetValue(b64(h.Sum(nil)))
 	b, err := c14n.Bytes(si, c14n.Options{Algorithm: c14n.Exclusive10})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sig.ChildElements()[1].Children[0].Value = b64(sign(b))
+	sig.ChildElements()[1].FirstChild().SetValue(b64(sign(b)))
 	return doc, sig
 }
 

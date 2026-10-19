@@ -123,7 +123,7 @@ Defences here:
   to plant a second target: with the default set, an `ID` or `Id` attribute
   is neither resolved nor counted. `xdm.ElementByID` is never used on the
   verify path: on duplicates it returns the first depth-first match
-  (confirmed against go-xml v1.6.0), which is exactly the ambiguity the
+  (confirmed against go-xml v2.0.1), which is exactly the ambiguity the
   attack needs.
 * The enveloped-signature transform removes the enclosing signature by
   identity, not every `ds:Signature` in the document. Over a node set parsed
@@ -216,8 +216,9 @@ silently change what is accepted. Each is enforced before the work it bounds.
 The two depth limits differ, so a document can parse and then fail to
 canonicalize. That is a bounded outcome, not a bug.
 
-**Bounded is not cheap.** Measured on an arm64 Mac, parsing costs up to
-about 40 times the input in memory, before anything is authenticated:
+**Bounded is not cheap.** Measured on an arm64 Mac with go-xml v1.6.0, not
+yet re-measured on go-xml v2, parsing costs up to about 40 times the input
+in memory, before anything is authenticated:
 
 | Input | Size | Outcome | Peak memory |
 |---|---:|---|---:|

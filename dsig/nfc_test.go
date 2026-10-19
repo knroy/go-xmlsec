@@ -5,11 +5,11 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // decomposed is "é" as e and a combining acute accent: not NFC.
@@ -31,7 +31,7 @@ func TestSignRefusesNonNFC(t *testing.T) {
 			doc := parse(t, []byte(`<r><a xml:id="a">`+c.text+`</a></r>`))
 			r := ref("#a")
 			r.Type = c.typ
-			_, err := dsig.Sign(doc, newKey(t, rsaKey), dsig.SignOptions{
+			_, err := signAt(&doc, newKey(t, rsaKey), dsig.SignOptions{
 				SignatureAlgorithm:        xmlsec.SigRSASHA256,
 				CanonicalizationAlgorithm: string(c14n.Exclusive10),
 				References:                []dsig.Reference{r},
@@ -49,15 +49,17 @@ func nonNFCSignature(t *testing.T, text, typ string) (doc, sig *xdm.Node) {
 	t.Helper()
 	doc = parse(t, []byte(covDoc(covSI(covCM+covSM+covRef)+covSV)))
 	sig = findSignature(doc)
+	var e xmltree.Edits
+	e.SetAttr(sig.ChildElements()[0].ChildElements()[2], xdm.QName{Local: "Type"}, typ)
+	doc, sig = rebuilt(doc, sig, &e)
 	a := xmltree.DocumentElement(doc).ChildElements()[0]
-	a.Children[0].Value = text
+	a.FirstChild().SetValue(text)
 	r := sig.ChildElements()[0].ChildElements()[2]
-	xmltree.SetAttr(r, "", "", "Type", typ)
 	h := sha256.New()
 	if _, err := c14n.Digest(h, a, c14n.Options{Algorithm: c14n.Exclusive10}); err != nil {
 		t.Fatal(err)
 	}
-	r.ChildElements()[2].Children[0].Value = b64(h.Sum(nil))
+	r.ChildElements()[2].FirstChild().SetValue(b64(h.Sum(nil)))
 	resignSI(t, sig, c14n.Exclusive10)
 	return doc, sig
 }

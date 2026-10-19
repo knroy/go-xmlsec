@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/xenc"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/xenc"
 )
 
 // Section 2.1.4: arbitrary octets, inline or by CipherReference, with the

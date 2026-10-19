@@ -17,11 +17,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/wss"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/wss"
 )
 
 // SignOptions configures signature generation.
@@ -227,25 +227,30 @@ type SignOptions struct {
 // Sign refuses with xmlsec.ErrNotNFC to sign a same-document reference, or
 // a ds:SignedInfo, whose canonical form is not in Unicode Normalization Form
 // C (XML-DSig 8.1.3): a verifier may normalize what it receives.
-func Sign(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions) (*xdm.Node, error) {
+func Sign(doc *xmlsec.Document, key xmlsec.KeyProvider, opts SignOptions) (*xdm.Node, error) {
+	var d *xmltree.Doc
+	var root *xdm.Node
+	if doc != nil {
+		if d = xmltree.DocOf(doc); d == nil {
+			return nil, fmt.Errorf("%w: Sign needs a Document made by xmlsec.NewDocument", xmlsec.ErrMalformed)
+		}
+		root = d.Root()
+	}
 	if opts.Parent == nil {
 		if !c14n.Algorithm(opts.CanonicalizationAlgorithm).Exclusive() {
 			return nil, fmt.Errorf("%w: a detached signature needs an exclusive SignedInfo canonicalization, got %q; set SignOptions.Parent to compute it in place",
 				xmlsec.ErrUnsupportedAlgorithm, opts.CanonicalizationAlgorithm)
 		}
-		return sign(doc, key, opts, nil)
+		return sign(root, key, opts, nil, nil)
 	}
-	p := opts.Parent
-	if doc == nil || p.Kind != xdm.KindElement || p.Root() != doc.Root() {
+	var p *xdm.Node
+	if d != nil {
+		p = d.Node(opts.Parent)
+	}
+	if p == nil || p.Kind() != xdm.KindElement {
 		return nil, fmt.Errorf("%w: SignOptions.Parent must be an element inside doc", xmlsec.ErrMalformed)
 	}
-	n := len(p.Children)
-	sig, err := sign(doc, key, opts, p)
-	if err != nil {
-		p.Children = p.Children[:n]
-		return nil, err
-	}
-	return sig, nil
+	return sign(root, key, opts, d, p)
 }
 
 // SignEnveloped creates an enveloped signature, appended as the last child
@@ -263,18 +268,19 @@ func SignEnveloped(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions) ([]b
 	if el == nil {
 		return nil, fmt.Errorf("%w: no document element", xmlsec.ErrMalformed)
 	}
-	n := len(el.Children)
-	defer func() { el.Children = el.Children[:n] }()
-
-	if _, err := sign(doc, key, opts, el); err != nil {
+	sig, err := sign(doc.Root(), key, opts, xmltree.NewDoc(doc), el)
+	if err != nil {
 		return nil, err
 	}
-	return c14n.Bytes(doc.Root(), c14n.Options{Algorithm: c14n.Inclusive10WithComments})
+	return c14n.Bytes(sig.Root(), c14n.Options{Algorithm: c14n.Inclusive10WithComments})
 }
 
-// sign builds the signature, attaching it to parent first if non-nil so
-// that references and ds:SignedInfo are processed in their final position.
-func sign(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions, parent *xdm.Node) (*xdm.Node, error) {
+// sign builds the signature. With parent, an element of d's current tree
+// doc, it is placed there in a new tree before references and
+// ds:SignedInfo are processed, so that they are processed in their final
+// position, and the new tree becomes d's current one if signing succeeds.
+// The returned element is the signature as placed.
+func sign(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions, d *xmltree.Doc, parent *xdm.Node) (*xdm.Node, error) {
 	sigHash, err := signatureMethod(opts)
 	if err != nil {
 		return nil, err
@@ -307,12 +313,25 @@ func sign(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions, parent *xdm.N
 		return nil, err
 	}
 
-	sig := xmltree.Element(parent, "ds", xmlsec.NSDSig, "Signature")
+	// The signature is built whole, top-down, with the digest and signature
+	// values empty, and placed; the values are filled in as they are
+	// computed. Everything after ds:SignedInfo is built before any reference
+	// is digested, so that a reference to ds:KeyInfo (XML-DSig 4.5) or to a
+	// ds:Object covers it as it will stand.
+	sig := xmltree.Element(nil, "ds", xmlsec.NSDSig, "Signature")
+	// Built under parent, the signature sees parent's namespaces while it
+	// is built, so that xmltree.Declare neither repeats a binding in scope
+	// there nor shadows another; they are dropped again before placing.
+	inherited := map[string]string{}
+	if parent != nil {
+		inherited = parent.InScopeNamespaces()
+		delete(inherited, "xml")
+		for p, u := range inherited {
+			sig.AddNamespace(p, u)
+		}
+	}
 	if err := xmltree.Declare(sig, "ds", xmlsec.NSDSig); err != nil {
 		return nil, err
-	}
-	if doc == nil {
-		doc = sig // enveloping: the signature is all there is
 	}
 	setOptional(sig, "Id", opts.SignatureID)
 	si := xmltree.Element(sig, "ds", xmlsec.NSDSig, "SignedInfo")
@@ -325,27 +344,38 @@ func sign(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions, parent *xdm.N
 	if opts.HMACOutputLength > 0 {
 		xmltree.Text(xmltree.Element(sm, "ds", xmlsec.NSDSig, "HMACOutputLength"), strconv.Itoa(opts.HMACOutputLength))
 	}
-
-	// Everything after ds:SignedInfo is built before any reference is
-	// digested, so that a reference to ds:KeyInfo (XML-DSig 4.5) or to a
-	// ds:Object covers it as it will stand; ds:SignatureValue is filled in
-	// last.
+	pending, err := buildReferences(si, opts.References)
+	if err != nil {
+		return nil, err
+	}
 	sv := xmltree.Element(sig, "ds", xmlsec.NSDSig, "SignatureValue")
 	setOptional(sv, "Id", opts.SignatureValueID)
+	svText := sv.AppendText("")
 	if err := addKeyInfo(sig, doc, key, opts); err != nil {
 		return nil, err
 	}
-	if opts.KeyInfoID != "" {
-		kids := sig.ChildElements()
-		ki := kids[len(kids)-1]
-		if !ki.IsElement(xmlsec.NSDSig, "KeyInfo") {
-			return nil, fmt.Errorf("%w: KeyInfoID is set, and no ds:KeyInfo is emitted", xmlsec.ErrMalformed)
-		}
-		xmltree.SetAttr(ki, "", "", "Id", opts.KeyInfoID)
+	if opts.KeyInfoID != "" && !sig.LastChild().IsElement(xmlsec.NSDSig, "KeyInfo") {
+		return nil, fmt.Errorf("%w: KeyInfoID is set, and no ds:KeyInfo is emitted", xmlsec.ErrMalformed)
 	}
 	addObjects(sig, opts)
+	sig.RemoveNamespaceDecls(func(p, u string) bool { _, ok := inherited[p]; return ok })
 
-	if err := addReferences(si, doc, sig, opts.References, opts); err != nil {
+	at := func(n *xdm.Node) *xdm.Node { return n }
+	var root *xdm.Node
+	var m map[*xdm.Node]*xdm.Node
+	switch {
+	case parent != nil:
+		var e xmltree.Edits
+		e.Insert(parent, parent.NumChildren(), sig)
+		root, m, _ = d.Prepare(&e) // parent is in d's current tree
+		at = func(n *xdm.Node) *xdm.Node { return m[n] }
+		doc = root
+	case doc == nil:
+		doc = sig // enveloping: the signature is all there is
+	}
+	placed := at(sig)
+
+	if err := digestPending(doc, placed, pending, opts, at); err != nil {
 		return nil, err
 	}
 
@@ -357,7 +387,7 @@ func sign(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions, parent *xdm.N
 	}
 	siOpts := c14n.Options{Algorithm: c14n.Algorithm(opts.CanonicalizationAlgorithm), InclusiveNamespacePrefixes: opts.CanonicalizationPrefixes}
 	if err := checkNFC(true, h, "ds:SignedInfo", func(w hash.Hash) error {
-		_, err := c14n.DigestNodeSet(w, c14n.Subtree(si), siOpts)
+		_, err := c14n.DigestNodeSet(w, c14n.Subtree(at(si)), siOpts)
 		return err
 	}); err != nil {
 		return nil, err
@@ -368,8 +398,11 @@ func sign(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions, parent *xdm.N
 	} else if value, err = signDigest(key.Signer, opts.SignatureAlgorithm, sigHash, h.Sum(nil)); err != nil {
 		return nil, err
 	}
-	xmltree.Text(sv, base64.StdEncoding.EncodeToString(value))
-	return sig, nil
+	at(svText).SetValue(base64.StdEncoding.EncodeToString(value))
+	if root != nil {
+		d.Commit(root, m)
+	}
+	return placed, nil
 }
 
 // checkKey admits a KeyProvider for a public-key signature.
@@ -470,14 +503,23 @@ func checkReferences(refs []Reference, opts SignOptions, noDoc bool) error {
 	return nil
 }
 
-// addReferences appends a digested ds:Reference to parent, a ds:SignedInfo
-// or ds:Manifest, for each of refs. sig is what the enveloped-signature
-// transform removes, and whose own Ids "#id" resolves against.
-func addReferences(parent, doc, sig *xdm.Node, refs []Reference, opts SignOptions) error {
+// pendingRef is a ds:Reference built and not yet digested: its
+// transforms, each holding the ds:Transform element it was built as, and
+// the empty text node of its ds:DigestValue.
+type pendingRef struct {
+	r          Reference
+	transforms []TransformSpec
+	value      *xdm.Node
+}
+
+// buildReferences appends a ds:Reference to parent, a ds:SignedInfo or
+// ds:Manifest, for each of refs, with an empty ds:DigestValue that
+// digestPending fills.
+func buildReferences(parent *xdm.Node, refs []Reference) ([]pendingRef, error) {
+	var out []pendingRef
 	for _, r := range refs {
-		dh, ok := signingDigest(r.DigestAlgorithm)
-		if !ok {
-			return fmt.Errorf("%w: digest %q", xmlsec.ErrUnsupportedAlgorithm, r.DigestAlgorithm)
+		if _, ok := signingDigest(r.DigestAlgorithm); !ok {
+			return nil, fmt.Errorf("%w: digest %q", xmlsec.ErrUnsupportedAlgorithm, r.DigestAlgorithm)
 		}
 		ref := xmltree.Element(parent, "ds", xmlsec.NSDSig, "Reference")
 		setOptional(ref, "Id", r.ID)
@@ -493,14 +535,33 @@ func addReferences(parent, doc, sig *xdm.Node, refs []Reference, opts SignOption
 			for i, t := range transforms {
 				tr := algElement(ts, "Transform", t.Algorithm)
 				if err := transformParams(tr, t); err != nil {
-					return err
+					return nil, err
 				}
 				transforms[i].el = tr
 			}
 		}
+		algElement(ref, "DigestMethod", r.DigestAlgorithm)
+		value := xmltree.Element(ref, "ds", xmlsec.NSDSig, "DigestValue").AppendText("")
+		out = append(out, pendingRef{r, transforms, value})
+	}
+	return out, nil
+}
+
+// digestPending digests each reference buildReferences built, as it
+// stands in doc, and fills in its ds:DigestValue. at maps a node as built
+// to the node as placed. sig is what the enveloped-signature transform
+// removes, and whose own Ids "#id" resolves against.
+func digestPending(doc, sig *xdm.Node, refs []pendingRef, opts SignOptions, at func(*xdm.Node) *xdm.Node) error {
+	for _, p := range refs {
+		r := p.r
+		dh, _ := signingDigest(r.DigestAlgorithm)
+		transforms := slices.Clone(p.transforms)
+		for i := range transforms {
+			transforms[i].el = at(transforms[i].el)
+		}
 		// XML-DSig 4.4.3.3: digesting an element of a detached signature
 		// fixes what it renders now, before the caller places it.
-		detached := sig.Parent == nil && sig != doc
+		detached := sig.Parent() == nil && sig != doc
 		if detached && !r.OmitURI && !placementIndependent(r.Transforms) && within(signatureTarget(doc, sig, r.URI, opts.IDAttributes), sig) {
 			return fmt.Errorf("%w: reference %q names an element of the detached signature, and its transforms depend on where the signature is placed; "+
 				"use only exclusive canonicalization without InclusiveNamespacePrefixes, or set SignOptions.Parent", xmlsec.ErrUnsupportedAlgorithm, r.URI)
@@ -523,8 +584,7 @@ func addReferences(parent, doc, sig *xdm.Node, refs []Reference, opts SignOption
 		}); err != nil {
 			return err
 		}
-		algElement(ref, "DigestMethod", r.DigestAlgorithm)
-		xmltree.Text(xmltree.Element(ref, "ds", xmlsec.NSDSig, "DigestValue"), base64.StdEncoding.EncodeToString(h.Sum(nil)))
+		at(p.value).SetValue(base64.StdEncoding.EncodeToString(h.Sum(nil)))
 	}
 	return nil
 }
@@ -662,6 +722,7 @@ func addKeyInfo(sig, doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions) er
 	keyInfo := func() *xdm.Node {
 		if ki == nil {
 			ki = xmltree.Element(sig, "ds", xmlsec.NSDSig, "KeyInfo")
+			setOptional(ki, "Id", opts.KeyInfoID)
 			if opts.KeyName != "" {
 				xmltree.Text(xmltree.Element(ki, "ds", xmlsec.NSDSig, "KeyName"), opts.KeyName)
 			}
@@ -691,7 +752,7 @@ func addKeyInfo(sig, doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions) er
 			if err := checkKeyInfoElement(key.Certificate, opts.KeyInfoElement); err != nil {
 				return err
 			}
-			keyInfo().AppendChild(opts.KeyInfoElement)
+			keyInfo().AppendCopy(opts.KeyInfoElement)
 			return nil
 		}
 		tok, err := wss.FindByID(doc, opts.SecurityTokenID)
@@ -709,7 +770,7 @@ func addKeyInfo(sig, doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions) er
 		if err != nil {
 			return err
 		}
-		keyInfo().AppendChild(str)
+		keyInfo().AppendCopy(str)
 		return nil
 	case KeyInfoKeyValue, KeyInfoDEREncodedKeyValue:
 		if err := checkRawKey(key.Certificate.PublicKey); err != nil {

@@ -3,11 +3,16 @@
 XML Signature, XML Encryption and WS-Security for Go. Pure Go, no cgo, no
 libxml2.
 
-Parsing and canonicalization come from [go-xml](https://github.com/knroy/go-xml);
+Parsing and canonicalization come from [go-xml](https://github.com/knroy/go-xml)
+v2;
 this library never serializes XML for a digest any other way. That matters,
 because a signature is only as correct as the canonical octets it covers.
 
-> **Status: v1.** The API is stable: no breaking change within v1. Output is
+> **Status: v2, unreleased.** Module `github.com/knroy/go-xmlsec/v2`, on
+> go-xml v2, whose parsed trees cannot be changed; the calls that add to a
+> document take an `xmlsec.Document`. Upgrading from v1:
+> [docs/migrating-to-v2.md](docs/migrating-to-v2.md). v1 continues on the
+> `v1` branch for fixes. Within v2 there will be no breaking change. Output is
 > verified in both directions against two independent implementations,
 > `xmlsec1` and Apache Santuario, on every commit, and signatures are
 > byte-identical to Santuario's. See [what is tested](#how-it-is-tested).
@@ -47,7 +52,7 @@ because a signature is only as correct as the canonical octets it covers.
 ## Install
 
 ```
-go get github.com/knroy/go-xmlsec
+go get github.com/knroy/go-xmlsec/v2
 ```
 
 Requires Go 1.26 or later.
@@ -57,6 +62,14 @@ Requires Go 1.26 or later.
 Sign a document, then verify it as the receiver. `key` is an
 `xmlsec.KeyProvider`: any `crypto.Signer` with its certificate, so a PEM key,
 a PKCS#11 token and a cloud KMS key all work.
+
+```go
+import (
+    "github.com/knroy/go-xml/v2/c14n"
+    "github.com/knroy/go-xmlsec/v2"
+    "github.com/knroy/go-xmlsec/v2/dsig"
+)
+```
 
 ```go
 tree, err := xmlsec.Parse([]byte(`<Invoice><Total>100.00</Total></Invoice>`))
@@ -97,8 +110,45 @@ Both snippets are adapted from `Example_enveloped` in
 [dsig/example_test.go](dsig/example_test.go), with error handling left out;
 `go test` compiles and runs the example, so it cannot drift from the API.
 `Example_wsSecurity` in the same file signs a SOAP body inside a WS-Security
-header, and [docs/usage.md](docs/usage.md) covers WS-Security, attachments
-and encryption in full.
+header. A parsed tree cannot be changed, so adding a header, an ID or a
+signature to a message goes through an `xmlsec.Document`: each change builds a
+new tree, `d.Root()` is the latest, and `d.Node(n)` finds an earlier tree's
+node in it.
+
+```go
+tree, err := xmlsec.Parse(envelope)
+d := xmlsec.NewDocument(tree.Root)
+
+bodyID, err := wss.AssignID(d, body) // body found in tree.Root: any version of d will do
+hdr, err := wss.NewHeader(d, xmlsec.NSSOAP12, "", true)
+tokenID, err := hdr.AddBinarySecurityToken(key.Certificate, nil, xmlsec.BSTValueTypeX509v3)
+sig, err := dsig.Sign(d, key, dsig.SignOptions{
+    SignatureAlgorithm:        xmlsec.SigRSASHA256,
+    CanonicalizationAlgorithm: string(c14n.Exclusive10),
+    References: []dsig.Reference{{
+        URI:             "#" + bodyID,
+        DigestAlgorithm: xmlsec.DigestSHA256,
+        Transforms:      []dsig.TransformSpec{{Algorithm: string(c14n.Exclusive10)}},
+    }},
+    KeyInfo:         dsig.KeyInfoSecurityTokenReference,
+    SecurityTokenID: tokenID,
+})
+err = hdr.Prepend(sig) // places a copy: d.Node(sig) is the placed signature
+
+// Then encrypt. An EncryptedKey's methods replace ek.Element, so call them
+// before placing it.
+encOpts.DataID = "ED-1"
+ek, err := xenc.GenerateEncryptedKey(encOpts)
+err = ek.SetKeyInfo(recipientSTR)
+err = ek.AddDataReference(encOpts.DataID)
+err = hdr.Prepend(ek.Element)
+out, err := xenc.EncryptElement(d.Root(), d.Node(payload), ek.SessionKey, encOpts)
+```
+
+`out` is the message to send. To send it signed only, serialize the latest
+tree: `c14n.Bytes(d.Root(), c14n.Options{Algorithm: c14n.Inclusive10WithComments})`.
+[docs/usage.md](docs/usage.md) covers WS-Security, attachments and encryption
+in full.
 
 ## Verifying safely
 
@@ -168,7 +218,7 @@ requirement, are in [docs/security.md](docs/security.md#conformance).
 | Real-world documents | 122 real Peppol SMP responses, from 62 providers, all verify; kept in a separate corpus module |
 | Security | XXE, external fetches, signature wrapping, key substitution, algorithm confusion, comment truncation and encryption downgrade, each a regression test |
 | Fuzzing | Three targets on the verify and decrypt paths, one hour each, nightly |
-| Canonicalization | done by `go-xml/c14n` v1.6.0, which publishes its figures in its own docs rather than its README: the W3C C14N 1.1 interop cases 20/20, the Baltimore Merlin interop signatures, the Recommendations' examples, and differentials against `xmllint` and `xmlsec1`. A Santuario differential and a real-message corpus are still open there. The byte-identical signatures, Canonical XML 1.1 included, and the real-world corpus above exercise it independently; see [docs/testing.md](docs/testing.md#canonicalization). |
+| Canonicalization | done by `go-xml/c14n` v2.0.1, which publishes its figures in its own docs rather than its README: the W3C C14N 1.1 interop cases 20/20, the Baltimore Merlin interop signatures, the Recommendations' examples, and differentials against `xmllint` and `xmlsec1`. A Santuario differential and a real-message corpus are still open there. The byte-identical signatures, Canonical XML 1.1 included, and the real-world corpus above exercise it independently; see [docs/testing.md](docs/testing.md#canonicalization). |
 
 [docs/testing.md](docs/testing.md) has the detail, including every dataset
 the tests use.
@@ -178,6 +228,7 @@ the tests use.
 - [Usage](docs/usage.md): signing, verifying, WS-Security, encryption
 - [Security](docs/security.md): threat model, refusals, limits, assessment
 - [Testing](docs/testing.md): what runs and how to run it
+- [Migrating to v2](docs/migrating-to-v2.md): from go-xmlsec v1
 - [CHANGELOG.md](CHANGELOG.md) · [SECURITY.md](SECURITY.md) for reporting
   vulnerabilities · [RELEASE.md](RELEASE.md)
 

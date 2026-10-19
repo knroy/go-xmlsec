@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"hash"
 
-	"github.com/knroy/go-xmlsec"
+	"github.com/knroy/go-xmlsec/v2"
 )
 
 // signatureMethod checks opts.SignatureAlgorithm against the key model

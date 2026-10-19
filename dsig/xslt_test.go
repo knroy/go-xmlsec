@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // xsltSheet writes the text of a and the number of x:drop elements, which
@@ -73,31 +73,40 @@ func TestXSLTTransform(t *testing.T) {
 func TestXSLTVerifyAdmission(t *testing.T) {
 	sign := func() (*xdm.Node, *xdm.Node, *xdm.Node) {
 		doc, sig := mustSignInPlace(t, xpDoc, "", xpEnv, xsltSpec(stylesheet(t, xsltSheet)), xpExc)
-		return doc, sig, find(sig, xmlsec.NSDSig, "Transform").Parent.ChildElements()[1]
+		return doc, sig, find(sig, xmlsec.NSDSig, "Transform").Parent().ChildElements()[1]
 	}
 	cases := []struct {
 		name    string
-		edit    func(tr *xdm.Node)
+		edit    func(e *xmltree.Edits, tr *xdm.Node)
 		allowed string
 		want    error
 	}{
-		{"another stylesheet", func(*xdm.Node) {}, strings.Replace(xsltSheet, "|", "-", 1), xmlsec.ErrTransformRefused},
+		{"another stylesheet", func(*xmltree.Edits, *xdm.Node) {}, strings.Replace(xsltSheet, "|", "-", 1), xmlsec.ErrTransformRefused},
 		// q is used only inside select: no element or attribute name shows
 		// it, so plain Exclusive C14N would not notice the rebinding.
-		{"prefix rebinding", func(tr *xdm.Node) {
-			for _, ns := range tr.ChildElements()[0].Namespaces {
-				if ns.Name.Local == "q" {
-					ns.Value = "urn:attacker"
-				}
+		{"prefix rebinding", func(e *xmltree.Edits, tr *xdm.Node) {
+			sheet := tr.ChildElements()[0]
+			if _, ok := sheet.LookupPrefix("q"); !ok {
+				t.Fatal("q is not in scope")
 			}
+			e.Declare(sheet, "q", "urn:attacker")
 		}, xsltSheet, xmlsec.ErrTransformRefused},
-		{"two children", func(tr *xdm.Node) { xmltree.Element(tr, "", "", "x") }, xsltSheet, xmlsec.ErrMalformed},
-		{"not a stylesheet", func(tr *xdm.Node) { tr.ChildElements()[0].Name.Local = "template" }, xsltSheet, xmlsec.ErrMalformed},
+		{"two children", func(e *xmltree.Edits, tr *xdm.Node) {
+			e.Insert(tr, tr.NumChildren(), xmltree.Element(nil, "", "", "x"))
+		}, xsltSheet, xmlsec.ErrMalformed},
+		{"not a stylesheet", func(_ *xmltree.Edits, tr *xdm.Node) {
+			sheet := tr.ChildElements()[0]
+			name := sheet.Name()
+			name.Local = "template"
+			sheet.SetName(name)
+		}, xsltSheet, xmlsec.ErrMalformed},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			doc, sig, tr := sign()
-			c.edit(tr)
+			var e xmltree.Edits
+			c.edit(&e, tr)
+			doc, sig = rebuilt(doc, sig, &e)
 			_, err := xpVerify(t, doc, sig, dsig.VerifyOptions{AllowedXSLTStylesheets: []*xdm.Node{stylesheet(t, c.allowed)}})
 			if !errors.Is(err, c.want) {
 				t.Fatalf("got %v, want %v", err, c.want)

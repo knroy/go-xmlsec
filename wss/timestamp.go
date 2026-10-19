@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 const timestampLayout = "2006-01-02T15:04:05.000Z"
@@ -42,12 +42,12 @@ func (h *Header) addTimestamp(now time.Time, ttl time.Duration, id string) (stri
 	if ttl < 0 {
 		return "", fmt.Errorf("wss: negative timestamp ttl %v", ttl)
 	}
-	for _, e := range h.el.ChildElements() {
+	for _, e := range h.sec().ChildElements() {
 		if e.IsElement(xmlsec.NSWSU, "Timestamp") {
 			return "", errors.New("wss: the header already has a wsu:Timestamp")
 		}
 	}
-	id, err := idFor(h.doc, id)
+	id, err := idFor(h.doc.Root(), id)
 	if err != nil {
 		return "", err
 	}
@@ -112,12 +112,12 @@ func ParseTimestamp(el *xdm.Node) (Timestamp, error) {
 
 func timestampTime(e *xdm.Node) (time.Time, error) {
 	if e.Attr("", "ValueType") != nil {
-		return time.Time{}, fmt.Errorf("%w: wsu:%s has a ValueType", xmlsec.ErrMalformed, e.Name.Local)
+		return time.Time{}, fmt.Errorf("%w: wsu:%s has a ValueType", xmlsec.ErrMalformed, e.Name().Local)
 	}
 	s := strings.Trim(e.StringValue(), " \t\r\n")
 	t, err := time.Parse(time.RFC3339, s)
 	if !dateTimeUTC.MatchString(s) || err != nil {
-		return time.Time{}, fmt.Errorf("%w: wsu:%s %q is not a UTC xs:dateTime", xmlsec.ErrMalformed, e.Name.Local, s)
+		return time.Time{}, fmt.Errorf("%w: wsu:%s %q is not a UTC xs:dateTime", xmlsec.ErrMalformed, e.Name().Local, s)
 	}
 	return t, nil
 }

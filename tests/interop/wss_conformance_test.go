@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/wss"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/wss"
 )
 
 // resolverFor is a VerifyOptions.ResolveSecurityToken that knows one
@@ -44,8 +44,8 @@ func TestWSS4JVerifiesOurSTRTransform(t *testing.T) {
 		t.Run(keyRef, func(t *testing.T) {
 			kp := newKeypair(t, rsaKey(t))
 			cert := kp.provider.Certificate
-			doc := parse(t, []byte(envelope))
-			body := xmltree.DocumentElement(doc).ChildElements()[1]
+			doc := xmlsec.NewDocument(parse(t, []byte(envelope)))
+			body := xmltree.DocumentElement(doc.Root()).ChildElements()[1]
 			bodyID, err := wss.AssignID(doc, body)
 			if err != nil {
 				t.Fatal(err)
@@ -74,18 +74,22 @@ func TestWSS4JVerifiesOurSTRTransform(t *testing.T) {
 					opts.KeyInfoElement, err = wss.NewKeyIdentifierReference(cert)
 				}
 			} else if opts.SecurityTokenID, err = hdr.AddBinarySecurityToken(cert, nil, xmlsec.BSTValueTypeX509v3); err == nil {
-				str, err = wss.NewSecurityTokenReference(doc, opts.SecurityTokenID, "")
+				str, err = wss.NewSecurityTokenReference(doc.Root(), opts.SecurityTokenID, "")
 			}
 			if err != nil {
 				t.Fatal(err)
 			}
+			// AssignID takes an element of the document, the header's copy
+			// of str; WithID one that stays detached until Sign places it.
+			var strID string
 			if keyRef == "keyinfo" {
-				opts.KeyInfoElement = str
+				opts.KeyInfoElement, strID, err = wss.WithID(str, "")
+				if err != nil {
+					t.Fatal(err)
+				}
 			} else if err := hdr.Append(str); err != nil {
 				t.Fatal(err)
-			}
-			strID, err := wss.AssignID(doc, str)
-			if err != nil {
+			} else if strID, err = wss.AssignID(doc, str); err != nil {
 				t.Fatal(err)
 			}
 			exc := []dsig.TransformSpec{{Algorithm: string(c14n.Exclusive10)}}
@@ -101,7 +105,7 @@ func TestWSS4JVerifiesOurSTRTransform(t *testing.T) {
 			if err := hdr.Append(sig); err != nil {
 				t.Fatal(err)
 			}
-			signed, err := c14n.Bytes(doc, c14n.Options{Algorithm: c14n.Inclusive10})
+			signed, err := c14n.Bytes(doc.Root(), c14n.Options{Algorithm: c14n.Inclusive10})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -157,7 +161,7 @@ func TestWeVerifyWSS4JSTRTransform(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%v\n%s", err, signed)
 			}
-			if len(cov.SignedTokens) != 1 || (keyRef == "bst") != (cov.SignedTokens[0].Parent != nil) {
+			if len(cov.SignedTokens) != 1 || (keyRef == "bst") != (cov.SignedTokens[0].Parent() != nil) {
 				t.Fatalf("coverage %+v", cov)
 			}
 			// Without the resolver, a token that is not in the message

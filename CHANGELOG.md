@@ -1,9 +1,37 @@
 # Changelog
 
 Notable changes, newest first. Versions follow [semantic
-versioning](https://semver.org): within v1 no exported name is removed or
-changed. See [RELEASE.md](RELEASE.md) for the compatibility promise and how a
-release is cut.
+versioning](https://semver.org): within a major version no exported name is
+removed or changed. See [RELEASE.md](RELEASE.md) for the compatibility
+promise and how a release is cut.
+
+## Unreleased
+
+v2.0.0, new module path `github.com/knroy/go-xmlsec/v2`, on go-xml v2.
+go-xml v2's parsed trees cannot be changed, so the calls that add to a
+document take an `xmlsec.Document` and build a new tree for each change.
+[docs/migrating-to-v2.md](docs/migrating-to-v2.md) has before/after code for
+every changed call. v1 continues at `github.com/knroy/go-xmlsec`, with fixes
+released from the `v1` branch.
+
+### Changed — breaking
+
+| Change | Why | Commit |
+|---|---|---|
+| Module path `github.com/knroy/go-xmlsec/v2` | A breaking change needs a new module path. Import `github.com/knroy/go-xmlsec/v2/<package>`. | — |
+| `go-xml` v1.6.0 → v2.0.1 (`github.com/knroy/go-xml/v2`); `golang.org/x/text` v0.36.0 → v0.41.0 | Security-relevant, per RELEASE.md. go-xml's changelog lists no change to canonical output between the two, only faster canonicalization; its parser fixes are in DTD processing, which `xmlsec.Parse` refuses. `x/text` v0.36.0 loops forever on some invalid input (GO-2026-5970). Nodes are read through methods (`n.Kind()`, `n.Children()`), and a parsed tree is frozen. | — |
+| `dsig.Sign` takes an `*xmlsec.Document` | With `SignOptions.Parent` the signature is placed in a new tree, which becomes `doc.Root()` on success; the returned element is the placed signature. Without `Parent`, `doc` is only read; nil is still an enveloping signature. `SignEnveloped`, `Verify` and `BuildManifest` still take an `*xdm.Node`. | — |
+| `wss.NewHeader` takes an `*xmlsec.Document` | `NewHeader` and every `Header` method change the document; `Header.Element` is the `wsse:Security` element in the latest tree. `Prepend` and `Append` place a copy of their element: `doc.Node(el)` finds it. | — |
+| `wss.AssignID` and `AssignIDWith` take an `*xmlsec.Document` | The element may come from any earlier tree of the document; one not in it, such as an `xenc:EncryptedKey` not yet placed, is refused with `ErrMalformed`. | — |
+| `xenc.EncryptedKey.SetKeyInfo`, `AddDataReference` and `AddKeyReference` replace `ek.Element` with a new element | The old one cannot be changed. Call them before placing `ek.Element`: a copy already in the header is not updated. | — |
+
+### Added
+
+| Change | Commit |
+|---|---|
+| `xmlsec.Document`, `xmlsec.NewDocument`, `Document.Root` and `Document.Node`: a document that `dsig.Sign`, `wss.NewHeader` and `wss.AssignID` add to, its latest tree, and an earlier tree's node in it | — |
+| `wss.WithID`: a copy of a detached element carrying an ID, set as `AssignID` sets it, for an element that needs one before it is placed, such as a `SignOptions.KeyInfoElement` named by the STR Dereference Transform | — |
+| [docs/migrating-to-v2.md](docs/migrating-to-v2.md) | — |
 
 ## v1.3.0 — 2026-10-08
 

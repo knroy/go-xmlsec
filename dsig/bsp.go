@@ -7,11 +7,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/wss"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/wss"
 )
 
 // The X.509 key identifiers of the X.509 Token Profile 1.1.1 and SOAP
@@ -132,8 +132,8 @@ func checkBSPReference(doc, sig *xdm.Node, r parsedReference, idAttrs []xdm.QNam
 	// Enveloping is signing a ds:Object of the signature itself. Its
 	// ds:KeyInfo is not one: WSS4J signs the reference there through the STR
 	// Dereference Transform.
-	for e := target; e.Parent != nil; e = e.Parent {
-		if e.Parent == sig && e.IsElement(xmlsec.NSDSig, "Object") {
+	for e := target; e.Parent() != nil; e = e.Parent() {
+		if e.Parent() == sig && e.IsElement(xmlsec.NSDSig, "Object") {
 			return malformed("ds:Reference %q names content of the signature's own ds:Object, an enveloping signature (BSP R3102)", r.uri)
 		}
 	}
@@ -178,7 +178,7 @@ func checkPinnedSTR(ki *xdm.Node, cert *x509.Certificate, strict bool) error {
 // detached wsse:SecurityTokenReference, or one naming an X.509 certificate
 // other than cert.
 func checkKeyInfoElement(cert *x509.Certificate, el *xdm.Node) error {
-	if el.Parent != nil || !el.IsElement(xmlsec.NSWSSE, "SecurityTokenReference") {
+	if el.Parent() != nil || !el.IsElement(xmlsec.NSWSSE, "SecurityTokenReference") {
 		return fmt.Errorf("%w: SignOptions.KeyInfoElement must be a detached wsse:SecurityTokenReference", xmlsec.ErrMalformed)
 	}
 	if x509Reference(el) && !wss.MatchSecurityTokenReference(el, cert) {

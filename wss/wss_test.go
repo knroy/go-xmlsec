@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
 )
 
 const env11 = `<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">` +
@@ -60,7 +60,7 @@ func TestFindByIDExtraAttributes(t *testing.T) {
 		{"w", "c", samlID}, // wsu:Id always counts
 		{"n", "e", xdm.QName{Prefix: "ignored", Local: "ID"}},
 	} {
-		if e, err := FindByID(root, c.id, c.attr); err != nil || e.Name.Local != c.want {
+		if e, err := FindByID(root, c.id, c.attr); err != nil || e.Name().Local != c.want {
 			t.Errorf("%q: %v, %v", c.id, e, err)
 		}
 	}
@@ -100,12 +100,8 @@ func TestHeaderAndAssignID(t *testing.T) {
 	randReader = bytes.NewReader(append(bytes.Repeat([]byte{0xab}, 16), bytes.Repeat([]byte{0xcd}, 16)...))
 	t.Cleanup(func() { randReader = old })
 
-	tree, err := xmlsec.Parse([]byte(env11))
-	if err != nil {
-		t.Fatal(err)
-	}
-	doc := tree.Root
-	body := doc.Children[0].ChildElements()[0]
+	doc := newDoc(t, env11)
+	body := doc.Root().FirstChild().ChildElements()[0]
 	id, err := AssignID(doc, body)
 	if err != nil || id != "id-abababababababababababababababab" {
 		t.Fatalf("AssignID = %q, %v", id, err)
@@ -125,7 +121,7 @@ func TestHeaderAndAssignID(t *testing.T) {
 		t.Fatal("second Security header for the same actor accepted")
 	}
 
-	out, err := c14n.Bytes(doc, c14n.Options{Algorithm: c14n.Exclusive10})
+	out, err := c14n.Bytes(doc.Root(), c14n.Options{Algorithm: c14n.Exclusive10})
 	if err != nil {
 		t.Fatal(err)
 	}

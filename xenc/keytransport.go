@@ -8,10 +8,10 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/hashes"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/hashes"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // EncryptedKey is a generated xenc:EncryptedKey plus the session key it wraps.
@@ -291,7 +291,7 @@ func (ek *EncryptedKey) SetKeyInfo(el *xdm.Node) error {
 	if err := ek.check(); err != nil {
 		return err
 	}
-	if el == nil || el.Kind != xdm.KindElement || el.Parent != nil {
+	if el == nil || el.Kind() != xdm.KindElement || el.Parent() != nil {
 		return errors.New("xenc: SetKeyInfo needs a detached element")
 	}
 	for _, k := range ek.Element.ChildElements() {
@@ -299,7 +299,9 @@ func (ek *EncryptedKey) SetKeyInfo(el *xdm.Node) error {
 			return errors.New("xenc: EncryptedKey already has a ds:KeyInfo")
 		}
 	}
-	newKeyInfo(ek.Element).AppendChild(el)
+	ki := newKeyInfo(nil)
+	ki.AppendCopy(el)
+	ek.Element = withChild(ek.Element, ki)
 	return nil
 }
 
@@ -314,16 +316,6 @@ func (ek *EncryptedKey) AddDataReference(id string) error {
 	if !xdm.IsNCName(id) {
 		return fmt.Errorf("xenc: data reference %q is not an NCName", id)
 	}
-	var list *xdm.Node
-	for _, k := range ek.Element.ChildElements() {
-		if k.IsElement(xmlsec.NSXEnc, "ReferenceList") {
-			list = k
-		}
-	}
-	if list == nil {
-		list = element(ek.Element, "ReferenceList")
-		place(ek.Element)
-	}
-	xmltree.SetAttr(element(list, "DataReference"), "", "", "URI", "#"+id)
+	ek.addReference("DataReference", id)
 	return nil
 }

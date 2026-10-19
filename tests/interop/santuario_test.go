@@ -9,12 +9,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/xenc"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/xenc"
 )
 
 // santuario runs the Apache Santuario harness (tests/santuario/Harness.java,
@@ -72,10 +72,10 @@ func signatureValue(t *testing.T, doc []byte) (sig []byte, digests [][]byte) {
 	t.Helper()
 	root := parse(t, doc)
 	xmltree.Walk(root, func(e *xdm.Node) {
-		if e.Name.URI != xmlsec.NSDSig {
+		if e.Name().URI != xmlsec.NSDSig {
 			return
 		}
-		switch e.Name.Local {
+		switch e.Name().Local {
 		case "SignatureValue":
 			if sig == nil {
 				sig = mustBase64(t, e)
@@ -193,7 +193,7 @@ func TestSignatureValueMatchesSantuarioDetached(t *testing.T) {
 
 	doc := parse(t, []byte(soapWithHeader))
 	exc := []dsig.TransformSpec{{Algorithm: string(c14n.Exclusive10)}}
-	sig, err := dsig.Sign(doc, kp.provider, dsig.SignOptions{
+	sig, err := dsig.Sign(xmlsec.NewDocument(doc), kp.provider, dsig.SignOptions{
 		SignatureAlgorithm:        xmlsec.SigRSASHA256,
 		CanonicalizationAlgorithm: string(c14n.Exclusive10),
 		References: []dsig.Reference{
@@ -205,7 +205,8 @@ func TestSignatureValueMatchesSantuarioDetached(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	find(doc, xmlsec.NSWSSE, "Security").AppendChild(sig)
+	sec := find(doc, xmlsec.NSWSSE, "Security")
+	doc, _ = xmltree.Rebuild(doc, &xmltree.Edits{Append: map[*xdm.Node][]*xdm.Node{sec: {sig}}})
 	ours, err := c14n.Bytes(doc, c14n.Options{Algorithm: c14n.Inclusive10})
 	if err != nil {
 		t.Fatal(err)
@@ -268,7 +269,8 @@ func TestSantuarioVerifiesOurInPlaceInclusiveSignature(t *testing.T) {
 	kp := newKeypair(t, rsaKey(t))
 	incl := string(c14n.Inclusive10)
 	doc := parse(t, []byte(soapWithHeader))
-	sig, err := dsig.Sign(doc, kp.provider, dsig.SignOptions{
+	d := xmlsec.NewDocument(doc)
+	sig, err := dsig.Sign(d, kp.provider, dsig.SignOptions{
 		SignatureAlgorithm:        xmlsec.SigRSASHA256,
 		CanonicalizationAlgorithm: incl,
 		References: []dsig.Reference{{URI: "#body", DigestAlgorithm: xmlsec.DigestSHA256,
@@ -278,10 +280,10 @@ func TestSantuarioVerifiesOurInPlaceInclusiveSignature(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sig.Parent == nil {
+	if sig.Parent() == nil {
 		t.Fatal("signature not placed")
 	}
-	signed, err := c14n.Bytes(doc, c14n.Options{Algorithm: c14n.Inclusive10})
+	signed, err := c14n.Bytes(d.Root(), c14n.Options{Algorithm: c14n.Inclusive10})
 	if err != nil {
 		t.Fatal(err)
 	}

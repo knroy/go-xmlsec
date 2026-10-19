@@ -4,10 +4,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/idref"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/idref"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 func TestFind(t *testing.T) {

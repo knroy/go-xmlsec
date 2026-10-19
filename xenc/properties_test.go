@@ -6,16 +6,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/xenc"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/xenc"
 )
 
 func childNames(el *xdm.Node) string {
 	var names []string
 	for _, k := range el.ChildElements() {
-		names = append(names, k.Name.Local)
+		names = append(names, k.Name().Local)
 	}
 	return strings.Join(names, ",")
 }
@@ -71,7 +71,7 @@ func TestEncryptionProperties(t *testing.T) {
 			}
 		})
 	}
-	if prop.Parent == nil || prop.Parent.Name.Local != "r" {
+	if prop.Parent() == nil || prop.Parent().Name().Local != "r" {
 		t.Fatal("the caller's property was moved")
 	}
 
@@ -114,6 +114,13 @@ func TestEncryptionPropertiesRefused(t *testing.T) {
 	att := &xmlsec.Attachment{ID: "a", Body: []byte("b")}
 	if _, _, err := xenc.EncryptAttachment(att, key, xmlsec.TransformAttachmentContentOnly, with(func(o *xenc.EncryptOptions) { o.MimeType = "text/plain" })); err == nil {
 		t.Fatal("attachment MimeType accepted")
+	}
+	tooDeep := with(func(o *xenc.EncryptOptions) { o.EncryptionProperties = []*xdm.Node{deep} })
+	if _, _, err := xenc.EncryptAttachment(att, key, xmlsec.TransformAttachmentContentOnly, tooDeep); err == nil {
+		t.Fatal("attachment: too deep property accepted")
+	}
+	if _, _, err := xenc.EncryptOctets([]byte("b"), key, tooDeep); err == nil {
+		t.Fatal("octets: too deep property accepted")
 	}
 }
 

@@ -5,12 +5,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 func TestAddTimestampWithoutExpiry(t *testing.T) {
-	h, err := NewHeader(parseDoc(t, env11), xmlsec.NSSOAP11, "", false)
+	h, err := NewHeader(newDoc(t, env11), xmlsec.NSSOAP11, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func TestAddTimestampWithoutExpiry(t *testing.T) {
 // At most one timestamp per header (R3227), never a negative ttl, and the
 // timestamp goes first whenever it is added.
 func TestAddTimestampRules(t *testing.T) {
-	h, err := NewHeader(parseDoc(t, env11), xmlsec.NSSOAP11, "", false)
+	h, err := NewHeader(newDoc(t, env11), xmlsec.NSSOAP11, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestAddTimestampRules(t *testing.T) {
 
 // What AddTimestamp writes, ParseTimestamp reads back.
 func TestTimestampRoundTrip(t *testing.T) {
-	h, err := NewHeader(parseDoc(t, env11), xmlsec.NSSOAP11, "", false)
+	h, err := NewHeader(newDoc(t, env11), xmlsec.NSSOAP11, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}

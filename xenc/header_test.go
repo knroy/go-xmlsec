@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/xenc"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/xenc"
 )
 
 // BSP R5624: with no DataID, EncryptHeader gives the EncryptedData a
@@ -87,8 +87,8 @@ func TestDecryptHeaderContext(t *testing.T) {
 	if err != nil || !strings.Contains(string(out), `<S:Header><x:B xmlns:wsse11="`+xmlsec.NSWSSE11+`" xmlns:x="urn:x"><c></c></x:B></S:Header>`) {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if b := firstNamed(covParse(t, string(out)), "c"); b.Name.URI != "urn:default" {
-		t.Fatalf("default namespace %q", b.Name.URI)
+	if b := firstNamed(covParse(t, string(out)), "c"); b.Name().URI != "urn:default" {
+		t.Fatalf("default namespace %q", b.Name().URI)
 	}
 }
 
@@ -184,9 +184,11 @@ func TestEncryptHeaderErrors(t *testing.T) {
 	doc := covParse(t, `<S:Envelope xmlns:S="`+soap12+`" xmlns:x="urn:x"><S:Header>`+
 		`<wsse:Security xmlns:wsse="`+xmlsec.NSWSSE+`"/>`+
 		`<wsse:Security xmlns:wsse="`+xmlsec.NSWSSE+`" xmlns:x="`+soap12+`" x:mustUnderstand="true"/>`+
+		`<wsse:Security xmlns:wsse="`+xmlsec.NSWSSE+`" xmlns:wsse11="`+soap12+`" wsse11:mustUnderstand="true"/>`+
 		`<b>v</b></S:Header><S:Body><c/></S:Body></S:Envelope>`)
 	hdr := doc.ChildElements()[0]
-	sec, clash, block := hdr.ChildElements()[0], hdr.ChildElements()[1], hdr.ChildElements()[2]
+	sec, clash, block := hdr.ChildElements()[0], hdr.ChildElements()[1], hdr.ChildElements()[3]
+	clash11 := hdr.ChildElements()[2]
 	other := covParse(t, `<wsse:Security xmlns:wsse="`+xmlsec.NSWSSE+`"/>`)
 	for name, c := range map[string]struct {
 		block, sec *xdm.Node
@@ -199,6 +201,7 @@ func TestEncryptHeaderErrors(t *testing.T) {
 		"Security is the block":    {sec, sec, ""},
 		"Security in another doc":  {block, other, ""},
 		"prefix bound elsewhere":   {block, clash, ""},
+		"wsse11 prefix taken":      {block, clash11, ""},
 		"unknown data algorithm":   {block, sec, "urn:x"},
 	} {
 		t.Run(name, func(t *testing.T) {

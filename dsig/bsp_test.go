@@ -8,12 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/wss"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/wss"
 )
 
 // StrictBSP applies the Basic Security Profile's rules for a signature
@@ -114,16 +114,17 @@ func TestStrictBSP(t *testing.T) {
 func signKeyInfoElement(t *testing.T, key xmlsec.KeyProvider, el *xdm.Node) ([]byte, error) {
 	t.Helper()
 	doc := parse(t, []byte(envelope))
+	d := xmlsec.NewDocument(doc)
 	body := xmltree.DocumentElement(doc).ChildElements()[1]
-	bodyID, err := wss.AssignID(doc, body)
+	bodyID, err := wss.AssignID(d, body)
 	if err != nil {
 		t.Fatal(err)
 	}
-	hdr, err := wss.NewHeader(doc, xmlsec.NSSOAP12, "", false)
+	hdr, err := wss.NewHeader(d, xmlsec.NSSOAP12, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sig, err := dsig.Sign(doc, key, dsig.SignOptions{
+	sig, err := dsig.Sign(d, key, dsig.SignOptions{
 		SignatureAlgorithm:        xmlsec.SigRSASHA256,
 		CanonicalizationAlgorithm: string(c14n.Exclusive10),
 		References:                []dsig.Reference{{URI: "#" + bodyID, Transforms: excC14N, DigestAlgorithm: xmlsec.DigestSHA256}},
@@ -136,7 +137,7 @@ func signKeyInfoElement(t *testing.T, key xmlsec.KeyProvider, el *xdm.Node) ([]b
 	if err := hdr.Append(sig); err != nil {
 		t.Fatal(err)
 	}
-	return serialize(t, doc), nil
+	return serialize(t, d.Root()), nil
 }
 
 // SignOptions.KeyInfoElement puts a key identifier or issuer-serial
@@ -219,7 +220,7 @@ func TestKeyInfoElement(t *testing.T) {
 		t.Error("another certificate accepted")
 	}
 	attached, _ := wss.NewKeyIdentifierReference(key.Certificate)
-	xmltree.Element(nil, "p", "urn:p", "p").AppendChild(attached)
+	attached = xmltree.Element(nil, "p", "urn:p", "p").AppendCopy(attached)
 	if _, err := signKeyInfoElement(t, key, attached); !errors.Is(err, xmlsec.ErrMalformed) {
 		t.Errorf("attached: %v", err)
 	}

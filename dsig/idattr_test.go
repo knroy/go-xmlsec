@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 const samlAssertion = `<saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="_a1" Version="2.0">` +
@@ -105,17 +105,17 @@ func TestPlainIdReference(t *testing.T) {
 		}},
 		KeyInfo: dsig.KeyInfoX509Data,
 	}
-	if _, err := dsig.Sign(parse(t, []byte(in)), key, opts); !errors.Is(err, xmlsec.ErrIDNotFound) {
+	if _, err := dsig.Sign(xmlsec.NewDocument(parse(t, []byte(in))), key, opts); !errors.Is(err, xmlsec.ErrIDNotFound) {
 		t.Fatalf("default options signed over Id: %v", err)
 	}
 
 	opts.IDAttributes = []xdm.QName{dsig.IDAttrDSig}
 	doc := parse(t, []byte(in))
-	sig, err := dsig.Sign(doc, key, opts)
+	sig, err := signAt(&doc, key, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	xmltree.DocumentElement(doc).AppendChild(sig)
+	doc = appendChild(xmltree.DocumentElement(doc), sig)
 	signed := string(serialize(t, doc))
 
 	_, cov, err := verifyWith(t, signed, dsig.IDAttrDSig)

@@ -8,10 +8,10 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/swa"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/swa"
 )
 
 // impliesC14N reports whether a reference relies on the implicit Canonical
@@ -362,10 +362,10 @@ func textOf(ns c14n.NodeSet) string {
 	var b strings.Builder
 	var walk func(n *xdm.Node)
 	walk = func(n *xdm.Node) {
-		if n.Kind == xdm.KindText && ns.Contains(n) {
-			b.WriteString(n.Value)
+		if n.Kind() == xdm.KindText && ns.Contains(n) {
+			b.WriteString(n.Value())
 		}
-		for _, c := range n.Children {
+		for c := range n.Children() {
 			walk(c)
 		}
 	}

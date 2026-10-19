@@ -6,11 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/wss"
-	"github.com/knroy/go-xmlsec/xenc"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/wss"
+	"github.com/knroy/go-xmlsec/v2/xenc"
 )
 
 const strNS = `xmlns:wsse="` + xmlsec.NSWSSE + `"`
@@ -69,17 +69,13 @@ func TestFindEncryptedKeySTRErrors(t *testing.T) {
 func TestSymmetricBinding(t *testing.T) {
 	const src = `<S:Envelope xmlns:S="` + soap12 + `"><S:Header><h:H xmlns:h="urn:h">secret header</h:H></S:Header>` +
 		`<S:Body><p:P xmlns:p="urn:p">secret body</p:P></S:Body></S:Envelope>`
-	doc := covParse(t, src)
-	hdr, err := wss.NewHeader(doc, xmlsec.NSSOAP12, "", true)
+	d := xmlsec.NewDocument(covParse(t, src))
+	hdr, err := wss.NewHeader(d, xmlsec.NSSOAP12, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	opts := as4Opts(t)
 	ek, err := xenc.GenerateEncryptedKey(opts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ekID, err := wss.AssignID(doc, ek.Element)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,9 +86,6 @@ func TestSymmetricBinding(t *testing.T) {
 	if err := ek.SetKeyInfo(recip); err != nil {
 		t.Fatal(err)
 	}
-	if opts.DataKeyInfo, err = wss.NewSecurityTokenReference(doc, ekID, encryptedKeyToken); err != nil {
-		t.Fatal(err)
-	}
 	list, err := wss.NewReferenceList("ED-body", "ED-header")
 	if err != nil {
 		t.Fatal(err)
@@ -101,6 +94,14 @@ func TestSymmetricBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := hdr.Prepend(ek.Element); err != nil {
+		t.Fatal(err)
+	}
+	ekID, err := wss.AssignID(d, d.Node(ek.Element))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := xmltree.DocumentElement(d.Root())
+	if opts.DataKeyInfo, err = wss.NewSecurityTokenReference(doc, ekID, encryptedKeyToken); err != nil {
 		t.Fatal(err)
 	}
 	opts.DataID = "ED-body"
@@ -121,7 +122,7 @@ func TestSymmetricBinding(t *testing.T) {
 	// Receive.
 	doc = covParse(t, string(out))
 	sec := doc.ChildElements()[0].ChildElements()[1]
-	if k := sec.ChildElements(); len(k) != 2 || k[0].Name.Local != "EncryptedKey" || k[1].Name.Local != "ReferenceList" {
+	if k := sec.ChildElements(); len(k) != 2 || k[0].Name().Local != "EncryptedKey" || k[1].Name().Local != "ReferenceList" {
 		t.Fatalf("header order:\n%s", out)
 	}
 	eds, err := xenc.ReferencedData(sec.ChildElements()[1])
@@ -139,8 +140,8 @@ func TestSymmetricBinding(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if ed.Parent.IsElement(xmlsec.NSWSSE11, "EncryptedHeader") {
-			if out, err = xenc.DecryptHeader(doc, ed.Parent, key, strictOpts); err != nil || !strings.Contains(string(out), `<S:Header><h:H xmlns:h="urn:h"`) || !strings.Contains(string(out), `>secret header</h:H><wsse:Security`) {
+		if ed.Parent().IsElement(xmlsec.NSWSSE11, "EncryptedHeader") {
+			if out, err = xenc.DecryptHeader(doc, ed.Parent(), key, strictOpts); err != nil || !strings.Contains(string(out), `<S:Header><h:H xmlns:h="urn:h"`) || !strings.Contains(string(out), `>secret header</h:H><wsse:Security`) {
 				t.Fatalf("header: %v\n%s", err, out)
 			}
 			continue
@@ -165,8 +166,7 @@ const encryptedKeyToken = "http://docs.oasis-open.org/wss/oasis-wss-soap-message
 // options encrypt twice. FindEncryptedKey follows it back.
 func TestDataKeyInfo(t *testing.T) {
 	key := bytes.Repeat([]byte{7}, 16)
-	str := covParse(t, strRef("#EK-1"))
-	str.Parent = nil
+	str := xdm.Copy(covParse(t, strRef("#EK-1")))
 	opts := as4Opts(t)
 	opts.DataKeyInfo = str
 	const want = `<xenc:EncryptionMethod Algorithm="` + xmlsec.EncAES128GCM + `"></xenc:EncryptionMethod><ds:KeyInfo xmlns:ds="` + xmlsec.NSDSig + `"><wsse:SecurityTokenReference ` + strNS + `><wsse:Reference URI="#EK-1"></wsse:Reference></wsse:SecurityTokenReference></ds:KeyInfo><xenc:CipherData>`
@@ -195,7 +195,7 @@ func TestDataKeyInfo(t *testing.T) {
 	if err != nil || !ed.ChildElements()[1].IsElement(xmlsec.NSDSig, "KeyInfo") {
 		t.Fatalf("attachment: %v", err)
 	}
-	if str.Parent != nil {
+	if str.Parent() != nil {
 		t.Fatal("DataKeyInfo was linked, not copied")
 	}
 
@@ -209,7 +209,7 @@ func TestDataKeyInfo(t *testing.T) {
 	for name, k := range map[string]*xdm.Node{
 		"attached": covParse(t, `<a><b/></a>`).ChildElements()[0],
 		"KeyInfo":  xmltree.Element(nil, "ds", xmlsec.NSDSig, "KeyInfo"),
-		"text":     {Kind: xdm.KindText, Value: "x"},
+		"text":     xdm.NewNode(xdm.KindText, xdm.QName{}, "x"),
 	} {
 		opts.DataKeyInfo = k
 		if _, err := xenc.EncryptElement(doc, body.ChildElements()[0], key, opts); err == nil {

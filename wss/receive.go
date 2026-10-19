@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // FindHeader returns the wsse:Security header of a received SOAP message
@@ -77,12 +77,12 @@ func CheckUniqueIDs(doc *xdm.Node, extra ...xdm.QName) error {
 	seen := map[string]bool{}
 	var dup string
 	xmltree.Walk(doc.Root(), func(e *xdm.Node) {
-		for _, a := range e.Attrs {
-			if dup == "" && (isDefaultID(a.Name) || slices.ContainsFunc(extra, a.Name.Equal)) {
-				if seen[a.Value] {
-					dup = a.Value
+		for a := range e.Attrs() {
+			if dup == "" && (isDefaultID(a.Name()) || slices.ContainsFunc(extra, a.Name().Equal)) {
+				if seen[a.Value()] {
+					dup = a.Value()
 				}
-				seen[a.Value] = true
+				seen[a.Value()] = true
 			}
 		}
 	})
@@ -150,7 +150,7 @@ func CheckSecurityTokenReference(str *xdm.Node) error {
 		}
 	default:
 		// ds:KeyName included (R3027).
-		return fmt.Errorf("%w: %s in a wsse:SecurityTokenReference (BSP R3061, R3027)", xmlsec.ErrMalformed, k.Name.Local)
+		return fmt.Errorf("%w: %s in a wsse:SecurityTokenReference (BSP R3061, R3027)", xmlsec.ErrMalformed, k.Name().Local)
 	}
 	return nil
 }
@@ -172,7 +172,7 @@ func checkKeyIdentifier(k *xdm.Node, tt string) error {
 		// this library reads no SAML token, so any is let through. The
 		// identifier is an xs:string, with no EncodingType (R6604, R6605).
 		if enc := k.Attr("", "EncodingType"); enc != nil {
-			return fmt.Errorf("%w: SAML wsse:KeyIdentifier with EncodingType %q (BSP R6604)", xmlsec.ErrMalformed, enc.Value)
+			return fmt.Errorf("%w: SAML wsse:KeyIdentifier with EncodingType %q (BSP R6604)", xmlsec.ErrMalformed, enc.Value())
 		}
 		return nil
 	default:

@@ -6,11 +6,11 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xml/xslt"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xml/v2/xslt"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 const nsXSL = "http://www.w3.org/1999/XSL/Transform"
@@ -47,24 +47,24 @@ func sameStylesheet(allowed, got *xdm.Node) bool {
 func copyStylesheet(tr, s *xdm.Node) {
 	var cp func(parent, n *xdm.Node)
 	cp = func(parent, n *xdm.Node) {
-		if n.Kind != xdm.KindElement {
+		if n.Kind() != xdm.KindElement {
 			// text, comment or processing instruction
-			parent.AppendChild(&xdm.Node{Kind: n.Kind, Name: n.Name, Value: n.Value})
+			parent.AppendShallowCopy(n)
 			return
 		}
-		e := xmltree.Element(parent, n.Name.Prefix, n.Name.URI, n.Name.Local)
-		for _, ns := range n.Namespaces {
-			e.AddNamespace(ns.Name.Local, ns.Value)
+		e := xmltree.Element(parent, n.Name().Prefix, n.Name().URI, n.Name().Local)
+		for ns := range n.NamespaceDecls() {
+			e.AddNamespace(ns.Name().Local, ns.Value())
 		}
-		for _, a := range n.Attrs {
-			xmltree.SetAttr(e, a.Name.Prefix, a.Name.URI, a.Name.Local, a.Value)
+		for a := range n.Attrs() {
+			xmltree.SetAttr(e, a.Name().Prefix, a.Name().URI, a.Name().Local, a.Value())
 		}
-		for _, c := range n.Children {
+		for c := range n.Children() {
 			cp(e, c)
 		}
 	}
 	cp(tr, s)
-	top := tr.Children[len(tr.Children)-1]
+	top := tr.LastChild()
 	scope := maps.Clone(s.InScopeNamespaces())
 	if _, ok := scope[""]; !ok {
 		scope[""] = ""

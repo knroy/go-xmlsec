@@ -13,15 +13,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // setKeyInfo replaces the content of the signature's ds:KeyInfo, which no
-// reference signs, so the signature stays authentic.
-func setKeyInfo(t *testing.T, doc *xdm.Node, inner string) (sig *xdm.Node) {
+// reference signs, so the signature stays authentic. It returns the new
+// document and its signature.
+func setKeyInfo(t *testing.T, doc *xdm.Node, inner string) (*xdm.Node, *xdm.Node) {
+	var sig *xdm.Node
 	t.Helper()
 	xmltree.Walk(doc, func(e *xdm.Node) {
 		if e.IsElement(xmlsec.NSDSig, "Signature") {
@@ -33,11 +35,10 @@ func setKeyInfo(t *testing.T, doc *xdm.Node, inner string) (sig *xdm.Node) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ki.Children = nil
-	for _, c := range xmltree.DocumentElement(fresh.Root).ChildElements() {
-		ki.AppendChild(c)
-	}
-	return sig
+	e := &xmltree.Edits{}
+	e.ReplaceNode(ki, xmltree.DocumentElement(fresh.Root))
+	root, m := xmltree.Rebuild(doc, e)
+	return root, m[sig]
 }
 
 // issued is a certificate for signer, issued by the CA key and name.
@@ -87,16 +88,14 @@ func TestX509DescriptorMismatchRefused(t *testing.T) {
 	kp := xmlsec.KeyProvider{Signer: victimKey, Certificate: victim}
 	for name, extra := range cases {
 		t.Run(name, func(t *testing.T) {
-			doc := signEnveloped(t, `<r><a>signed</a></r>`, kp, xmlsec.SigRSASHA256)
-			sig := setKeyInfo(t, doc, `<ds:X509Data>`+certElement(victim)+extra+`</ds:X509Data>`)
+			doc, sig := setKeyInfo(t, signEnveloped(t, `<r><a>signed</a></r>`, kp, xmlsec.SigRSASHA256), `<ds:X509Data>`+certElement(victim)+extra+`</ds:X509Data>`)
 			if _, err := dsig.Verify(doc, sig, dsig.VerifyOptions{StrictX509Data: true}); !errors.Is(err, xmlsec.ErrUnsupportedKeyInfo) {
 				t.Fatalf("got %v", err)
 			}
 		})
 	}
 	// The same KeyInfo without the extra element verifies.
-	doc := signEnveloped(t, `<r><a>signed</a></r>`, kp, xmlsec.SigRSASHA256)
-	sig := setKeyInfo(t, doc, `<ds:X509Data>`+certElement(victim)+certElement(ca)+`</ds:X509Data>`)
+	doc, sig := setKeyInfo(t, signEnveloped(t, `<r><a>signed</a></r>`, kp, xmlsec.SigRSASHA256), `<ds:X509Data>`+certElement(victim)+certElement(ca)+`</ds:X509Data>`)
 	if cov, err := dsig.Verify(doc, sig, dsig.VerifyOptions{}); err != nil || !cov.Certificate.Equal(victim) {
 		t.Fatalf("control: %v", err)
 	}
@@ -138,8 +137,7 @@ func TestKeyResolversNotCalledBeforeAllowLists(t *testing.T) {
 				if r == nil {
 					alg = xmlsec.SigRSASHA224 // outside the default set
 				}
-				doc := signEnveloped(t, `<r><a>signed</a></r>`, kp, alg)
-				sig := setKeyInfo(t, doc, ki)
+				doc, sig := setKeyInfo(t, signEnveloped(t, `<r><a>signed</a></r>`, kp, alg), ki)
 				o := opts
 				if r != nil {
 					r(&o)

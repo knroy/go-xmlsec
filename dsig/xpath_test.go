@@ -4,15 +4,16 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // xpDoc has an element with wsu:Id "a", a namespaced element x:drop that the
@@ -49,7 +50,7 @@ func filter2(ns map[string]string, pairs ...string) dsig.TransformSpec {
 func signInPlace(t *testing.T, doc, uri string, ts ...dsig.TransformSpec) (*xdm.Node, *xdm.Node, error) {
 	t.Helper()
 	d := parse(t, []byte(doc))
-	_, err := dsig.Sign(d, newKey(t, rsaKey), dsig.SignOptions{
+	_, err := signAt(&d, newKey(t, rsaKey), dsig.SignOptions{
 		SignatureAlgorithm:        xmlsec.SigRSASHA256,
 		CanonicalizationAlgorithm: string(c14n.Exclusive10),
 		References:                []dsig.Reference{{URI: uri, Transforms: ts, DigestAlgorithm: xmlsec.DigestSHA256}},
@@ -83,11 +84,11 @@ func xpVerify(t *testing.T, doc, sig *xdm.Node, opts dsig.VerifyOptions) (*dsig.
 func replaceText(doc *xdm.Node, old, new string) {
 	var walk func(n *xdm.Node) bool
 	walk = func(n *xdm.Node) bool {
-		if n.Kind == xdm.KindText && n.Value == old {
-			n.Value = new
+		if n.Kind() == xdm.KindText && n.Value() == old {
+			n.SetValue(new)
 			return true
 		}
-		for _, c := range n.Children {
+		for c := range n.Children() {
 			if walk(c) {
 				return true
 			}
@@ -129,16 +130,21 @@ func TestXPathTransform(t *testing.T) {
 				c.ts = []dsig.TransformSpec{xp("true()", nil), xpIncl}
 			}
 			doc, sig := mustSignInPlace(t, xpDoc, c.uri, c.ts...)
-			ts := find(sig, xmlsec.NSDSig, "Transforms")
+			ts := slices.Collect(find(sig, xmlsec.NSDSig, "Transforms").Children())
+			var e xmltree.Edits
 			switch c.name {
 			case "implicit canonicalization":
-				ts.Children = ts.Children[:1]
-				resign(sig)
+				for _, tr := range ts[1:] {
+					e.ReplaceNode(tr)
+				}
+				_, sig = rebuilt(doc, sig, &e)
+				doc, sig, _ = resign(sig)
 			case "here() removes only this signature":
 				// Sign puts enveloped-signature first on a whole-document
 				// reference; a received one may rely on here() alone.
-				ts.Children = ts.Children[1:]
-				resign(sig)
+				e.ReplaceNode(ts[0])
+				_, sig = rebuilt(doc, sig, &e)
+				doc, sig, _ = resign(sig)
 			}
 			if _, err := xpVerify(t, doc, sig, dsig.VerifyOptions{}); !errors.Is(err, xmlsec.ErrTransformRefused) {
 				t.Fatalf("not opted in: got %v", err)
@@ -290,7 +296,7 @@ func TestXPathSignErrors(t *testing.T) {
 // the document, cannot use it (XML-DSig 6.6.3.1).
 func TestXPathHereDetached(t *testing.T) {
 	doc := parse(t, []byte(xpDoc))
-	_, err := dsig.Sign(doc, newKey(t, rsaKey), dsig.SignOptions{
+	_, err := signAt(&doc, newKey(t, rsaKey), dsig.SignOptions{
 		SignatureAlgorithm:        xmlsec.SigRSASHA256,
 		CanonicalizationAlgorithm: string(c14n.Exclusive10),
 		References:                []dsig.Reference{{URI: "#a", Transforms: []dsig.TransformSpec{xp("here()", nil), xpExc}, DigestAlgorithm: xmlsec.DigestSHA256}},
@@ -303,7 +309,7 @@ func TestXPathHereDetached(t *testing.T) {
 // Received transforms: what is refused, and when.
 func TestXPathVerifyAdmission(t *testing.T) {
 	doc, sig := mustSignInPlace(t, xpDoc, "", xpEnv, xp(xpNoX, xpNS), xpExc)
-	tr := find(sig, xmlsec.NSDSig, "Transform").Parent.ChildElements()[1]
+	tr := find(sig, xmlsec.NSDSig, "Transform").Parent().ChildElements()[1]
 	xpath := tr.ChildElements()[0]
 	opts := dsig.VerifyOptions{AllowedXPathExpressions: xpAllow}
 
@@ -325,22 +331,32 @@ func TestXPathVerifyAdmission(t *testing.T) {
 
 	edits := []struct {
 		name string
-		edit func()
+		edit func(e *xmltree.Edits)
 		want error
 	}{
-		{"element child", func() { xmltree.Element(xpath, "", "", "e") }, xmlsec.ErrMalformed},
-		{"second XPath", func() { tr.AppendChild(xpath) }, xmlsec.ErrMalformed},
-		{"no XPath", func() { tr.Children = nil }, xmlsec.ErrMalformed},
-		{"wrong element", func() { xpath.Name.Local = "Expr" }, xmlsec.ErrMalformed},
+		{"element child", func(e *xmltree.Edits) { e.Insert(xpath, xpath.NumChildren(), xmltree.Element(nil, "", "", "e")) }, xmlsec.ErrMalformed},
+		{"second XPath", func(e *xmltree.Edits) { e.Insert(tr, tr.NumChildren(), xpath) }, xmlsec.ErrMalformed},
+		{"no XPath", func(e *xmltree.Edits) {
+			for c := range tr.Children() {
+				e.ReplaceNode(c)
+			}
+		}, xmlsec.ErrMalformed},
+		{"wrong element", func(*xmltree.Edits) {
+			name := xpath.Name()
+			name.Local = "Expr"
+			xpath.SetName(name)
+		}, xmlsec.ErrMalformed},
 	}
-	for _, e := range edits {
-		t.Run(e.name, func(t *testing.T) {
+	for _, c := range edits {
+		t.Run(c.name, func(t *testing.T) {
 			doc, sig := mustSignInPlace(t, xpDoc, "", xpEnv, xp(xpNoX, xpNS), xpExc)
-			tr = find(sig, xmlsec.NSDSig, "Transform").Parent.ChildElements()[1]
+			tr = find(sig, xmlsec.NSDSig, "Transform").Parent().ChildElements()[1]
 			xpath = tr.ChildElements()[0]
-			e.edit()
-			if _, err := xpVerify(t, doc, sig, dsig.VerifyOptions{AllowedXPathExpressions: xpAllow}); !errors.Is(err, e.want) {
-				t.Fatalf("got %v, want %v", err, e.want)
+			var e xmltree.Edits
+			c.edit(&e)
+			doc, sig = rebuilt(doc, sig, &e)
+			if _, err := xpVerify(t, doc, sig, dsig.VerifyOptions{AllowedXPathExpressions: xpAllow}); !errors.Is(err, c.want) {
+				t.Fatalf("got %v, want %v", err, c.want)
 			}
 		})
 	}
@@ -349,29 +365,40 @@ func TestXPathVerifyAdmission(t *testing.T) {
 func TestXPathFilter2VerifyAdmission(t *testing.T) {
 	sign := func() (*xdm.Node, *xdm.Node, *xdm.Node) {
 		doc, sig := mustSignInPlace(t, xpDoc, "", xpEnv, filter2(nil, "subtract", "//b", "union", "//b"), xpExc)
-		return doc, sig, find(sig, xmlsec.NSDSig, "Transform").Parent.ChildElements()[1]
+		return doc, sig, find(sig, xmlsec.NSDSig, "Transform").Parent().ChildElements()[1]
 	}
 	allow := []dsig.XPathExpression{{Expr: "//b"}}
 	cases := []struct {
 		name  string
-		edit  func(tr *xdm.Node)
+		edit  func(e *xmltree.Edits, tr *xdm.Node)
 		allow []dsig.XPathExpression
 		want  error
 	}{
-		{"unchanged", func(*xdm.Node) {}, allow, nil},
-		{"bad Filter", func(tr *xdm.Node) { tr.ChildElements()[1].Attr("", "Filter").Value = "xor" }, allow, xmlsec.ErrMalformed},
-		{"no XPath", func(tr *xdm.Node) { tr.Children = nil }, allow, xmlsec.ErrMalformed},
-		{"ds:XPath", func(tr *xdm.Node) { tr.ChildElements()[0].Name.URI = xmlsec.NSDSig }, allow, xmlsec.ErrMalformed},
-		{"one expression not allowed", func(tr *xdm.Node) { replaceText(tr.ChildElements()[1], "//b", "//a") }, allow, xmlsec.ErrTransformRefused},
-		{"conflicting bindings", func(tr *xdm.Node) {
-			tr.ChildElements()[0].AddNamespace("p", "urn:1")
-			tr.ChildElements()[1].AddNamespace("p", "urn:2")
+		{"unchanged", func(*xmltree.Edits, *xdm.Node) {}, allow, nil},
+		{"bad Filter", func(_ *xmltree.Edits, tr *xdm.Node) { tr.ChildElements()[1].Attr("", "Filter").SetValue("xor") }, allow, xmlsec.ErrMalformed},
+		{"no XPath", func(e *xmltree.Edits, tr *xdm.Node) {
+			for c := range tr.Children() {
+				e.ReplaceNode(c)
+			}
+		}, allow, xmlsec.ErrMalformed},
+		{"ds:XPath", func(_ *xmltree.Edits, tr *xdm.Node) {
+			x := tr.ChildElements()[0]
+			name := x.Name()
+			name.URI = xmlsec.NSDSig
+			x.SetName(name)
+		}, allow, xmlsec.ErrMalformed},
+		{"one expression not allowed", func(_ *xmltree.Edits, tr *xdm.Node) { replaceText(tr.ChildElements()[1], "//b", "//a") }, allow, xmlsec.ErrTransformRefused},
+		{"conflicting bindings", func(e *xmltree.Edits, tr *xdm.Node) {
+			e.Declare(tr.ChildElements()[0], "p", "urn:1")
+			e.Declare(tr.ChildElements()[1], "p", "urn:2")
 		}, []dsig.XPathExpression{{Expr: "//b", Namespaces: map[string]string{"p": "urn:1"}}, {Expr: "//b", Namespaces: map[string]string{"p": "urn:2"}}}, xmlsec.ErrTransformRefused},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			doc, sig, tr := sign()
-			c.edit(tr)
+			var e xmltree.Edits
+			c.edit(&e, tr)
+			doc, sig = rebuilt(doc, sig, &e)
 			_, err := xpVerify(t, doc, sig, dsig.VerifyOptions{AllowedXPathExpressions: c.allow})
 			if c.want == nil && err != nil || c.want != nil && !errors.Is(err, c.want) {
 				t.Fatalf("got %v, want %v", err, c.want)
@@ -389,20 +416,24 @@ func TestXPathOmittedURICoverage(t *testing.T) {
 		want           bool
 	}{{"true()", obj, true}, {"not(ancestor-or-self::d)", `<o><k>1</k></o>`, false}} {
 		doc, sig := mustSignInPlace(t, xpDoc, "", xpEnv, xpExc)
+		// The ds:Reference again, without URI, with these transforms and
+		// the digest of what they keep.
 		ref := find(sig, xmlsec.NSDSig, "Reference")
-		ref.Attrs = nil
-		ts := find(ref, xmlsec.NSDSig, "Transforms")
-		ts.Children = nil
+		nr := xmltree.Element(nil, "ds", xmlsec.NSDSig, "Reference")
+		ts := xmltree.Element(nr, "ds", xmlsec.NSDSig, "Transforms")
 		tr := xmltree.Element(ts, "ds", xmlsec.NSDSig, "Transform")
 		xmltree.SetAttr(tr, "", "", "Algorithm", xmlsec.TransformXPath)
 		xmltree.Text(xmltree.Element(tr, "ds", xmlsec.NSDSig, "XPath"), c.expr)
 		tr = xmltree.Element(ts, "ds", xmlsec.NSDSig, "Transform")
 		xmltree.SetAttr(tr, "", "", "Algorithm", string(c14n.Exclusive10))
+		nr.AppendCopy(find(ref, xmlsec.NSDSig, "DigestMethod"))
 		sum := sha256.Sum256([]byte(c.digested))
-		dv := find(ref, xmlsec.NSDSig, "DigestValue")
-		dv.Children = nil
-		xmltree.Text(dv, base64.StdEncoding.EncodeToString(sum[:]))
-		if !resign(sig) {
+		xmltree.Text(xmltree.Element(nr, "ds", xmlsec.NSDSig, "DigestValue"), base64.StdEncoding.EncodeToString(sum[:]))
+		var e xmltree.Edits
+		e.ReplaceNode(ref, nr)
+		_, sig = rebuilt(doc, sig, &e)
+		var ok bool
+		if doc, sig, ok = resign(sig); !ok {
 			t.Fatal("resign")
 		}
 		cov, err := dsig.Verify(doc, sig, dsig.VerifyOptions{

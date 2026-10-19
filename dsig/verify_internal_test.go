@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xmlsec"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xmlsec/v2"
 )
 
 // An empty allow-list means the default set; an algorithm outside it is

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
 )
 
 // FaultCode maps each class of error to its SOAP Message Security 1.1.1
@@ -38,7 +38,7 @@ func TestFaultCode(t *testing.T) {
 
 	// What this package returns maps as documented.
 	if _, err := ParseBinarySecurityToken(parseDoc(t, bst(`EncodingType="`+xmlsec.BSTEncodingBase64+`" ValueType="`+
-		xmlsec.BSTValueTypeX509v3+`"`, "AAAA")).Children[0]); FaultCode(err).Local != "InvalidSecurityToken" || !errors.Is(err, xmlsec.ErrInvalidSecurityToken) {
+		xmlsec.BSTValueTypeX509v3+`"`, "AAAA")).FirstChild()); FaultCode(err).Local != "InvalidSecurityToken" || !errors.Is(err, xmlsec.ErrInvalidSecurityToken) {
 		t.Errorf("unreadable certificate: %v", err)
 	}
 }

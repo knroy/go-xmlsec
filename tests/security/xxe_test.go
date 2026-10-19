@@ -20,11 +20,11 @@ import (
 	"time"
 	"unicode/utf16"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // listener counts every request made to it. A fetch is the failure, whatever
@@ -181,7 +181,7 @@ func TestVerifyDereferencesNothingExternal(t *testing.T) {
 				t.Fatal(err)
 			}
 			sig, si, ref, value := elements(doc.Root)
-			ref.Attr("", "URI").Value = uri
+			ref.Attr("", "URI").SetValue(uri)
 
 			// Re-sign the altered SignedInfo with the real key, so the
 			// signature is authentic and verification goes on to resolve
@@ -194,7 +194,7 @@ func TestVerifyDereferencesNothingExternal(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			value.Children[0].Value = base64.StdEncoding.EncodeToString(v)
+			value.FirstChild().SetValue(base64.StdEncoding.EncodeToString(v))
 
 			_, err = dsig.Verify(doc.Root, sig, dsig.VerifyOptions{Certificate: cert})
 			if !errors.Is(err, want) || errors.Is(err, xmlsec.ErrSignatureInvalid) {
@@ -209,10 +209,10 @@ func TestVerifyDereferencesNothingExternal(t *testing.T) {
 
 func elements(root *xdm.Node) (sig, si, ref, value *xdm.Node) {
 	xmltree.Walk(root, func(e *xdm.Node) {
-		if e.Name.URI != xmlsec.NSDSig {
+		if e.Name().URI != xmlsec.NSDSig {
 			return
 		}
-		switch e.Name.Local {
+		switch e.Name().Local {
 		case "Signature":
 			sig = e
 		case "SignedInfo":

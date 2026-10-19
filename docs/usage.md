@@ -13,8 +13,11 @@ which a caller replaces by naming its own.
 | A new inclusive signature | `c14n.Inclusive11`, which XML Signature 1.1 §3.1.1 and §6.5 recommend |
 | Enveloped documents whose profile names Canonical XML 1.0, such as SMP metadata | `c14n.Inclusive10` |
 
-Canonicalization algorithm URIs are go-xml's `c14n.Algorithm` constants; this
-module does not redefine them.
+Canonicalization algorithm URIs are go-xml's `c14n.Algorithm` constants
+(`github.com/knroy/go-xml/v2/c14n`); this module does not redefine them.
+Import paths are `github.com/knroy/go-xmlsec/v2` and its packages
+`/v2/dsig`, `/v2/wss` and `/v2/xenc`; upgrading from v1 is covered in
+[migrating-to-v2.md](migrating-to-v2.md).
 
 ## Parsing
 
@@ -33,15 +36,39 @@ doc := tree.Root
 `MaxDepth` and `MaxNodes` to what your profile needs. Limits can only be
 tightened, never loosened, and exceeding one is `ErrLimitExceeded`.
 
+### Documents
+
+A parsed go-xml v2 tree is frozen: nothing can be added to it. The calls
+that add to a document — `dsig.Sign` with `Parent`, `wss.NewHeader` and its
+`Header` methods, `wss.AssignID` — take an `*xmlsec.Document` instead:
+
+```go
+d := xmlsec.NewDocument(tree.Root)
+```
+
+Each change builds a new tree. `d.Root()` is the latest; `d.Node(n)` is the
+counterpart there of a node from any earlier tree, or nil if it was never in
+`d` or a change removed it. Wherever a `Document` is passed beside a node,
+such as `Parent` or `AssignID`'s element, a node of an earlier tree is
+accepted; a node that is not in `d` at all, such as a detached element not
+yet placed, is refused with `ErrMalformed`. Functions that take a tree and
+return octets or a verdict — `dsig.Verify`, `dsig.SignEnveloped`,
+`BuildManifest`, the `xenc` Encrypt and Decrypt functions — are read-only and
+take `d.Root()` and `d.Node(x)`. Each change copies the whole tree, so a
+message built in k steps costs k times its size. A `Document` is not safe for
+concurrent use.
+
 ## Signing
 
-`dsig.Sign` returns a detached `ds:Signature` for you to place, and does not
-modify the document. A detached signature's `ds:SignedInfo` is canonicalized
+`dsig.Sign(d, key, opts)` returns a detached `ds:Signature` for you to place,
+and only reads `d`. A detached signature's `ds:SignedInfo` is canonicalized
 before you place it, and only exclusive canonicalization is independent of
 where it ends up, so a detached signature needs exclusive canonicalization.
 To use any other, set `SignOptions.Parent` to the element the signature
-belongs in: `Sign` then appends it there first and computes it in place,
-leaves it there, and leaves the document unchanged if it fails.
+belongs in, an element of any version of `d`: `Sign` then places it there
+first, in a new tree, and computes it in place. On success that tree becomes
+`d.Root()` and the returned element is the signature as placed
+(`sig.Root() == d.Root()`); on failure `d` is unchanged.
 
 For the same reason, without `Parent` a reference to an element of the
 signature itself — its `ds:Object`, `ds:KeyInfo`, or a token embedded in its
@@ -120,13 +147,14 @@ sig, err := dsig.Sign(nil, key, dsig.SignOptions{
     SignatureAlgorithm:        xmlsec.SigRSASHA256,
     CanonicalizationAlgorithm: string(c14n.Exclusive10),
     KeyInfo:                   dsig.KeyInfoX509Data,
-    Objects:                   []dsig.Object{{ID: "obj", Content: payload.Children}},
+    Objects:                   []dsig.Object{{ID: "obj", Content: slices.Collect(payload.Children())}},
     References: []dsig.Reference{{URI: "#obj", DigestAlgorithm: xmlsec.DigestSHA256,
         Transforms: []dsig.TransformSpec{{Algorithm: string(c14n.Exclusive10)}}}},
 })
-doc := &xdm.Node{Kind: xdm.KindDocument}
-doc.AppendChild(sig)
-out, err := c14n.Bytes(doc, c14n.Options{Algorithm: c14n.Inclusive10})
+t := xdm.NewTree()
+t.Root.AppendCopy(sig)
+t.Finalize()
+out, err := c14n.Bytes(t.Root, c14n.Options{Algorithm: c14n.Inclusive10})
 ```
 
 `Verify` resolves `#obj` to the signature's own `ds:Object` without
@@ -153,8 +181,8 @@ opts)` digests `refs` as `Sign` would and returns the Manifest, with its
 `Id` from `opts.ManifestID`. Place it in a `ds:Object` and sign it:
 
 ```go
-m, err := dsig.BuildManifest(doc, refs, dsig.SignOptions{ManifestID: "m"})
-sig, err := dsig.Sign(doc, key, dsig.SignOptions{
+m, err := dsig.BuildManifest(d.Root(), refs, dsig.SignOptions{ManifestID: "m"})
+sig, err := dsig.Sign(d, key, dsig.SignOptions{
     ...
     Objects:    []dsig.Object{{Content: []*xdm.Node{m}}},
     References: []dsig.Reference{{URI: "#m", Type: xmlsec.TypeManifest, ...}},
@@ -230,7 +258,7 @@ noDrafts := dsig.TransformSpec{
 	XPath:           "not(ancestor-or-self::m:Draft)",
 	XPathNamespaces: map[string]string{"m": "urn:example:m"},
 }
-sig, err := dsig.Sign(doc, key, dsig.SignOptions{
+sig, err := dsig.Sign(d, key, dsig.SignOptions{
 	// ...
 	References: []dsig.Reference{{URI: "", DigestAlgorithm: xmlsec.DigestSHA256,
 		Transforms: []dsig.TransformSpec{
@@ -241,7 +269,7 @@ sig, err := dsig.Sign(doc, key, dsig.SignOptions{
 	Parent: root, // the element the signature goes in
 })
 
-cov, err := dsig.Verify(doc, sig, dsig.VerifyOptions{
+cov, err := dsig.Verify(d.Root(), sig, dsig.VerifyOptions{
 	Certificate: cert,
 	AllowedXPathExpressions: []dsig.XPathExpression{
 		{Expr: "not(ancestor-or-self::m:Draft)", Namespaces: map[string]string{"m": "urn:example:m"}},
@@ -279,21 +307,25 @@ WS-Security has each step **prepended** to the `wsse:Security` header (SOAP
 Message Security 1.1.1 §5, §8.2, §9), so the header lists the steps last
 first and a receiver processes it top to bottom.
 
-- `hdr.Prepend(el)` places a signature, an `EncryptedKey` or a
-  `ReferenceList`. It keeps two things ahead of the new element: a leading
+`hdr, err := wss.NewHeader(d, soapNS, actor, mustUnderstand)` adds the
+header to `d`, and every method below changes `d` again; `hdr.Element()` is
+the `wsse:Security` element in `d.Root()`.
+
+- `hdr.Prepend(el)` places a copy of a detached signature, `EncryptedKey` or
+  `ReferenceList`; `d.Node(el)` is the placed copy. It keeps two things ahead of the new element: a leading
   timestamp, and every token the element references (Basic Security Profile
   R5205). It refuses an `EncryptedKey` that would land after an
   `EncryptedData` it lists (R3208).
 - `AddBinarySecurityToken`, `AddTimestamp` and `AddSignatureConfirmation`
   place their elements themselves; the timestamp always goes first, at most
   once.
-- `hdr.Append(el)` places an element last, for callers who order the header
-  themselves.
+- `hdr.Append(el)` places a copy of an element last, for callers who order
+  the header themselves.
 
 Sign, then encrypt:
 
 1. `hdr.AddTimestamp(now, ttl)`.
-2. `wss.AssignID` on every element to sign. On an XML Signature or XML
+2. `wss.AssignID(d, el)` on every element to sign, once it is in `d`. On an XML Signature or XML
    Encryption element it sets the schema's own unqualified `Id` rather than
    `wsu:Id`; sign such references with `IDAttributes: []xdm.QName{dsig.IDAttrDSig}`.
    An element that already has an `xml:id` keeps it (§4 forbids both).
@@ -305,8 +337,10 @@ Sign, then encrypt:
    (subject key identifier, or a SHA-1 thumbprint when the certificate has
    none) or `wss.NewIssuerSerialReference(cert)` when the certificate is not
    sent.
-5. `ek.SetKeyInfo(str)`, `ek.AddDataReference(id)`, `hdr.Prepend(ek.Element)`,
-   then `xenc.EncryptElement`.
+5. `ek.SetKeyInfo(str)` and `ek.AddDataReference(id)`, both before
+   `hdr.Prepend(ek.Element)`: each replaces `ek.Element`, and a copy already
+   placed is not updated. Then `xenc.EncryptElement(d.Root(), d.Node(el), …)`,
+   which returns the message octets.
 
 The result reads `wsu:Timestamp`, [recipient token], `xenc:EncryptedKey`,
 signer token, `ds:Signature`: a receiver decrypts, then verifies.
@@ -395,7 +429,7 @@ with the message (X.509 Token Profile §3.2, BSP R5417, R5209), pass the referen
 
 ```go
 str, err := wss.NewKeyIdentifierReference(signerCert) // or NewIssuerSerialReference
-sig, err := dsig.Sign(doc, key, dsig.SignOptions{
+sig, err := dsig.Sign(d, key, dsig.SignOptions{
 	// ...
 	KeyInfo:        dsig.KeyInfoSecurityTokenReference,
 	KeyInfoElement: str, // Sign takes it: build one per signature
@@ -438,11 +472,26 @@ reference in the header with an ID and make the transform the reference's
 only transform.
 
 ```go
-str, err := wss.NewSecurityTokenReference(doc, tokenID, "")
-hdr.Append(str)
-strID, err := wss.AssignID(doc, str)
+str, err := wss.NewSecurityTokenReference(d.Root(), tokenID, "")
+err = hdr.Append(str)                   // first: AssignID needs it in d
+strID, err := wss.AssignID(d, d.Node(str))
 refs = append(refs, dsig.Reference{URI: "#" + strID, DigestAlgorithm: xmlsec.DigestSHA256,
 	Transforms: []dsig.TransformSpec{{Algorithm: xmlsec.TransformSTR}}})
+```
+
+The reference may instead be the signature's own, in `ds:KeyInfo`
+(`SignOptions.KeyInfoElement`). It is not in the document when `Sign` needs
+its ID, so `wss.WithID` returns a copy carrying one, set as `AssignID` would;
+with no document to search, keeping it unique is yours, and a duplicate is
+refused on verification with `ErrAmbiguousID`:
+
+```go
+str, err := wss.NewSecurityTokenReference(d.Root(), tokenID, "")
+opts.KeyInfoElement, strID, err = wss.WithID(str, "") // "" mints an ID
+opts.KeyInfo = dsig.KeyInfoSecurityTokenReference
+opts.References = append(opts.References, dsig.Reference{URI: "#" + strID,
+	DigestAlgorithm: xmlsec.DigestSHA256,
+	Transforms:      []dsig.TransformSpec{{Algorithm: xmlsec.TransformSTR}}})
 ```
 
 `Sign` serializes the token with Exclusive C14N, stated in
@@ -530,11 +579,11 @@ byte-identical from run to run with RSA (PKCS#1 v1.5 is deterministic;
 ECDSA is not):
 
 ```go
-msgID, err := wss.AssignIDWith(doc, messaging, "msg-1")
-bodyID, err := wss.AssignIDWith(doc, body, "body-1")
+msgID, err := wss.AssignIDWith(d, messaging, "msg-1")
+bodyID, err := wss.AssignIDWith(d, body, "body-1")
 tsID, err := hdr.AddTimestampWithID(fixedNow, 5*time.Minute, "ts-1")
 tokID, err := hdr.AddBinarySecurityTokenWithID(cert, nil, xmlsec.BSTValueTypeX509v3, "bst-1")
-sig, err := dsig.Sign(doc, key, dsig.SignOptions{
+sig, err := dsig.Sign(d, key, dsig.SignOptions{
     // ... references to msgID, bodyID, tsID and attachments ...
     KeyInfo:          dsig.KeyInfoSecurityTokenReference,
     SecurityTokenID:  tokID,
@@ -543,6 +592,8 @@ sig, err := dsig.Sign(doc, key, dsig.SignOptions{
     SignatureValueID: "sv-1",
     KeyInfoID:        "ki-1",
 })
+err = hdr.Prepend(sig)
+out, err := c14n.Bytes(d.Root(), c14n.Options{Algorithm: c14n.Inclusive10WithComments})
 ```
 
 `AddSignatureConfirmationWithID` does the same for a confirmation, and
@@ -863,7 +914,8 @@ defer clear(ek.SessionKey)
 
 ciphertext, ed, err := xenc.EncryptAttachment(att, ek.SessionKey, xmlsec.TransformAttachmentContentOnly, opts)
 // Replace the MIME body with ciphertext, Content-Type application/octet-stream,
-// place ek.Element and ed in the security header.
+// and place ek.Element and ed in the security header (hdr.Prepend), after any
+// ek.SetKeyInfo or ek.AddDataReference.
 ```
 
 Pass `xmlsec.TransformAttachmentComplete` instead to encrypt the listed MIME
@@ -916,6 +968,11 @@ signed. An element that undeclares a default namespace is encrypted with
 `xmlns=""`, so a peer that decrypts in place keeps it out of its parent's
 namespace. `EncryptOptions.DataID` must be an XML name.
 
+These functions leave `doc` unchanged and return the whole document as
+octets, in canonical form (`Inclusive10WithComments`). `el`, `block` and
+`security` must be nodes of `doc` itself: after building a header with a
+`Document`, pass `d.Root()` and `d.Node(el)`.
+
 A WS-Security receiver finds the session key through the `EncryptedKey` in
 the header: its `ds:KeyInfo` names the recipient's key, and its
 `xenc:ReferenceList` names each `EncryptedData` it decrypts:
@@ -925,13 +982,15 @@ opts.DataID = "ED-1"                    // the Id the EncryptedData will carry
 ek, err := xenc.GenerateEncryptedKey(opts)
 err = ek.SetKeyInfo(str)                // which key unwraps it
 err = ek.AddDataReference(opts.DataID)  // what it decrypts
-err = hdr.Prepend(ek.Element)
-encrypted, err := xenc.EncryptElement(doc, payload, ek.SessionKey, opts)
+err = hdr.Prepend(ek.Element)           // last: places a copy
+encrypted, err := xenc.EncryptElement(d.Root(), d.Node(payload), ek.SessionKey, opts)
 ```
 
 `EncryptOptions.CarriedKeyName` and `RecipientHint` emit the `EncryptedKey`'s
-`CarriedKeyName` and `Recipient`. `SetKeyInfo` and `AddDataReference` place
-what they add in schema order, whatever order they are called in.
+`CarriedKeyName` and `Recipient`. `SetKeyInfo`, `AddDataReference` and
+`AddKeyReference` place what they add in schema order, whatever order they
+are called in. Each makes `ek.Element` a new element, so call them before
+placing it: a copy already in the header is not updated.
 
 Arbitrary octets, such as an image or a PDF, are encrypted with
 `EncryptOctets`. `Type`, `MimeType` and `Encoding` tell the recipient what
@@ -1017,15 +1076,15 @@ standalone `ReferenceList` in the header names the `EncryptedData`, and each
 
 ```go
 ek, err := xenc.GenerateEncryptedKey(opts)
-ekID, err := wss.AssignID(doc, ek.Element)         // an unqualified Id
 err = ek.SetKeyInfo(recipientSTR)                  // which private key unwraps it
-opts.DataKeyInfo, err = wss.NewSecurityTokenReference(doc, ekID,
-    "http://docs.oasis-open.org/wss/oasis-wss-soap-message-security-1.1#EncryptedKey") // with TokenType (R3069)
 list, err := wss.NewReferenceList("ED-body", "ED-header")
 err = hdr.Prepend(list)
 err = hdr.Prepend(ek.Element)                      // ahead of the list
+ekID, err := wss.AssignID(d, d.Node(ek.Element))   // once placed; an unqualified Id
+opts.DataKeyInfo, err = wss.NewSecurityTokenReference(d.Root(), ekID,
+    "http://docs.oasis-open.org/wss/oasis-wss-soap-message-security-1.1#EncryptedKey") // with TokenType (R3069)
 opts.DataID = "ED-body"
-out, err := xenc.EncryptContent(doc, body, ek.SessionKey, opts)
+out, err := xenc.EncryptContent(d.Root(), d.Node(body), ek.SessionKey, opts)
 // parse out, then with opts.DataID = "ED-header":
 // xenc.EncryptHeader(doc2, block, security, ek.SessionKey, opts)
 ```
@@ -1043,8 +1102,8 @@ eds, err := xenc.ReferencedData(referenceList)  // the header's list, in order
 for _, ed := range eds {
     ekEl, err := xenc.FindEncryptedKey(ed)      // follows the SecurityTokenReference one hop
     key, err := xenc.DecryptEncryptedKey(ekEl, decrypter, allow)
-    if ed.Parent.IsElement(xmlsec.NSWSSE11, "EncryptedHeader") {
-        out, err := xenc.DecryptHeader(doc, ed.Parent, key, allow) // the document, header restored
+    if ed.Parent().IsElement(xmlsec.NSWSSE11, "EncryptedHeader") {
+        out, err := xenc.DecryptHeader(doc, ed.Parent(), key, allow) // the document, header restored
     } else {
         plaintext, err := xenc.DecryptData(ed, key, allow)
     }

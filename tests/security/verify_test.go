@@ -16,12 +16,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/xenc"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/xenc"
 )
 
 func keyPair(t *testing.T, signer crypto.Signer) xmlsec.KeyProvider {
@@ -94,12 +94,12 @@ func TestPinnedCertificateIgnoresEmbeddedKey(t *testing.T) {
 func resign(t *testing.T, doc *xdm.Node, method string, sign func(digest []byte) []byte) *xdm.Node {
 	t.Helper()
 	sig, si, _, value := elements(doc)
-	si.ChildElements()[1].Attr("", "Algorithm").Value = method
+	si.ChildElements()[1].Attr("", "Algorithm").SetValue(method)
 	h := sha256.New()
 	if _, err := c14n.Digest(h, si, c14n.Options{Algorithm: c14n.Exclusive10}); err != nil {
 		t.Fatal(err)
 	}
-	value.Children[0].Value = base64.StdEncoding.EncodeToString(sign(h.Sum(nil)))
+	value.FirstChild().SetValue(base64.StdEncoding.EncodeToString(sign(h.Sum(nil))))
 	return sig
 }
 

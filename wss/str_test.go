@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // certFrom self-signs tmpl, given a serial number and validity if it has
@@ -88,7 +88,7 @@ func TestNewKeyIdentifierReference(t *testing.T) {
 			if !ki.IsElement(xmlsec.NSWSSE, "KeyIdentifier") || ki.AttrValue("ValueType") != c.valueType ||
 				ki.AttrValue("EncodingType") != xmlsec.BSTEncodingBase64 ||
 				ki.StringValue() != base64.StdEncoding.EncodeToString(c.value) {
-				t.Fatalf("%v ValueType %q EncodingType %q value %q", ki.Name, ki.AttrValue("ValueType"), ki.AttrValue("EncodingType"), ki.StringValue())
+				t.Fatalf("%v ValueType %q EncodingType %q value %q", ki.Name(), ki.AttrValue("ValueType"), ki.AttrValue("EncodingType"), ki.StringValue())
 			}
 			if !MatchSecurityTokenReference(str, c.cert) {
 				t.Error("does not match its own certificate")
@@ -121,7 +121,7 @@ func TestNewIssuerSerialReference(t *testing.T) {
 	xd := str.ChildElements()[0]
 	is := xd.ChildElements()[0].ChildElements()
 	if !xd.IsElement(xmlsec.NSDSig, "X509Data") || len(is) != 2 {
-		t.Fatalf("structure %v", xd.Name)
+		t.Fatalf("structure %v", xd.Name())
 	}
 	if got := is[0].StringValue(); got != `CN=Test CA,O=Acme\, Inc.,C=NO` {
 		t.Errorf("issuer %q", got)
@@ -203,7 +203,7 @@ func TestMatchSecurityTokenReference(t *testing.T) {
 // strictFixture is a header holding an X509v3, a PKIPath and a PKCS7 token,
 // plus a second header for another actor holding a third.
 type strictFixture struct {
-	doc, body       *xdm.Node
+	doc             *xmlsec.Document
 	h               *Header
 	v3, pki, p7     string
 	other           string
@@ -212,7 +212,7 @@ type strictFixture struct {
 
 func newStrictFixture(t *testing.T) strictFixture {
 	t.Helper()
-	f := strictFixture{doc: parseDoc(t, env11), cert: testCert(t, "c"), otherCert: testCert(t, "o")}
+	f := strictFixture{doc: newDoc(t, env11), cert: testCert(t, "c"), otherCert: testCert(t, "o")}
 	var err error
 	if f.h, err = NewHeader(f.doc, xmlsec.NSSOAP11, "", false); err != nil {
 		t.Fatal(err)
@@ -233,7 +233,6 @@ func newStrictFixture(t *testing.T) strictFixture {
 	if f.other, err = h2.AddBinarySecurityToken(f.otherCert, nil, xmlsec.BSTValueTypeX509v3); err != nil {
 		t.Fatal(err)
 	}
-	f.body = xmltree.DocumentElement(f.doc).ChildElements()[1]
 	return f
 }
 
@@ -243,7 +242,7 @@ func strTo(id, valueType, tokenType string) *xdm.Node {
 	ki := xmltree.Element(nil, "ds", xmlsec.NSDSig, "KeyInfo")
 	ki.AddNamespace("ds", xmlsec.NSDSig)
 	str := newSTR()
-	ki.AppendChild(str)
+	str = ki.AppendCopy(str)
 	if tokenType != "" {
 		str.AddNamespace("wsse11", xmlsec.NSWSSE11)
 		xmltree.SetAttr(str, "wsse11", xmlsec.NSWSSE11, "TokenType", tokenType)
@@ -293,11 +292,23 @@ func TestResolveSecurityTokenReferenceStrict(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			f := newStrictFixture(t)
-			tok := xmltree.Element(f.body, "wsse", xmlsec.NSWSSE, "BinarySecurityToken")
+			tok := xmltree.Element(nil, "wsse", xmlsec.NSWSSE, "BinarySecurityToken")
 			xmltree.SetAttr(tok, "wsu", xmlsec.NSWSU, "Id", "bodytoken")
 			xmltree.SetAttr(tok, "", "", "ValueType", v3)
 
 			ki := strTo(c.id(f), c.valueType, c.tokenType)
+			sb := xmltree.DocumentElement(f.doc.Root()).ChildElements()[1]
+			var e xmltree.Edits
+			e.Insert(sb, sb.NumChildren(), tok)
+			switch c.where {
+			case body:
+				e.Insert(sb, sb.NumChildren(), ki)
+			case bodyFirst:
+				e.Insert(sb, 0, ki)
+			}
+			if _, err := xmltree.DocOf(f.doc).Apply(&e); err != nil {
+				t.Fatal(err)
+			}
 			switch c.where {
 			case after:
 				if err := f.h.Append(ki); err != nil {
@@ -305,21 +316,16 @@ func TestResolveSecurityTokenReferenceStrict(t *testing.T) {
 				}
 			case before:
 				f.h.insert(0, ki)
-			case body:
-				f.body.AppendChild(ki)
-			case bodyFirst:
-				f.body.AppendChild(ki)
-				f.body.Children = append([]*xdm.Node{ki}, f.body.Children[:len(f.body.Children)-1]...)
 			}
-			str := ki.ChildElements()[0]
-			got, err := ResolveSecurityTokenReferenceStrict(f.doc, str)
+			str := f.doc.Node(ki).ChildElements()[0]
+			got, err := ResolveSecurityTokenReferenceStrict(f.doc.Root(), str)
 			if !errors.Is(err, c.want) || c.want == nil && !got.Equal(f.cert) {
 				t.Fatalf("got %v, %v; want %v", got, err, c.want)
 			}
 			// The lenient resolution accepts every well-formed reference to a
 			// certificate.
 			if c.want == xmlsec.ErrMalformed && c.id(f) != "bodytoken" {
-				if _, err := ResolveSecurityTokenReference(f.doc, str); err != nil {
+				if _, err := ResolveSecurityTokenReference(f.doc.Root(), str); err != nil {
 					t.Errorf("lenient: %v", err)
 				}
 			}
@@ -367,8 +373,8 @@ func TestNewSecurityTokenReference(t *testing.T) {
 			}
 			// The wsse11 prefix is declared on the element itself.
 			if tt := str.Attr(xmlsec.NSWSSE11, "TokenType"); tt != nil {
-				if uri, _ := str.LookupPrefix(tt.Name.Prefix); uri != xmlsec.NSWSSE11 {
-					t.Errorf("prefix %q bound to %q", tt.Name.Prefix, uri)
+				if uri, _ := str.LookupPrefix(tt.Name().Prefix); uri != xmlsec.NSWSSE11 {
+					t.Errorf("prefix %q bound to %q", tt.Name().Prefix, uri)
 				}
 			}
 		})
@@ -443,7 +449,7 @@ func TestReferencedToken(t *testing.T) {
 		"embedded":              {`<wsse:SecurityTokenReference><wsse:Embedded>` + strings.Replace(bst, `wsu:Id="tok" `, "", 1) + `</wsse:Embedded></wsse:SecurityTokenReference>`, "BinarySecurityToken", nil},
 	} {
 		tok, err := resolve(t, c.str, c.extra...)
-		if err != nil || tok.Name.Local != c.want {
+		if err != nil || tok.Name().Local != c.want {
 			t.Errorf("%s: %v, %v", name, tok, err)
 		}
 	}
@@ -483,8 +489,10 @@ func TestReferencedToken(t *testing.T) {
 			t.Errorf("%s embedded: %v", name, err)
 		}
 	}
-	xmltree.SetAttr(emb, "wsse11", xmlsec.NSWSSE11, "TokenType", xmlsec.BSTValueTypePKCS7)
-	if _, err := ResolveSecurityTokenReferenceStrict(d, emb); !errors.Is(err, xmlsec.ErrMalformed) {
+	var e xmltree.Edits
+	e.SetAttr(emb, xdm.QName{Prefix: "wsse11", URI: xmlsec.NSWSSE11, Local: "TokenType"}, xmlsec.BSTValueTypePKCS7)
+	d, m := xmltree.Rebuild(d, &e)
+	if _, err := ResolveSecurityTokenReferenceStrict(d, m[emb]); !errors.Is(err, xmlsec.ErrMalformed) {
 		t.Errorf("strict embedded, wrong TokenType: %v", err)
 	}
 }

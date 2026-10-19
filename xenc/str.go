@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/idref"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/idref"
 )
 
 // strEncryptedKey resolves str, a wsse:SecurityTokenReference in the
@@ -28,7 +28,7 @@ func strEncryptedKey(ed, str *xdm.Node) (*xdm.Node, error) {
 		return nil, err
 	}
 	if !t.IsElement(xmlsec.NSXEnc, "EncryptedKey") {
-		return nil, malformed("wsse:Reference %q names a %s, not an xenc:EncryptedKey", uri, t.Name.Local)
+		return nil, malformed("wsse:Reference %q names a %s, not an xenc:EncryptedKey", uri, t.Name().Local)
 	}
 	return t, nil
 }

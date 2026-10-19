@@ -11,12 +11,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/wss"
-	"github.com/knroy/go-xmlsec/xenc"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/wss"
+	"github.com/knroy/go-xmlsec/v2/xenc"
 )
 
 // encryptWithEK encrypts the element named local in src under ek and
@@ -27,7 +27,7 @@ func encryptWithEK(t *testing.T, src, local string, ek *xenc.EncryptedKey, opts 
 	doc := parse(t, []byte(src))
 	var target *xdm.Node
 	xmltree.Walk(doc, func(e *xdm.Node) {
-		if target == nil && e.Name.Local == local {
+		if target == nil && e.Name().Local == local {
 			target = e
 		}
 	})
@@ -36,13 +36,8 @@ func encryptWithEK(t *testing.T, src, local string, ek *xenc.EncryptedKey, opts 
 		t.Fatal(err)
 	}
 	edoc := parse(t, encrypted)
-	ed := find(edoc, xmlsec.NSXEnc, "EncryptedData")
-	ki := xmltree.Element(nil, "ds", xmlsec.NSDSig, "KeyInfo")
-	ki.AddNamespace("ds", xmlsec.NSDSig)
-	ki.AppendChild(ek.Element)
 	// ds:KeyInfo belongs between EncryptionMethod and CipherData.
-	ed.AppendChild(ki)
-	ed.Children = []*xdm.Node{ed.Children[0], ki, ed.Children[1]}
+	edoc, _ = withKeyInfo(find(edoc, xmlsec.NSXEnc, "EncryptedData"), ek.Element)
 	withKey, err := c14n.Bytes(edoc, c14n.Options{Algorithm: c14n.Inclusive10})
 	if err != nil {
 		t.Fatal(err)
@@ -274,7 +269,7 @@ func TestDecryptReplaceKeepsNoNamespace(t *testing.T) {
 	check := func(who string, b []byte) {
 		doc := parse(t, b)
 		var names []string
-		xmltree.Walk(doc, func(e *xdm.Node) { names = append(names, "{"+e.Name.URI+"}"+e.Name.Local) })
+		xmltree.Walk(doc, func(e *xdm.Node) { names = append(names, "{"+e.Name().URI+"}"+e.Name().Local) })
 		want := "{urn:example:d}Document {}ToBeEncrypted {}c {urn:example:d}after"
 		if got := strings.Join(names, " "); got != want {
 			t.Errorf("%s: %s, want %s\n%s", who, got, want, b)
@@ -294,7 +289,7 @@ func TestDecryptReplaceKeepsNoNamespace(t *testing.T) {
 func wss4jMessage(t *testing.T, recipient keypair, dataID string,
 	encrypt func(doc, security *xdm.Node, key []byte, opts xenc.EncryptOptions) ([]byte, error)) []byte {
 	t.Helper()
-	doc := parse(t, []byte(envelope))
+	doc := xmlsec.NewDocument(parse(t, []byte(envelope)))
 	hdr, err := wss.NewHeader(doc, xmlsec.NSSOAP12, "", true)
 	if err != nil {
 		t.Fatal(err)
@@ -310,7 +305,7 @@ func wss4jMessage(t *testing.T, recipient keypair, dataID string,
 	if err != nil {
 		t.Fatal(err)
 	}
-	str, err := wss.NewSecurityTokenReference(doc, tokenID, xmlsec.BSTValueTypeX509v3)
+	str, err := wss.NewSecurityTokenReference(doc.Root(), tokenID, xmlsec.BSTValueTypeX509v3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +318,7 @@ func wss4jMessage(t *testing.T, recipient keypair, dataID string,
 	if err := hdr.Append(ek.Element); err != nil {
 		t.Fatal(err)
 	}
-	encrypted, err := encrypt(doc, hdr.Element(), ek.SessionKey, opts)
+	encrypted, err := encrypt(doc.Root(), hdr.Element(), ek.SessionKey, opts)
 	if err != nil {
 		t.Fatal(err)
 	}

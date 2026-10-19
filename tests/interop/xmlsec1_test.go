@@ -19,13 +19,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/wss"
-	"github.com/knroy/go-xmlsec/xenc"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/wss"
+	"github.com/knroy/go-xmlsec/v2/xenc"
 )
 
 // tool returns the path of a reference implementation's command. It skips
@@ -130,6 +130,14 @@ func parse(t *testing.T, b []byte) *xdm.Node {
 		t.Fatalf("%v\n%s", err, b)
 	}
 	return tree.Root
+}
+
+// docOf returns a document holding a copy of el, a parentless element.
+func docOf(el *xdm.Node) *xdm.Node {
+	t := xdm.NewTree()
+	t.Root.AppendCopy(el)
+	t.Finalize()
+	return t.Root
 }
 
 func find(doc *xdm.Node, uri, local string) *xdm.Node {
@@ -263,8 +271,8 @@ var idAttrs = []string{
 // since xmlsec1 does not resolve a wsse:SecurityTokenReference.
 func TestXmlsec1VerifiesOurDetachedSignature(t *testing.T) {
 	kp := newKeypair(t, rsaKey(t))
-	doc := parse(t, []byte(envelope))
-	env := xmltree.DocumentElement(doc)
+	doc := xmlsec.NewDocument(parse(t, []byte(envelope)))
+	env := xmltree.DocumentElement(doc.Root())
 	msgID, err := wss.AssignID(doc, env.ChildElements()[0].ChildElements()[0])
 	if err != nil {
 		t.Fatal(err)
@@ -293,7 +301,7 @@ func TestXmlsec1VerifiesOurDetachedSignature(t *testing.T) {
 	if err := hdr.Append(sig); err != nil {
 		t.Fatal(err)
 	}
-	signed, err := c14n.Bytes(doc, c14n.Options{Algorithm: c14n.Inclusive10WithComments})
+	signed, err := c14n.Bytes(doc.Root(), c14n.Options{Algorithm: c14n.Inclusive10WithComments})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -387,13 +395,8 @@ func encryptWithKeyInfo(t *testing.T, kp keypair) []byte {
 	}
 
 	edoc := parse(t, encrypted)
-	ed := find(edoc, xmlsec.NSXEnc, "EncryptedData")
-	ki := xmltree.Element(nil, "ds", xmlsec.NSDSig, "KeyInfo")
-	ki.AddNamespace("ds", xmlsec.NSDSig)
-	ki.AppendChild(ek.Element)
 	// ds:KeyInfo belongs between EncryptionMethod and CipherData.
-	ed.AppendChild(ki)
-	ed.Children = []*xdm.Node{ed.Children[0], ki, ed.Children[1]}
+	edoc, _ = withKeyInfo(find(edoc, xmlsec.NSXEnc, "EncryptedData"), ek.Element)
 	withKey, err := c14n.Bytes(edoc, c14n.Options{Algorithm: c14n.Inclusive10})
 	if err != nil {
 		t.Fatal(err)

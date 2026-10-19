@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/wss"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/wss"
 )
 
 const soapEnvelope = `<S:Envelope xmlns:S="http://www.w3.org/2003/05/soap-envelope">` +
@@ -30,8 +30,8 @@ func signedWSS(t *testing.T, kp xmlsec.KeyProvider) (msg, tokID string, decoys [
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc := tree.Root
-	body := xmltree.DocumentElement(doc).ChildElements()[1]
+	doc := xmlsec.NewDocument(tree.Root)
+	body := xmltree.DocumentElement(tree.Root).ChildElements()[1]
 	bodyID, err := wss.AssignID(doc, body)
 	if err != nil {
 		t.Fatal(err)
@@ -43,11 +43,11 @@ func signedWSS(t *testing.T, kp xmlsec.KeyProvider) (msg, tokID string, decoys [
 	if tokID, err = hdr.AddBinarySecurityToken(kp.Certificate, nil, xmlsec.BSTValueTypeX509v3); err != nil {
 		t.Fatal(err)
 	}
-	str, err := wss.NewSecurityTokenReference(doc, tokID, "")
+	str, err := wss.NewSecurityTokenReference(doc.Root(), tokID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoy, _ := wss.NewSecurityTokenReference(doc, tokID, "")
+	decoy, _ := wss.NewSecurityTokenReference(doc.Root(), tokID, "")
 	emb := xmltree.Element(nil, "wsse", xmlsec.NSWSSE, "SecurityTokenReference")
 	emb.AddNamespace("wsse", xmlsec.NSWSSE)
 	xmltree.Element(xmltree.Element(emb, "wsse", xmlsec.NSWSSE, "Embedded"), "t", "urn:t", "Token").AddNamespace("t", "urn:t")
@@ -87,7 +87,7 @@ func signedWSS(t *testing.T, kp xmlsec.KeyProvider) (msg, tokID string, decoys [
 	if err := hdr.Prepend(sig); err != nil {
 		t.Fatal(err)
 	}
-	b, err := c14n.Bytes(doc, c14n.Options{Algorithm: c14n.Inclusive10})
+	b, err := c14n.Bytes(doc.Root(), c14n.Options{Algorithm: c14n.Inclusive10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestSignatureConfirmationMismatch(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		hdr, err := wss.NewHeader(tree.Root, xmlsec.NSSOAP12, "", true)
+		hdr, err := wss.NewHeader(xmlsec.NewDocument(tree.Root), xmlsec.NSSOAP12, "", true)
 		if err != nil {
 			t.Fatal(err)
 		}

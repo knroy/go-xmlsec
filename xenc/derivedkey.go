@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // partyUSize is the length of the fresh PartyUInfo a MasterKey derivation
@@ -31,7 +31,7 @@ func derivedKeyMethod(dk, implied *xdm.Node) (*xdm.Node, error) {
 		case k.IsElement(xmlsec.NSXEnc, "ReferenceList"),
 			k.IsElement(xmlsec.NSXEnc11, "MasterKeyName"), k.IsElement(xmlsec.NSXEnc11, "DerivedKeyName"):
 		default:
-			return nil, malformed("unexpected %s in xenc11:DerivedKey", k.Name.Local)
+			return nil, malformed("unexpected %s in xenc11:DerivedKey", k.Name().Local)
 		}
 	}
 	switch {

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
 )
 
 // ds:RetrievalMethod Type URIs (XML-DSig 4.5.3).
@@ -48,18 +48,18 @@ func (c *keyContext) retrievalMethod(rm *xdm.Node) (resolvedKey, error) {
 		return resolvedKey{}, malformed("ds:RetrievalMethod without URI")
 	case len(rm.ChildElements()) > 0:
 		return resolvedKey{}, fmt.Errorf("%w: ds:RetrievalMethod with transforms", xmlsec.ErrUnsupportedKeyInfo)
-	case !strings.HasPrefix(uri.Value, "#"):
+	case !strings.HasPrefix(uri.Value(), "#"):
 		if typ != typeRawX509Certificate {
 			return resolvedKey{}, fmt.Errorf("%w: ds:RetrievalMethod to %q of Type %q; another document is followed only for rawX509Certificate",
-				xmlsec.ErrUnsupportedKeyInfo, uri.Value, typ)
+				xmlsec.ErrUnsupportedKeyInfo, uri.Value(), typ)
 		}
-		b, err := c.fetch("ds:RetrievalMethod", uri.Value)
+		b, err := c.fetch("ds:RetrievalMethod", uri.Value())
 		if err != nil {
 			return resolvedKey{}, err
 		}
 		cert, err := x509.ParseCertificate(b)
 		if err != nil {
-			return resolvedKey{}, malformed("ds:RetrievalMethod %q: %v", uri.Value, err)
+			return resolvedKey{}, malformed("ds:RetrievalMethod %q: %v", uri.Value(), err)
 		}
 		return withKey(cert, KeyInfoX509Data, nil)
 	}
@@ -70,7 +70,7 @@ func (c *keyContext) retrievalMethod(rm *xdm.Node) (resolvedKey, error) {
 	if typ != "" && unsupported() {
 		return resolvedKey{}, fmt.Errorf("%w: ds:RetrievalMethod Type %q", xmlsec.ErrUnsupportedKeyInfo, typ)
 	}
-	target, err := c.sameDocument("ds:RetrievalMethod", uri.Value)
+	target, err := c.sameDocument("ds:RetrievalMethod", uri.Value())
 	if err != nil {
 		return resolvedKey{}, err
 	}
@@ -82,12 +82,12 @@ func (c *keyContext) retrievalMethod(rm *xdm.Node) (resolvedKey, error) {
 			}
 		}
 		if unsupported() {
-			return resolvedKey{}, fmt.Errorf("%w: ds:RetrievalMethod without Type names %s", xmlsec.ErrUnsupportedKeyInfo, target.Name.Local)
+			return resolvedKey{}, fmt.Errorf("%w: ds:RetrievalMethod without Type names %s", xmlsec.ErrUnsupportedKeyInfo, target.Name().Local)
 		}
 	}
 	want := retrievalTargets[typ]
 	if !target.IsElement(want.URI, want.Local) {
-		return resolvedKey{}, malformed("ds:RetrievalMethod %q of Type %q names %s", uri.Value, typ, target.Name.Local)
+		return resolvedKey{}, malformed("ds:RetrievalMethod %q of Type %q names %s", uri.Value(), typ, target.Name().Local)
 	}
 	var pub crypto.PublicKey
 	switch typ {

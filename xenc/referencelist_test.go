@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/xenc"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/xenc"
 )
 
 // rlDoc is a document holding a ReferenceList with refs, then rest.
@@ -22,7 +22,7 @@ func TestReferencedData(t *testing.T) {
 		resolveED(`Id="a"`, `-`)+`<wsse11:EncryptedHeader wsu:Id="h">`+resolveED(`Id="b"`, `-`)+`</wsse11:EncryptedHeader>`))
 	got, err := xenc.ReferencedData(firstNamed(doc, "ReferenceList"))
 	if err != nil || len(got) != 2 || got[0].AttrValue("Id") != "a" || got[1].AttrValue("Id") != "b" ||
-		!got[1].Parent.IsElement(xmlsec.NSWSSE11, "EncryptedHeader") {
+		!got[1].Parent().IsElement(xmlsec.NSWSSE11, "EncryptedHeader") {
 		t.Fatalf("%v, %v", got, err)
 	}
 }

@@ -1,4 +1,4 @@
-github.com/knroy/go-xml v1.6.0 h1:gYAkDz5ZzMeMmE6a+IbTRsDsm4edpLFeIQi9nqzc/kM=
-github.com/knroy/go-xml v1.6.0/go.mod h1:nsAVaCUOCSZlR6U2UsbXH1VMYu+FNxkYuKEZzCfy4+Y=
-golang.org/x/text v0.36.0 h1:JfKh3XmcRPqZPKevfXVpI1wXPTqbkE5f7JA92a55Yxg=
-golang.org/x/text v0.36.0/go.mod h1:NIdBknypM8iqVmPiuco0Dh6P5Jcdk8lJL0CUebqK164=
+github.com/knroy/go-xml/v2 v2.0.1 h1:ftnXgPQhazVajf7NzspvVtJnEwpjm3mbGSCfoAxfAys=
+github.com/knroy/go-xml/v2 v2.0.1/go.mod h1:q3hL666HVFOGRuv+qwUQCyql/QteEB1qCk6EUdNk7pw=
+golang.org/x/text v0.41.0 h1:vz/seA0lnX87Othu2f/0L24RcgrXD9/YFTSuGjj3rH8=
+golang.org/x/text v0.41.0/go.mod h1:jvf1O8ajNzZqhSrQBPbutR/EB83Cc0CFrezNQIwbb5M=

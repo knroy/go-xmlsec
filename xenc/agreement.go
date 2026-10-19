@@ -11,9 +11,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // curveURIs are the dsig11:NamedCurve URIs of the curves ECDH-ES accepts.
@@ -152,7 +152,7 @@ func concatKDFMethod(parent *xdm.Node, alg string, partyU []byte, digest string)
 func only(n *xdm.Node, uri, local string) (*xdm.Node, error) {
 	kids := n.ChildElements()
 	if len(kids) != 1 || !kids[0].IsElement(uri, local) {
-		return nil, malformed("%s must hold exactly one %s", n.Name.Local, local)
+		return nil, malformed("%s must hold exactly one %s", n.Name().Local, local)
 	}
 	return kids[0], nil
 }
@@ -268,7 +268,7 @@ func parseAgreed(el *xdm.Node, data, noKey bool, opts DecryptOptions) (*agreed, 
 			a.origin = k
 		case k.IsElement(xmlsec.NSXEnc, "RecipientKeyInfo"):
 		default:
-			return nil, malformed("unexpected %s in xenc:AgreementMethod", k.Name.Local)
+			return nil, malformed("unexpected %s in xenc:AgreementMethod", k.Name().Local)
 		}
 	}
 	if a.origin == nil {

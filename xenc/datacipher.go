@@ -11,11 +11,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/idref"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/idref"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 	"golang.org/x/text/unicode/norm"
 )
 
@@ -109,7 +109,7 @@ func nfc(b []byte) error {
 
 // checkTarget refuses a target that is not an element inside doc.
 func checkTarget(doc, target *xdm.Node) error {
-	if doc == nil || target == nil || target.Kind != xdm.KindElement || target.Parent == nil || target.Root() != doc.Root() {
+	if doc == nil || target == nil || target.Kind() != xdm.KindElement || target.Parent() == nil || target.Root() != doc.Root() {
 		return errors.New("xenc: target must be an element inside doc")
 	}
 	return nil
@@ -122,7 +122,7 @@ func isSOAP(e *xdm.Node, local string) bool {
 
 // encryptedData encrypts plaintext into an xenc:EncryptedData of Type typ.
 func encryptedData(typ string, plaintext, sessionKey []byte, opts EncryptOptions) (*xdm.Node, error) {
-	ed, err := newEncryptedData(typ, opts)
+	ed, err := newEncryptedData(typ, "", opts)
 	if err != nil {
 		return nil, err
 	}
@@ -133,28 +133,24 @@ func encryptedData(typ string, plaintext, sessionKey []byte, opts EncryptOptions
 	if err != nil {
 		return nil, err
 	}
-	cd := element(ed, "CipherData")
-	place(ed)
-	xmltree.Text(element(cd, "CipherValue"), base64.StdEncoding.EncodeToString(ct))
+	xmltree.Text(element(element(ed, "CipherData"), "CipherValue"), base64.StdEncoding.EncodeToString(ct))
+	if err := addProperties(ed, opts); err != nil {
+		return nil, err
+	}
 	return ed, nil
 }
 
-// emitWith returns the canonical octets of doc with parent's children
-// replaced by kids, which include the new nodes added, and restores parent.
-func emitWith(doc, parent *xdm.Node, kids []*xdm.Node, added ...*xdm.Node) ([]byte, error) {
-	saved := parent.Children
-	for _, n := range added {
-		parent.AppendChild(n)
-	}
-	parent.Children = kids
-	defer func() { parent.Children = saved }()
-	return c14n.Bytes(doc.Root(), c14n.Options{Algorithm: c14n.Inclusive10WithComments})
+// emit returns the canonical octets of a copy of doc with e applied. doc
+// itself is left as it was.
+func emit(doc *xdm.Node, e *xmltree.Edits) ([]byte, error) {
+	root, _ := xmltree.Rebuild(doc, e)
+	return c14n.Bytes(root, c14n.Options{Algorithm: c14n.Inclusive10WithComments})
 }
 
 // replaceElement encrypts target and emits doc with wrap(EncryptedData) in
 // target's place.
 func replaceElement(doc, target *xdm.Node, sessionKey []byte, opts EncryptOptions, wrap func(*xdm.Node) (*xdm.Node, error)) ([]byte, error) {
-	plain, err := elementPlaintext(target, target.Parent)
+	plain, err := elementPlaintext(target, target.Parent())
 	if err != nil {
 		return nil, err
 	}
@@ -169,9 +165,9 @@ func replaceElement(doc, target *xdm.Node, sessionKey []byte, opts EncryptOption
 	if err != nil {
 		return nil, err
 	}
-	kids := slices.Clone(target.Parent.Children)
-	kids[slices.Index(kids, target)] = repl
-	return emitWith(doc, target.Parent, kids, repl)
+	var e xmltree.Edits
+	e.ReplaceNode(target, repl)
+	return emit(doc, &e)
 }
 
 // EncryptElement replaces target with an xenc:EncryptedData of Type
@@ -195,8 +191,8 @@ func EncryptElement(doc *xdm.Node, target *xdm.Node, sessionKey []byte, opts Enc
 	}
 	switch {
 	case isSOAP(target, "Envelope") || isSOAP(target, "Header") || isSOAP(target, "Body"):
-		return nil, fmt.Errorf("xenc: a SOAP %s must not be encrypted", target.Name.Local)
-	case isSOAP(target.Parent, "Header"):
+		return nil, fmt.Errorf("xenc: a SOAP %s must not be encrypted", target.Name().Local)
+	case isSOAP(target.Parent(), "Header"):
 		return nil, errors.New("xenc: a SOAP header block must be encrypted with EncryptHeader")
 	}
 	return replaceElement(doc, target, sessionKey, opts, func(ed *xdm.Node) (*xdm.Node, error) { return ed, nil })
@@ -222,13 +218,13 @@ func EncryptContent(doc *xdm.Node, target *xdm.Node, sessionKey []byte, opts Enc
 		return nil, err
 	}
 	if isSOAP(target, "Envelope") || isSOAP(target, "Header") {
-		return nil, fmt.Errorf("xenc: the content of a SOAP %s must not be encrypted", target.Name.Local)
+		return nil, fmt.Errorf("xenc: the content of a SOAP %s must not be encrypted", target.Name().Local)
 	}
 	var plain []byte
-	for _, c := range target.Children {
+	for c := range target.Children() {
 		var b []byte
 		var err error
-		if c.Kind == xdm.KindElement {
+		if c.Kind() == xdm.KindElement {
 			b, err = elementPlaintext(c, target)
 		} else {
 			b, err = c14n.BytesNodeSet(c14n.Func(c, func(n *xdm.Node) bool { return n == c }),
@@ -246,7 +242,20 @@ func EncryptContent(doc *xdm.Node, target *xdm.Node, sessionKey []byte, opts Enc
 	if err != nil {
 		return nil, err
 	}
-	return emitWith(doc, target, []*xdm.Node{ed}, ed)
+	var e xmltree.Edits
+	first := true
+	for c := range target.Children() {
+		if first {
+			e.ReplaceNode(c, ed)
+		} else {
+			e.ReplaceNode(c)
+		}
+		first = false
+	}
+	if first {
+		e.Insert(target, 0, ed)
+	}
+	return emit(doc, &e)
 }
 
 // DecryptData decrypts an xenc:EncryptedData whose ciphertext is inline in

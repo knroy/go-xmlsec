@@ -9,10 +9,10 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/swa"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/swa"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // EncryptAttachment encrypts an attachment and returns the ciphertext plus
@@ -67,7 +67,13 @@ func EncryptAttachment(att *xmlsec.Attachment, sessionKey []byte, transform stri
 	default:
 		return nil, nil, fmt.Errorf("%w: attachment transform %q", xmlsec.ErrUnsupportedAlgorithm, transform)
 	}
-	ed, err := newEncryptedData(transform, opts)
+	mt := contentType(att)
+	if mt == "" && transform == xmlsec.TransformAttachmentContentOnly {
+		// SwA profile sections 5.5.2 step 4 and 5.4.1 rule 2: a part
+		// without a Content-Type has this one.
+		mt = defaultContentType
+	}
+	ed, err := newEncryptedData(transform, mt, opts)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -78,21 +84,13 @@ func EncryptAttachment(att *xmlsec.Attachment, sessionKey []byte, transform stri
 	if err != nil {
 		return nil, nil, err
 	}
-	mt := contentType(att)
-	if mt == "" && transform == xmlsec.TransformAttachmentContentOnly {
-		// SwA profile sections 5.5.2 step 4 and 5.4.1 rule 2: a part
-		// without a Content-Type has this one.
-		mt = defaultContentType
-	}
-	if mt != "" {
-		xmltree.SetAttr(ed, "", "", "MimeType", mt)
-	}
-	cd := element(ed, "CipherData")
-	place(ed)
-	cr := element(cd, "CipherReference")
+	cr := element(element(ed, "CipherData"), "CipherReference")
 	xmltree.SetAttr(cr, "", "", "URI", "cid:"+cidEscape(att.ID))
 	tr := nsElement(element(cr, "Transforms"), "ds", xmlsec.NSDSig, "Transform")
 	xmltree.SetAttr(tr, "", "", "Algorithm", xmlsec.TransformAttachmentCiphertext)
+	if err := addProperties(ed, opts); err != nil {
+		return nil, nil, err
+	}
 	return ct, ed, nil
 }
 

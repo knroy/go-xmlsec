@@ -6,17 +6,17 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // content returns the children of the document element of s.
 func content(t *testing.T, s string) []*xdm.Node {
 	t.Helper()
-	return xmltree.DocumentElement(parse(t, []byte(s))).Children
+	return slices.Collect(xmltree.DocumentElement(parse(t, []byte(s))).Children())
 }
 
 // enveloping signs with no document and returns the signature serialized
@@ -27,8 +27,8 @@ func enveloping(t *testing.T, opts dsig.SignOptions) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	doc := &xdm.Node{Kind: xdm.KindDocument}
-	doc.AppendChild(sig)
+	doc := xdm.NewNode(xdm.KindDocument, xdm.QName{}, "")
+	doc.AppendCopy(sig)
 	return serialize(t, doc), nil
 }
 
@@ -83,7 +83,7 @@ func TestEnvelopingSignature(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(cov.SignedElementIDs, []string{"obj", "prop", "ki"}) || cov.SignedElements[0].Name.Local != "Object" {
+	if !slices.Equal(cov.SignedElementIDs, []string{"obj", "prop", "ki"}) || cov.SignedElements[0].Name().Local != "Object" {
 		t.Fatalf("coverage %v", cov.SignedElementIDs)
 	}
 
@@ -106,11 +106,11 @@ func TestObjectInDetachedSignature(t *testing.T) {
 		References:                []dsig.Reference{ref("#a"), ref("#obj")},
 		Objects:                   []dsig.Object{{ID: "obj", Content: content(t, `<r>data</r>`)}},
 	}
-	sig, err := dsig.Sign(doc, newKey(t, rsaKey), opts)
+	sig, err := signAt(&doc, newKey(t, rsaKey), opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	xmltree.DocumentElement(doc).AppendChild(sig)
+	doc = appendChild(xmltree.DocumentElement(doc), sig)
 	signed := serialize(t, doc)
 	got := parse(t, signed)
 	if _, err := dsig.Verify(got, findSignature(got), dsig.VerifyOptions{PublicKey: &rsaKey.PublicKey}); err != nil {
@@ -125,7 +125,7 @@ func TestObjectInDetachedSignature(t *testing.T) {
 	// Id is ambiguous.
 	opts.IDAttributes = []xdm.QName{dsig.IDAttrDSig}
 	opts.Parent = xmltree.DocumentElement(doc)
-	if _, err := dsig.Sign(doc, newKey(t, rsaKey), opts); !errors.Is(err, xmlsec.ErrAmbiguousID) {
+	if _, err := signAt(&doc, newKey(t, rsaKey), opts); !errors.Is(err, xmlsec.ErrAmbiguousID) {
 		t.Fatalf("the first signature's Object still stands: %v", err)
 	}
 }
@@ -150,7 +150,7 @@ func TestOwnIDs(t *testing.T) {
 }
 
 func TestObjectRefusals(t *testing.T) {
-	attr := &xdm.Node{Kind: xdm.KindAttribute, Name: xdm.QName{Local: "a"}}
+	attr := xdm.NewNode(xdm.KindAttribute, xdm.QName{Local: "a"}, "")
 	el := content(t, `<r xmlns:t="urn:t"><t:x/></r>`)
 	cases := []struct {
 		name string
@@ -162,7 +162,7 @@ func TestObjectRefusals(t *testing.T) {
 		{"nil content", func(o *dsig.SignOptions) { o.Objects = []dsig.Object{{Content: []*xdm.Node{nil}}} }, xmlsec.ErrMalformed},
 		{"attribute content", func(o *dsig.SignOptions) { o.Objects = []dsig.Object{{Content: []*xdm.Node{attr}}} }, xmlsec.ErrMalformed},
 		{"document content", func(o *dsig.SignOptions) {
-			o.Objects = []dsig.Object{{Content: []*xdm.Node{{Kind: xdm.KindDocument}}}}
+			o.Objects = []dsig.Object{{Content: []*xdm.Node{xdm.NewNode(xdm.KindDocument, xdm.QName{}, "")}}}
 		}, xmlsec.ErrMalformed},
 		{"property ID", func(o *dsig.SignOptions) { o.Properties = []dsig.SignatureProperty{{ID: "a:b", Content: el}} }, xmlsec.ErrMalformed},
 		{"property without Target or SignatureID", func(o *dsig.SignOptions) {

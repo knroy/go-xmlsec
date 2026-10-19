@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
 )
 
 // Resource limits, set explicitly so that a change to an upstream default

@@ -10,9 +10,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // PBKDF2 iteration counts (XML Encryption 1.1 section 5.4.2).
@@ -115,7 +115,7 @@ func positiveInteger(e *xdm.Node) (int, error) {
 		return 0, err
 	}
 	if err != nil || n <= 0 {
-		return 0, malformed("%s %q is not a positive integer", e.Name.Local, e.StringValue())
+		return 0, malformed("%s %q is not a positive integer", e.Name().Local, e.StringValue())
 	}
 	return n, nil
 }

@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // Find returns the one element of n's document carrying id in wsu:Id,
@@ -20,8 +20,8 @@ func Find(n *xdm.Node, id string, extra ...xdm.QName) (*xdm.Node, error) {
 	var found *xdm.Node
 	count := 0
 	xmltree.Walk(n.Root(), func(e *xdm.Node) {
-		for _, a := range e.Attrs {
-			if a.Value == id && slices.ContainsFunc(counted, a.Name.Equal) {
+		for a := range e.Attrs() {
+			if a.Value() == id && slices.ContainsFunc(counted, a.Name().Equal) {
 				found = e
 				count++
 			}

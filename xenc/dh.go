@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // Finite-field Diffie-Hellman group sizes accepted, in bits of P.
@@ -211,15 +211,15 @@ func dhOriginatorKey(oki *xdm.Node, priv *DHPrivateKey) (*big.Int, error) {
 	names := make([]string, len(kids))
 	vals := map[string]*big.Int{}
 	for i, k := range kids {
-		if k.Name.URI != xmlsec.NSXEnc {
-			return nil, malformed("%s in xenc:DHKeyValue", k.Name.Local)
+		if k.Name().URI != xmlsec.NSXEnc {
+			return nil, malformed("%s in xenc:DHKeyValue", k.Name().Local)
 		}
 		b, err := xmltree.Base64(k)
 		if err != nil {
-			return nil, malformed("xenc:%s: %v", k.Name.Local, err)
+			return nil, malformed("xenc:%s: %v", k.Name().Local, err)
 		}
-		names[i] = k.Name.Local
-		vals[k.Name.Local] = new(big.Int).SetBytes(b)
+		names[i] = k.Name().Local
+		vals[k.Name().Local] = new(big.Int).SetBytes(b)
 	}
 	switch strings.TrimSuffix(strings.Join(names, " "), " seed pgenCounter") {
 	case "Public":

@@ -11,14 +11,15 @@ import (
 	"encoding/base64"
 	"errors"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 var covECKey = func() *ecdsa.PrivateKey {
@@ -239,7 +240,7 @@ func resignSI(t *testing.T, sig *xdm.Node, alg c14n.Algorithm) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	value.Children[0].Value = base64.StdEncoding.EncodeToString(v)
+	value.FirstChild().SetValue(base64.StdEncoding.EncodeToString(v))
 }
 
 // signForImplicit signs doc with an enveloped reference whose explicit
@@ -264,7 +265,11 @@ func signForImplicit(t *testing.T, siAlg c14n.Algorithm) (*xdm.Node, *xdm.Node, 
 	doc := parse(t, signed)
 	sig := findSignature(doc)
 	transforms := sig.ChildElements()[0].ChildElements()[2].ChildElements()[0]
-	transforms.Children = transforms.Children[:1] // enveloped-signature only
+	var e xmltree.Edits
+	for _, c := range slices.Collect(transforms.Children())[1:] { // enveloped-signature only
+		e.ReplaceNode(c)
+	}
+	doc, sig = rebuilt(doc, sig, &e)
 	resignSI(t, sig, siAlg)
 	return doc, sig, key
 }
@@ -294,7 +299,7 @@ func TestImplicitCanonicalization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := dsig.Sign(tree.Root, key, dsig.SignOptions{
+	s, err := dsig.Sign(xmlsec.NewDocument(tree.Root), key, dsig.SignOptions{
 		SignatureAlgorithm:        xmlsec.SigRSASHA256,
 		CanonicalizationAlgorithm: string(c14n.Exclusive10),
 		References: []dsig.Reference{{URI: "#a", DigestAlgorithm: xmlsec.DigestSHA256,
@@ -303,11 +308,13 @@ func TestImplicitCanonicalization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref := s.ChildElements()[0].ChildElements()[2]
-	ref.Children = ref.Children[1:] // drop ds:Transforms
-	xmltree.DocumentElement(tree.Root).AppendChild(s)
+	var e xmltree.Edits
+	e.ReplaceNode(s.ChildElements()[0].ChildElements()[2].FirstChild()) // drop ds:Transforms
+	s, _ = xmltree.Rebuild(s, &e)
+	doc = appendChild(xmltree.DocumentElement(tree.Root), s)
+	s = findSignature(doc)
 	resignSI(t, s, c14n.Exclusive10)
-	if cov, err := dsig.Verify(tree.Root, s, dsig.VerifyOptions{Certificate: key.Certificate}); err != nil || !cov.Covers("a") {
+	if cov, err := dsig.Verify(doc, s, dsig.VerifyOptions{Certificate: key.Certificate}); err != nil || !cov.Covers("a") {
 		t.Fatalf("no transforms: %v", err)
 	}
 }
@@ -316,10 +323,15 @@ func TestImplicitCanonicalization(t *testing.T) {
 // certificate, as most SMP software emits; they must describe it. A CRL and a
 // ds:KeyName beside are reported, not used.
 func TestX509DataDescriptiveElements(t *testing.T) {
-	add := func(parent *xdm.Node, local, text string) *xdm.Node {
-		e := xmltree.Element(parent, "ds", xmlsec.NSDSig, local)
+	// el builds a detached ds element holding text.
+	el := func(local, text string) *xdm.Node {
+		e := xmltree.Element(nil, "ds", xmlsec.NSDSig, local)
 		xmltree.Text(e, text)
 		return e
+	}
+	// add records el(local, text) appended to parent.
+	add := func(e *xmltree.Edits, parent *xdm.Node, local, text string) {
+		e.Insert(parent, parent.NumChildren(), el(local, text))
 	}
 	keyInfo := func(t *testing.T) (*xdm.Node, *xdm.Node, *xdm.Node) {
 		doc := parse(t, signEnveloped(t, newKey(t, rsaKey), xmlsec.SigRSASHA256, xmlsec.DigestSHA256))
@@ -329,35 +341,44 @@ func TestX509DataDescriptiveElements(t *testing.T) {
 	}
 	cases := []struct {
 		name string
-		mod  func(ki *xdm.Node)
+		mod  func(e *xmltree.Edits, ki *xdm.Node)
 		want error
 	}{
-		{"subject name and issuer-serial", func(ki *xdm.Node) {
+		{"subject name and issuer-serial", func(e *xmltree.Edits, ki *xdm.Node) {
 			x := ki.ChildElements()[0]
-			add(x, "X509SubjectName", "CN=test")
-			is := xmltree.Element(x, "ds", xmlsec.NSDSig, "X509IssuerSerial")
-			add(is, "X509IssuerName", "CN=test")
-			add(is, "X509SerialNumber", "1")
+			add(e, x, "X509SubjectName", "CN=test")
+			is := xmltree.Element(nil, "ds", xmlsec.NSDSig, "X509IssuerSerial")
+			is.AppendCopy(el("X509IssuerName", "CN=test"))
+			is.AppendCopy(el("X509SerialNumber", "1"))
+			e.Insert(x, x.NumChildren(), is)
 		}, nil},
 		// A stale descriptor beside the certificate selects nothing and is
 		// ignored unless VerifyOptions.StrictX509Data (TestX509Descriptors).
-		{"a second X509Data with another SKI", func(ki *xdm.Node) {
-			add(xmltree.Element(ki, "ds", xmlsec.NSDSig, "X509Data"), "X509SKI", "AAAA")
+		{"a second X509Data with another SKI", func(e *xmltree.Edits, ki *xdm.Node) {
+			x := xmltree.Element(nil, "ds", xmlsec.NSDSig, "X509Data")
+			x.AppendCopy(el("X509SKI", "AAAA"))
+			e.Insert(ki, ki.NumChildren(), x)
 		}, nil},
-		{"another subject name", func(ki *xdm.Node) { add(ki.ChildElements()[0], "X509SubjectName", "CN=other") }, nil},
+		{"another subject name", func(e *xmltree.Edits, ki *xdm.Node) { add(e, ki.ChildElements()[0], "X509SubjectName", "CN=other") }, nil},
 		// XML-DSig 4.5.4: two certificates for one key are one leaf.
-		{"the certificate twice", func(ki *xdm.Node) {
+		{"the certificate twice", func(e *xmltree.Edits, ki *xdm.Node) {
 			x := ki.ChildElements()[0]
-			add(x, "X509Certificate", x.ChildElements()[0].StringValue())
+			add(e, x, "X509Certificate", x.ChildElements()[0].StringValue())
 		}, nil},
-		{"a CRL", func(ki *xdm.Node) { add(ki.ChildElements()[0], "X509CRL", "AAAA") }, nil},
-		{"a KeyName beside X509Data", func(ki *xdm.Node) { add(ki, "KeyName", "k") }, nil},
-		{"no certificate", func(ki *xdm.Node) { ki.Children = nil }, xmlsec.ErrUnsupportedKeyInfo},
+		{"a CRL", func(e *xmltree.Edits, ki *xdm.Node) { add(e, ki.ChildElements()[0], "X509CRL", "AAAA") }, nil},
+		{"a KeyName beside X509Data", func(e *xmltree.Edits, ki *xdm.Node) { add(e, ki, "KeyName", "k") }, nil},
+		{"no certificate", func(e *xmltree.Edits, ki *xdm.Node) {
+			for c := range ki.Children() {
+				e.ReplaceNode(c)
+			}
+		}, xmlsec.ErrUnsupportedKeyInfo},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			doc, sig, ki := keyInfo(t)
-			c.mod(ki)
+			var e xmltree.Edits
+			c.mod(&e, ki)
+			doc, sig = rebuilt(doc, sig, &e)
 			if _, err := dsig.Verify(doc, sig, dsig.VerifyOptions{}); !errors.Is(err, c.want) && !(c.want == nil && err == nil) {
 				t.Fatalf("got %v, want %v", err, c.want)
 			}
@@ -371,8 +392,12 @@ func TestHMACReportedAsNotAllowed(t *testing.T) {
 	doc := parse(t, signEnveloped(t, newKey(t, rsaKey), xmlsec.SigRSASHA256, xmlsec.DigestSHA256))
 	sig := findSignature(doc)
 	sm := sig.ChildElements()[0].ChildElements()[1]
-	sm.Attr("", "Algorithm").Value = "http://www.w3.org/2000/09/xmldsig#hmac-sha1"
-	xmltree.Text(xmltree.Element(sm, "ds", xmlsec.NSDSig, "HMACOutputLength"), "160")
+	sm.Attr("", "Algorithm").SetValue("http://www.w3.org/2000/09/xmldsig#hmac-sha1")
+	hl := xmltree.Element(nil, "ds", xmlsec.NSDSig, "HMACOutputLength")
+	xmltree.Text(hl, "160")
+	var e xmltree.Edits
+	e.Insert(sm, 0, hl)
+	doc, sig = rebuilt(doc, sig, &e)
 	if _, err := dsig.Verify(doc, sig, dsig.VerifyOptions{}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) {
 		t.Fatalf("got %v", err)
 	}
@@ -538,7 +563,7 @@ func TestStrictSecurityTokenReference(t *testing.T) {
 // panic, even when asked about nothing.
 func TestCoverageNil(t *testing.T) {
 	var c *dsig.Coverage
-	if c.Covers() || c.Covers("a") || c.CoversNodes() || c.CoversNodes(&xdm.Node{}) || c.CoversAttachments() || c.CoversAttachments("a") {
+	if c.Covers() || c.Covers("a") || c.CoversNodes() || c.CoversNodes(xdm.NewNode(xdm.KindDocument, xdm.QName{}, "")) || c.CoversAttachments() || c.CoversAttachments("a") {
 		t.Fatal("a nil Coverage covers something")
 	}
 }

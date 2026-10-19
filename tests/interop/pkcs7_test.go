@@ -15,11 +15,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/wss"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/wss"
 )
 
 // PKCS7 tokens against the JDK's own PKCS#7 codec (sun.security.pkcs),
@@ -52,11 +52,12 @@ func TestPKCS7TokenWithJDK(t *testing.T) {
 	leafPEM := tempFile(t, "leaf.pem", pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
 
 	doc := parse(t, []byte(envelope))
-	bodyID, err := wss.AssignID(doc, xmltree.DocumentElement(doc).ChildElements()[1])
+	d := xmlsec.NewDocument(doc)
+	bodyID, err := wss.AssignID(d, xmltree.DocumentElement(doc).ChildElements()[1])
 	if err != nil {
 		t.Fatal(err)
 	}
-	hdr, err := wss.NewHeader(doc, xmlsec.NSSOAP12, "", true)
+	hdr, err := wss.NewHeader(d, xmlsec.NSSOAP12, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +65,7 @@ func TestPKCS7TokenWithJDK(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sig, err := dsig.Sign(doc, xmlsec.KeyProvider{Signer: leafKey, Certificate: leaf}, dsig.SignOptions{
+	sig, err := dsig.Sign(d, xmlsec.KeyProvider{Signer: leafKey, Certificate: leaf}, dsig.SignOptions{
 		SignatureAlgorithm:        xmlsec.SigRSASHA256,
 		CanonicalizationAlgorithm: string(c14n.Exclusive10),
 		References:                []dsig.Reference{{URI: "#" + bodyID, Transforms: []dsig.TransformSpec{{Algorithm: string(c14n.Exclusive10)}}, DigestAlgorithm: xmlsec.DigestSHA256}},
@@ -77,6 +78,7 @@ func TestPKCS7TokenWithJDK(t *testing.T) {
 	if err := hdr.Append(sig); err != nil {
 		t.Fatal(err)
 	}
+	doc = d.Root()
 	signed, err := c14n.Bytes(doc, c14n.Options{Algorithm: c14n.Inclusive10})
 	if err != nil {
 		t.Fatal(err)

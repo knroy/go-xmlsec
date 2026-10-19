@@ -17,9 +17,9 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/hashes"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/hashes"
 )
 
 // legacy lists every decryption-only algorithm. No encryption path accepts

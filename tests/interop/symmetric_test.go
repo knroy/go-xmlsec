@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/wss"
-	"github.com/knroy/go-xmlsec/xenc"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/wss"
+	"github.com/knroy/go-xmlsec/v2/xenc"
 )
 
 // tokenTypeEncryptedKey is the ValueType and TokenType of a reference to an
@@ -24,8 +24,8 @@ const tokenTypeEncryptedKey = "http://docs.oasis-open.org/wss/oasis-wss-soap-mes
 // EncryptedKey by a SecurityTokenReference (EncryptOptions.DataKeyInfo).
 func TestWSS4JProcessesOurSymmetricEncryption(t *testing.T) {
 	recipient := newKeypair(t, rsaKey(t))
-	doc := parse(t, []byte(envelope))
-	hdr, err := wss.NewHeader(doc, xmlsec.NSSOAP12, "", true)
+	d := xmlsec.NewDocument(parse(t, []byte(envelope)))
+	hdr, err := wss.NewHeader(d, xmlsec.NSSOAP12, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,18 +36,11 @@ func TestWSS4JProcessesOurSymmetricEncryption(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer clear(ek.SessionKey)
-	ekID, err := wss.AssignID(doc, ek.Element)
-	if err != nil {
-		t.Fatal(err)
-	}
 	recip, err := wss.NewIssuerSerialReference(recipient.provider.Certificate)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := ek.SetKeyInfo(recip); err != nil {
-		t.Fatal(err)
-	}
-	if opts.DataKeyInfo, err = wss.NewSecurityTokenReference(doc, ekID, tokenTypeEncryptedKey); err != nil {
 		t.Fatal(err)
 	}
 	list, err := wss.NewReferenceList("ED-body", "ED-header")
@@ -60,12 +53,20 @@ func TestWSS4JProcessesOurSymmetricEncryption(t *testing.T) {
 	if err := hdr.Prepend(ek.Element); err != nil {
 		t.Fatal(err)
 	}
-	opts.DataID = "ED-body"
-	out, err := xenc.EncryptContent(doc, xmltree.DocumentElement(doc).ChildElements()[1], ek.SessionKey, opts)
+	// The EncryptedKey's ID goes on its placed copy.
+	ekID, err := wss.AssignID(d, d.Node(ek.Element))
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc = parse(t, out)
+	if opts.DataKeyInfo, err = wss.NewSecurityTokenReference(d.Root(), ekID, tokenTypeEncryptedKey); err != nil {
+		t.Fatal(err)
+	}
+	opts.DataID = "ED-body"
+	out, err := xenc.EncryptContent(d.Root(), xmltree.DocumentElement(d.Root()).ChildElements()[1], ek.SessionKey, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := parse(t, out)
 	opts.DataID = "ED-header"
 	if out, err = xenc.EncryptHeader(doc, find(doc, "urn:example:eb", "Messaging"), find(doc, xmlsec.NSWSSE, "Security"), ek.SessionKey, opts); err != nil {
 		t.Fatal(err)
@@ -117,8 +118,8 @@ func TestWeDecryptWSS4JSymmetricEncryption(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if ed.Parent.IsElement(xmlsec.NSWSSE11, "EncryptedHeader") {
-			out, err := xenc.DecryptHeader(doc, ed.Parent, key, strict)
+		if ed.Parent().IsElement(xmlsec.NSWSSE11, "EncryptedHeader") {
+			out, err := xenc.DecryptHeader(doc, ed.Parent(), key, strict)
 			if err != nil || !strings.Contains(string(out), "<eb:MessageId>m1</eb:MessageId></eb:Messaging>") {
 				t.Fatalf("header: %v\n%s", err, out)
 			}

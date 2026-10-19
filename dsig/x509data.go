@@ -15,10 +15,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/certpath"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/certpath"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // maxX509Certificates bounds the ds:X509Certificate elements one ds:KeyInfo
@@ -175,8 +175,8 @@ func (c *keyContext) readX509Data(els []*xdm.Node) (x509Data, error) {
 	var d x509Data
 	for _, x := range els {
 		for _, e := range x.ChildElements() {
-			local := e.Name.Local
-			if e.Name.URI != xmlsec.NSDSig && e.Name.URI != xmlsec.NSDSig11 {
+			local := e.Name().Local
+			if e.Name().URI != xmlsec.NSDSig && e.Name().URI != xmlsec.NSDSig11 {
 				continue // XML-DSig 4.5.4: external elements from other namespaces
 			}
 			var b []byte

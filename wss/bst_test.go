@@ -8,13 +8,14 @@ import (
 	"crypto/x509/pkix"
 	"errors"
 	"math/big"
-	"slices"
+	"regexp"
 	"testing"
 	"time"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 func testCert(t *testing.T, cn string) *x509.Certificate {
@@ -53,7 +54,7 @@ func TestBinarySecurityTokenRoundTrip(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			doc := parseDoc(t, env11)
+			doc := newDoc(t, env11)
 			h, err := NewHeader(doc, xmlsec.NSSOAP11, "", false)
 			if err != nil {
 				t.Fatal(err)
@@ -62,11 +63,11 @@ func TestBinarySecurityTokenRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			str, err := NewSecurityTokenReference(doc, id, c.valueType)
+			str, err := NewSecurityTokenReference(doc.Root(), id, c.valueType)
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := ResolveSecurityTokenReference(doc, str)
+			got, err := ResolveSecurityTokenReference(doc.Root(), str)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -79,7 +80,7 @@ func TestBinarySecurityTokenRoundTrip(t *testing.T) {
 
 func TestAddBinarySecurityTokenErrors(t *testing.T) {
 	cert := testCert(t, "c")
-	h, err := NewHeader(parseDoc(t, env11), xmlsec.NSSOAP11, "", false)
+	h, err := NewHeader(newDoc(t, env11), xmlsec.NSSOAP11, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,25 +101,39 @@ func TestAddBinarySecurityTokenErrors(t *testing.T) {
 // BSP requires the attribute (R3029).
 func TestBinarySecurityTokenDefaultEncoding(t *testing.T) {
 	f := newStrictFixture(t)
-	tok, err := FindByID(f.doc, f.v3)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tok.Attrs = slices.DeleteFunc(tok.Attrs, func(a *xdm.Node) bool { return a.Name.Local == "EncodingType" })
-	if got, err := ParseBinarySecurityToken(tok); err != nil || !got.Equal(f.cert) {
-		t.Fatalf("no EncodingType: %v", err)
-	}
-	str, err := NewSecurityTokenReference(f.doc, f.v3, "")
+	str, err := NewSecurityTokenReference(f.doc.Root(), f.v3, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := f.h.Append(str); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ResolveSecurityTokenReference(f.doc, str); err != nil {
+	// A parsed tree cannot lose an attribute: drop it from the octets.
+	out, err := c14n.Bytes(f.doc.Root(), c14n.Options{Algorithm: c14n.Inclusive10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := parseDoc(t, regexp.MustCompile(` EncodingType="[^"]*"`).ReplaceAllString(string(out), ""))
+	tok, err := FindByID(doc, f.v3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tok.Attr("", "EncodingType") != nil {
+		t.Fatal("EncodingType still there")
+	}
+	if got, err := ParseBinarySecurityToken(tok); err != nil || !got.Equal(f.cert) {
+		t.Fatalf("no EncodingType: %v", err)
+	}
+	str = nil
+	xmltree.Walk(doc, func(e *xdm.Node) {
+		if e.IsElement(xmlsec.NSWSSE, "SecurityTokenReference") {
+			str = e
+		}
+	})
+	if _, err := ResolveSecurityTokenReference(doc, str); err != nil {
 		t.Fatalf("lenient: %v", err)
 	}
-	if _, err := ResolveSecurityTokenReferenceStrict(f.doc, str); !errors.Is(err, xmlsec.ErrMalformed) {
+	if _, err := ResolveSecurityTokenReferenceStrict(doc, str); !errors.Is(err, xmlsec.ErrMalformed) {
 		t.Fatalf("strict: %v", err)
 	}
 }

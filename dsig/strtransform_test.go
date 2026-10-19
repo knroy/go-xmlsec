@@ -5,16 +5,15 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"errors"
-	"slices"
 	"strings"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/wss"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/wss"
 )
 
 var strTransform = []dsig.TransformSpec{{Algorithm: xmlsec.TransformSTR}}
@@ -23,10 +22,10 @@ var strTransform = []dsig.TransformSpec{{Algorithm: xmlsec.TransformSTR}}
 // certificate and a wsse:SecurityTokenReference after it in the header,
 // made by mkSTR, and signs the Body and, through the STR Dereference
 // Transform, the reference's token. It returns the signed message.
-func signSTR(t *testing.T, key xmlsec.KeyProvider, mkSTR func(doc *xdm.Node, tokID string) *xdm.Node, edit func(*dsig.SignOptions)) []byte {
+func signSTR(t *testing.T, key xmlsec.KeyProvider, mkSTR func(doc *xmlsec.Document, tokID string) *xdm.Node, edit func(*dsig.SignOptions)) []byte {
 	t.Helper()
-	doc := parse(t, []byte(envelope))
-	body := xmltree.DocumentElement(doc).ChildElements()[1]
+	doc := xmlsec.NewDocument(parse(t, []byte(envelope)))
+	body := xmltree.DocumentElement(doc.Root()).ChildElements()[1]
 	bodyID, err := wss.AssignID(doc, body)
 	if err != nil {
 		t.Fatal(err)
@@ -71,12 +70,12 @@ func signSTR(t *testing.T, key xmlsec.KeyProvider, mkSTR func(doc *xdm.Node, tok
 			t.Fatal(err)
 		}
 	}
-	return serialize(t, doc)
+	return serialize(t, doc.Root())
 }
 
-func directSTR(t *testing.T) func(*xdm.Node, string) *xdm.Node {
-	return func(doc *xdm.Node, tokID string) *xdm.Node {
-		str, err := wss.NewSecurityTokenReference(doc, tokID, "")
+func directSTR(t *testing.T) func(*xmlsec.Document, string) *xdm.Node {
+	return func(doc *xmlsec.Document, tokID string) *xdm.Node {
+		str, err := wss.NewSecurityTokenReference(doc.Root(), tokID, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -84,8 +83,8 @@ func directSTR(t *testing.T) func(*xdm.Node, string) *xdm.Node {
 	}
 }
 
-func keyIdentifierSTR(t *testing.T, cert *x509.Certificate) func(*xdm.Node, string) *xdm.Node {
-	return func(*xdm.Node, string) *xdm.Node {
+func keyIdentifierSTR(t *testing.T, cert *x509.Certificate) func(*xmlsec.Document, string) *xdm.Node {
+	return func(*xmlsec.Document, string) *xdm.Node {
 		str, err := wss.NewKeyIdentifierReference(cert)
 		if err != nil {
 			t.Fatal(err)
@@ -184,14 +183,18 @@ func TestSTRTransformKeyIdentifier(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tok := cov.SignedTokens[0]; tok.Parent != nil || tok.AttrValue("ValueType") != xmlsec.BSTValueTypeX509v3 || tok.Attr("", "EncodingType") != nil {
+	if tok := cov.SignedTokens[0]; tok.Parent() != nil || tok.AttrValue("ValueType") != xmlsec.BSTValueTypeX509v3 || tok.Attr("", "EncodingType") != nil {
 		t.Fatalf("built token %+v", tok)
 	}
 
 	// An unprefixed reference gets the wsse prefix, as in WSS4J.
-	signed = signSTR(t, key, func(doc *xdm.Node, tokID string) *xdm.Node {
+	signed = signSTR(t, key, func(doc *xmlsec.Document, tokID string) *xdm.Node {
 		str := keyIdentifierSTR(t, key.Certificate)(doc, tokID)
-		str.Name.Prefix, str.ChildElements()[0].Name.Prefix = "", ""
+		for _, e := range []*xdm.Node{str, str.ChildElements()[0]} {
+			name := e.Name()
+			name.Prefix = ""
+			e.SetName(name)
+		}
 		str.AddNamespace("", xmlsec.NSWSSE)
 		return str
 	}, func(o *dsig.SignOptions) { o.ResolveSecurityToken = resolve })
@@ -213,25 +216,27 @@ func TestSTRTransformKeyIdentifier(t *testing.T) {
 // A wsse:Embedded token (section 7.4) is dereferenced where it stands.
 func TestSTRTransformEmbedded(t *testing.T) {
 	key := newKey(t, rsaKey)
-	signed := signSTR(t, key, func(doc *xdm.Node, tokID string) *xdm.Node {
-		tok, err := wss.FindByID(doc, tokID)
+	signed := signSTR(t, key, func(doc *xmlsec.Document, tokID string) *xdm.Node {
+		tok, err := wss.FindByID(doc.Root(), tokID)
 		if err != nil {
 			t.Fatal(err)
 		}
 		str := xmltree.Element(nil, "wsse", xmlsec.NSWSSE, "SecurityTokenReference")
 		str.AddNamespace("wsse", xmlsec.NSWSSE)
-		emb := xmltree.Element(str, "wsse", xmlsec.NSWSSE, "Embedded")
+		xmltree.Element(str, "wsse", xmlsec.NSWSSE, "Embedded").AppendCopy(tok)
 		// Moved into the reference: the header keeps no copy.
-		tok.Parent.Children = tok.Parent.Children[1:]
-		tok.Parent = nil
-		emb.AppendChild(tok)
+		var e xmltree.Edits
+		e.ReplaceNode(tok)
+		if _, err := xmltree.DocOf(doc).Apply(&e); err != nil {
+			t.Fatal(err)
+		}
 		return str
 	}, nil)
 	cov, err := verifySTR(t, signed, dsig.VerifyOptions{Certificate: key.Certificate})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cov.SignedTokens[0].Parent.IsElement(xmlsec.NSWSSE, "Embedded") {
+	if !cov.SignedTokens[0].Parent().IsElement(xmlsec.NSWSSE, "Embedded") {
 		t.Fatalf("coverage %+v", cov)
 	}
 }
@@ -242,7 +247,7 @@ func TestSTRTransformSignRefusals(t *testing.T) {
 	key := newKey(t, rsaKey)
 	doc, tokID, bodyID := covTokenDoc(t, key)
 	sign := func(uri string, ts ...dsig.TransformSpec) error {
-		_, err := dsig.Sign(doc, key, dsig.SignOptions{
+		_, err := signAt(&doc, key, dsig.SignOptions{
 			SignatureAlgorithm:        xmlsec.SigRSASHA256,
 			CanonicalizationAlgorithm: string(c14n.Exclusive10),
 			References:                []dsig.Reference{{URI: uri, Transforms: ts, DigestAlgorithm: xmlsec.DigestSHA256}},
@@ -269,7 +274,7 @@ func TestSTRTransformSignRefusals(t *testing.T) {
 // signKeyIdentifierNoResolver signs a key identifier reference through the
 // transform without a resolver, returning Sign's error.
 func signKeyIdentifierNoResolver(t *testing.T, key xmlsec.KeyProvider) error {
-	doc := parse(t, []byte(envelope))
+	doc := xmlsec.NewDocument(parse(t, []byte(envelope)))
 	hdr, err := wss.NewHeader(doc, xmlsec.NSSOAP12, "", false)
 	if err != nil {
 		t.Fatal(err)
@@ -346,7 +351,7 @@ func TestSTRTransformSignFailures(t *testing.T) {
 		`<w:SecurityTokenReference wsu:Id="ok"><w:Embedded><t></t></w:Embedded></w:SecurityTokenReference>`+
 		`<p xmlns:wsse="urn:other"></p></r>`))
 	sign := func(id string, parent *xdm.Node) error {
-		_, err := dsig.Sign(doc, key, dsig.SignOptions{
+		_, err := signAt(&doc, key, dsig.SignOptions{
 			SignatureAlgorithm:        xmlsec.SigRSASHA256,
 			CanonicalizationAlgorithm: string(c14n.Exclusive10),
 			References:                []dsig.Reference{{URI: "#" + id, Transforms: strTransform, DigestAlgorithm: xmlsec.DigestSHA256}},
@@ -373,11 +378,13 @@ func TestSTRTransformOverKeyInfo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	strID, err := wss.AssignID(doc, str)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sig, err := dsig.Sign(doc, key, dsig.SignOptions{
+	// The reference is detached, so wss.AssignID cannot reach it.
+	const strID = "str-1"
+	var e xmltree.Edits
+	e.Declare(str, "wsu", xmlsec.NSWSU)
+	e.SetAttr(str, xdm.QName{Prefix: "wsu", URI: xmlsec.NSWSU, Local: "Id"}, strID)
+	str, _ = xmltree.Rebuild(str, &e)
+	sig, err := signAt(&doc, key, dsig.SignOptions{
 		SignatureAlgorithm:        xmlsec.SigRSASHA256,
 		CanonicalizationAlgorithm: string(c14n.Exclusive10),
 		References: []dsig.Reference{
@@ -426,7 +433,7 @@ func TestSTRTransformSAMLKeyIdentifier(t *testing.T) {
 		wantSA2 = `<saml2:Assertion xmlns="" xmlns:saml2="urn:oasis:names:tc:SAML:2.0:assertion" ID="_a2" Version="2.0"></saml2:Assertion>`
 	)
 	sign := func(doc *xdm.Node) (*xdm.Node, error) {
-		return dsig.Sign(doc, key, dsig.SignOptions{
+		return dsig.Sign(xmlsec.NewDocument(doc), key, dsig.SignOptions{
 			SignatureAlgorithm:        xmlsec.SigRSASHA256,
 			CanonicalizationAlgorithm: string(c14n.Exclusive10),
 			References:                []dsig.Reference{{URI: "#str", Transforms: strTransform, DigestAlgorithm: xmlsec.DigestSHA256}},
@@ -446,9 +453,9 @@ func TestSTRTransformSAMLKeyIdentifier(t *testing.T) {
 		if !strings.Contains(string(serialize(t, sig)), base64.StdEncoding.EncodeToString(want[:])) {
 			t.Fatalf("%s: digest is not the assertion's:\n%s", name, serialize(t, sig))
 		}
-		xmltree.DocumentElement(doc).ChildElements()[0].ChildElements()[0].AppendChild(sig)
-		cov, err := dsig.Verify(doc, sig, dsig.VerifyOptions{Certificate: key.Certificate})
-		if err != nil || len(cov.SignedTokens) != 1 || cov.SignedTokens[0].Name.Local != "Assertion" {
+		doc = appendChild(xmltree.DocumentElement(doc).ChildElements()[0].ChildElements()[0], sig)
+		cov, err := dsig.Verify(doc, findSignature(doc), dsig.VerifyOptions{Certificate: key.Certificate})
+		if err != nil || len(cov.SignedTokens) != 1 || cov.SignedTokens[0].Name().Local != "Assertion" {
 			t.Fatalf("%s: %v, %+v", name, err, cov)
 		}
 	}
@@ -502,7 +509,7 @@ func TestSTRTransformCanonicalization(t *testing.T) {
 	d := sha256.Sum256(b)
 	refs := sig.ChildElements()[0].ChildElements()
 	digest := refs[len(refs)-1].ChildElements()[2]
-	digest.Children[0].Value = base64.StdEncoding.EncodeToString(d[:])
+	digest.FirstChild().SetValue(base64.StdEncoding.EncodeToString(d[:]))
 	resignSI(t, sig, c14n.Exclusive10)
 
 	if _, err := dsig.Verify(doc, sig, dsig.VerifyOptions{Certificate: key.Certificate}); err != nil {
@@ -517,7 +524,14 @@ func TestSTRTransformCanonicalization(t *testing.T) {
 	}
 	// StrictBSP also refuses the ds:X509Data KeyInfo (R5417); without it,
 	// the canonicalization decides.
-	sig.Children = slices.DeleteFunc(sig.Children, func(n *xdm.Node) bool { return n.IsElement(xmlsec.NSDSig, "KeyInfo") })
+	var e xmltree.Edits
+	for _, c := range sig.ChildElements() {
+		if c.IsElement(xmlsec.NSDSig, "KeyInfo") {
+			e.ReplaceNode(c)
+		}
+	}
+	doc, _ = xmltree.Rebuild(doc, &e)
+	sig = findSignature(doc)
 	if _, err := dsig.Verify(doc, sig, dsig.VerifyOptions{Certificate: key.Certificate, StrictBSP: true}); !errors.Is(err, xmlsec.ErrMalformed) ||
 		!strings.Contains(err.Error(), "R5404") {
 		t.Fatalf("Inclusive C14N under StrictBSP: %v", err)

@@ -5,11 +5,11 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xml/xpath"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xpathfilter"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xml/v2/xpath"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xpathfilter"
 )
 
 // xpathBase64 is the transform chain of Example 13: an XPath selecting the
@@ -114,14 +114,14 @@ func (x *xpathStep) decode(top *xdm.Node) ([]byte, error) {
 		// ponytail: one evaluation per text node, bounded by
 		// xmlsec.MaxParseNodes; the allow-list keeps the expression the
 		// caller's own.
-		for _, c := range n.Children {
+		for c := range n.Children() {
 			if err != nil {
 				return
 			}
-			if c.Kind == xdm.KindText {
+			if c.Kind() == xdm.KindText {
 				var keep bool
 				if keep, err = x.expr.EvalBool(xpath.NewContext(c, lib).WithFocus(c, 1, 1)); keep {
-					b.WriteString(c.Value)
+					b.WriteString(c.Value())
 				}
 			}
 			walk(c)

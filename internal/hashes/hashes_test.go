@@ -4,7 +4,7 @@ import (
 	"crypto"
 	"testing"
 
-	"github.com/knroy/go-xmlsec"
+	"github.com/knroy/go-xmlsec/v2"
 )
 
 func TestHashLookups(t *testing.T) {

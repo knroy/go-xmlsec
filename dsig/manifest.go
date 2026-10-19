@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // BuildManifest returns a ds:Manifest (XML-DSig 5.1) holding a digested
@@ -48,7 +48,11 @@ func BuildManifest(doc *xdm.Node, refs []Reference, opts SignOptions) (*xdm.Node
 	m := xmltree.Element(nil, "ds", xmlsec.NSDSig, "Manifest")
 	m.AddNamespace("ds", xmlsec.NSDSig)
 	setOptional(m, "Id", opts.ManifestID)
-	if err := addReferences(m, doc, m, refs, opts); err != nil {
+	pending, err := buildReferences(m, refs)
+	if err != nil {
+		return nil, err
+	}
+	if err := digestPending(doc, m, pending, opts, func(n *xdm.Node) *xdm.Node { return n }); err != nil {
 		return nil, err
 	}
 	return m, nil
@@ -89,7 +93,7 @@ func verifyManifest(doc, manifest *xdm.Node, cov *Coverage, opts VerifyOptions) 
 		return nil, errors.New("dsig: manifest is not inside the document")
 	}
 	if cov == nil || !slices.ContainsFunc(cov.SignedElements, func(e *xdm.Node) bool {
-		return e == manifest || e == manifest.Parent && e.IsElement(xmlsec.NSDSig, "Object")
+		return e == manifest || e == manifest.Parent() && e.IsElement(xmlsec.NSDSig, "Object")
 	}) {
 		return nil, fmt.Errorf("%w: the ds:Manifest is not covered by the signature", xmlsec.ErrSignatureInvalid)
 	}
@@ -121,7 +125,7 @@ func verifyManifest(doc, manifest *xdm.Node, cov *Coverage, opts VerifyOptions) 
 		return nil, err
 	}
 	sig := manifest
-	for a := manifest.Parent; a != nil; a = a.Parent {
+	for a := manifest.Parent(); a != nil; a = a.Parent() {
 		if a.IsElement(xmlsec.NSDSig, "Signature") {
 			sig = a
 			break

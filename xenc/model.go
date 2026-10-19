@@ -75,11 +75,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/hashes"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/hashes"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // Type URIs.
@@ -531,24 +531,32 @@ func encryptionMethod(parent *xdm.Node, alg string) *xdm.Node {
 }
 
 // newEncryptedData starts an xenc:EncryptedData of the given Type, with
-// opts.DataID and an EncryptionMethod naming opts.DataAlgorithm.
-func newEncryptedData(typ string, opts EncryptOptions) (*xdm.Node, error) {
-	ed := newRoot("EncryptedData")
-	if opts.DataID != "" {
-		if !xdm.IsNCName(opts.DataID) {
-			return nil, fmt.Errorf("xenc: DataID %q is not an NCName", opts.DataID)
-		}
-		xmltree.SetAttr(ed, "", "", "Id", opts.DataID)
+// opts.DataID, Type, mimeType (opts.MimeType when empty), Encoding and an
+// EncryptionMethod naming opts.DataAlgorithm. The caller appends the
+// xenc:CipherData, then calls addProperties.
+func newEncryptedData(typ, mimeType string, opts EncryptOptions) (*xdm.Node, error) {
+	if opts.DataID != "" && !xdm.IsNCName(opts.DataID) {
+		return nil, fmt.Errorf("xenc: DataID %q is not an NCName", opts.DataID)
 	}
-	encryptionMethod(ed, opts.DataAlgorithm)
-	if err := dataAttrs(ed, typ, opts); err != nil {
+	if err := checkDataAttrs(typ, opts); err != nil {
 		return nil, err
 	}
-	if k := opts.DataKeyInfo; k != nil {
-		if k.Kind != xdm.KindElement || k.Parent != nil || k.IsElement(xmlsec.NSDSig, "KeyInfo") {
-			return nil, errors.New("xenc: DataKeyInfo must be a detached element to go inside ds:KeyInfo")
+	k := opts.DataKeyInfo
+	if k != nil && (k.Kind() != xdm.KindElement || k.Parent() != nil || k.IsElement(xmlsec.NSDSig, "KeyInfo")) {
+		return nil, errors.New("xenc: DataKeyInfo must be a detached element to go inside ds:KeyInfo")
+	}
+	if mimeType == "" {
+		mimeType = opts.MimeType
+	}
+	ed := newRoot("EncryptedData")
+	for _, a := range [][2]string{{"Id", opts.DataID}, {"Type", typ}, {"MimeType", mimeType}, {"Encoding", opts.Encoding}} {
+		if a[1] != "" {
+			xmltree.SetAttr(ed, "", "", a[0], a[1])
 		}
-		newKeyInfo(ed).AppendChild(xmltree.Clone(k))
+	}
+	encryptionMethod(ed, opts.DataAlgorithm)
+	if k != nil {
+		newKeyInfo(ed).AppendCopy(k)
 	}
 	return ed, nil
 }
@@ -564,7 +572,7 @@ func parseEncryptionMethod(el *xdm.Node, implied string) (string, *xdm.Node, err
 	case len(kids) > 0 && isMethod(kids[0]):
 		return kids[0].AttrValue("Algorithm"), kids[0], nil
 	case implied == "" || slices.ContainsFunc(kids, isMethod):
-		return "", nil, malformed("%s without xenc:EncryptionMethod first", el.Name.Local)
+		return "", nil, malformed("%s without xenc:EncryptionMethod first", el.Name().Local)
 	}
 	return implied, nil, nil
 }
@@ -598,12 +606,12 @@ func methodParams(m *xdm.Node, bits int, permitted ...xdm.QName) (map[string]*xd
 				return nil, malformed("xenc:KeySize %q inconsistent with %s, which needs %d", k.StringValue(), m.AttrValue("Algorithm"), bits)
 			}
 		case !slices.ContainsFunc(permitted, func(q xdm.QName) bool { return k.IsElement(q.URI, q.Local) }):
-			return nil, malformed("%s not permitted in xenc:EncryptionMethod of %s", k.Name.Local, m.AttrValue("Algorithm"))
+			return nil, malformed("%s not permitted in xenc:EncryptionMethod of %s", k.Name().Local, m.AttrValue("Algorithm"))
 		}
-		if seen[k.Name.Local] != nil {
-			return nil, malformed("%s twice in xenc:EncryptionMethod", k.Name.Local)
+		if seen[k.Name().Local] != nil {
+			return nil, malformed("%s twice in xenc:EncryptionMethod", k.Name().Local)
 		}
-		seen[k.Name.Local] = k
+		seen[k.Name().Local] = k
 	}
 	return seen, nil
 }
@@ -615,7 +623,7 @@ func cipherData(el *xdm.Node) (*xdm.Node, error) {
 			return k, nil
 		}
 	}
-	return nil, malformed("%s without xenc:CipherData", el.Name.Local)
+	return nil, malformed("%s without xenc:CipherData", el.Name().Local)
 }
 
 // cipherValue decodes the xenc:CipherValue of cd, an xenc:CipherData.

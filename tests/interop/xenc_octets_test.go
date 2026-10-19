@@ -7,12 +7,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
-	"github.com/knroy/go-xmlsec/xenc"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
+	"github.com/knroy/go-xmlsec/v2/xenc"
 )
 
 // kwKey is a session key for opts wrapped under a fresh shared KEK, the
@@ -34,14 +34,18 @@ func kwKey(t *testing.T, opts xenc.EncryptOptions) (*xenc.EncryptedKey, string) 
 	return ek, kekPath
 }
 
-// withKeyInfo puts ek in ed's ds:KeyInfo, after its EncryptionMethod.
-func withKeyInfo(ed *xdm.Node, ek *xenc.EncryptedKey) {
+// withKeyInfo returns the root of ed's tree rebuilt with a ds:KeyInfo
+// holding a copy of kids after ed's EncryptionMethod, and ed's copy.
+func withKeyInfo(ed *xdm.Node, kids ...*xdm.Node) (root, newED *xdm.Node) {
 	ki := xmltree.Element(nil, "ds", xmlsec.NSDSig, "KeyInfo")
 	ki.AddNamespace("ds", xmlsec.NSDSig)
-	ki.AppendChild(ek.Element)
-	ed.AppendChild(ki)
-	kids := ed.Children
-	ed.Children = append([]*xdm.Node{kids[0], ki}, kids[1:len(kids)-1]...)
+	for _, k := range kids {
+		ki.AppendCopy(k)
+	}
+	var e xmltree.Edits
+	e.Insert(ed, 1, ki)
+	root, m := xmltree.Rebuild(ed, &e)
+	return root, m[ed]
 }
 
 func canonicalOf(t *testing.T, n *xdm.Node) []byte {
@@ -64,7 +68,7 @@ func TestReferenceImplementationsDecryptOurOctets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	withKeyInfo(ed, ek)
+	ed, _ = withKeyInfo(ed, ek.Element)
 	enc := tempFile(t, "enc.xml", canonicalOf(t, ed))
 
 	out := filepath.Join(t.TempDir(), "xmlsec1.bin")
@@ -92,7 +96,7 @@ func TestReferenceImplementationsDecryptOurEncryptionProperties(t *testing.T) {
 	doc := parse(t, []byte(envelope))
 	var payload *xdm.Node
 	xmltree.Walk(doc, func(e *xdm.Node) {
-		if e.Name.Local == "Payload" {
+		if e.Name().Local == "Payload" {
 			payload = e
 		}
 	})
@@ -102,10 +106,10 @@ func TestReferenceImplementationsDecryptOurEncryptionProperties(t *testing.T) {
 	}
 	edoc := parse(t, encrypted)
 	ed := find(edoc, xmlsec.NSXEnc, "EncryptedData")
-	withKeyInfo(ed, ek)
+	edoc, ed = withKeyInfo(ed, ek.Element)
 	if names := func() (s string) {
 		for _, k := range ed.ChildElements() {
-			s += k.Name.Local + " "
+			s += k.Name().Local + " "
 		}
 		return
 	}(); names != "EncryptionMethod KeyInfo CipherData EncryptionProperties " {
@@ -224,7 +228,7 @@ func TestCipherReferenceXPathDecryptedByAll(t *testing.T) {
 func firstText(n *xdm.Node, local string) string {
 	s := ""
 	xmltree.Walk(n, func(e *xdm.Node) {
-		if s == "" && e.Name.Local == local {
+		if s == "" && e.Name().Local == local {
 			s = e.StringValue()
 		}
 	})

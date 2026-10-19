@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/xenc"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/xenc"
 )
 
 // Sections 3.1 and 3.2: without an EncryptionMethod the algorithm must be

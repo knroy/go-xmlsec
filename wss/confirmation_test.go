@@ -3,13 +3,14 @@ package wss
 import (
 	"encoding/base64"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/knroy/go-xml/xdm"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/internal/xmltree"
+	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // A responder confirms each signature of the request (SOAP Message Security
@@ -25,8 +26,7 @@ func TestSignatureConfirmationRoundTrip(t *testing.T) {
 	}
 
 	respond := func(values ...[]byte) *xdm.Node {
-		doc := parseDoc(t, env11)
-		h, err := NewHeader(doc, xmlsec.NSSOAP11, "", false)
+		h, err := NewHeader(newDoc(t, env11), xmlsec.NSSOAP11, "", false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -41,7 +41,7 @@ func TestSignatureConfirmationRoundTrip(t *testing.T) {
 		}
 		// The confirmations follow the timestamp.
 		if kids := h.Element().ChildElements(); !kids[0].IsElement(xmlsec.NSWSU, "Timestamp") {
-			t.Fatalf("header order: %v", kids[0].Name)
+			t.Fatalf("header order: %v", kids[0].Name())
 		}
 		return h.Element()
 	}
@@ -70,7 +70,7 @@ func TestSignatureConfirmationRoundTrip(t *testing.T) {
 	sec := respond(sent[0])
 	sc := sec.ChildElements()[1]
 	if sc.AttrValue("Value") != base64.StdEncoding.EncodeToString(sent[0]) || sc.Attr(xmlsec.NSWSU, "Id") == nil {
-		t.Fatalf("SignatureConfirmation %+v", sc.Attrs)
+		t.Fatalf("SignatureConfirmation %+v", slices.Collect(sc.Attrs()))
 	}
 	if respond(nil).ChildElements()[1].Attr("", "Value") != nil {
 		t.Fatal("Value written for an unsigned request")
@@ -115,7 +115,7 @@ func TestSignatureConfirmationErrors(t *testing.T) {
 		t.Errorf("nil: %v", err)
 	}
 
-	h, err := NewHeader(parseDoc(t, env11), xmlsec.NSSOAP11, "", false)
+	h, err := NewHeader(newDoc(t, env11), xmlsec.NSSOAP11, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}

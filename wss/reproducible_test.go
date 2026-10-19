@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/knroy/go-xml/c14n"
-	"github.com/knroy/go-xmlsec"
-	"github.com/knroy/go-xmlsec/dsig"
-	"github.com/knroy/go-xmlsec/wss"
+	"github.com/knroy/go-xml/v2/c14n"
+	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/dsig"
+	"github.com/knroy/go-xmlsec/v2/wss"
 )
 
 // signReproducibly signs the full AS4 shape, a BinarySecurityToken referenced
@@ -18,7 +18,7 @@ import (
 // output depends on the inputs alone.
 func signReproducibly(t *testing.T) []byte {
 	t.Helper()
-	doc := parseDoc(t, []byte(goldenEnvelope))
+	doc := xmlsec.NewDocument(parseDoc(t, []byte(goldenEnvelope)))
 	key, _ := goldenKey(t)
 	step := func(_ string, err error) {
 		t.Helper()
@@ -26,8 +26,8 @@ func signReproducibly(t *testing.T) []byte {
 			t.Fatal(err)
 		}
 	}
-	step(wss.AssignIDWith(doc, mustFind(t, doc, "urn:example:eb", "Messaging"), "msg-1"))
-	step(wss.AssignIDWith(doc, mustFind(t, doc, xmlsec.NSSOAP12, "Body"), "body-1"))
+	step(wss.AssignIDWith(doc, mustFind(t, doc.Root(), "urn:example:eb", "Messaging"), "msg-1"))
+	step(wss.AssignIDWith(doc, mustFind(t, doc.Root(), xmlsec.NSSOAP12, "Body"), "body-1"))
 	hdr, err := wss.NewHeader(doc, xmlsec.NSSOAP12, "", true)
 	if err != nil {
 		t.Fatal(err)
@@ -59,7 +59,7 @@ func signReproducibly(t *testing.T) []byte {
 	if err := hdr.Prepend(sig); err != nil {
 		t.Fatal(err)
 	}
-	b, err := c14n.Bytes(doc, c14n.Options{Algorithm: c14n.Inclusive10})
+	b, err := c14n.Bytes(doc.Root(), c14n.Options{Algorithm: c14n.Inclusive10})
 	if err != nil {
 		t.Fatal(err)
 	}
