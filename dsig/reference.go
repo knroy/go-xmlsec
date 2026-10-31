@@ -303,9 +303,14 @@ func (d *data) digest(h hash.Hash, sig *xdm.Node, uri string, transforms []Trans
 			if d.attachment == nil || i > 0 {
 				return fmt.Errorf("%w: %s must be the first transform of a cid: reference", xmlsec.ErrMalformed, alg)
 			}
-			canon := swa.Content
+			canon, write := swa.Content, swa.WriteContent
 			if alg == xmlsec.TransformAttachmentCompleteSignature {
-				canon = swa.Complete
+				canon, write = swa.Complete, swa.WriteComplete
+			}
+			if last {
+				// Streamed into the digest, so an XML attachment's
+				// canonical form is never held in memory.
+				return write(h, d.attachment)
 			}
 			b, err := canon(d.attachment)
 			if err != nil {

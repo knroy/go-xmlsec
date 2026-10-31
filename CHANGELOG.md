@@ -5,6 +5,10 @@ versioning](https://semver.org): within a major version no exported name is
 removed or changed. See [RELEASE.md](RELEASE.md) for the compatibility
 promise and how a release is cut.
 
+## Unreleased
+
+- The SwA attachment signature transforms stream the canonical form into the digest when they are a reference's last transform; digests are byte-identical, no exported API changed.
+
 ## v2.0.0 — 2026-10-19
 
 New module path `github.com/knroy/go-xmlsec/v2`, on go-xml v2.

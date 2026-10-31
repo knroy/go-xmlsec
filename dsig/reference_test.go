@@ -128,6 +128,35 @@ func TestSwASignatureTransforms(t *testing.T) {
 	}
 }
 
+// An SwA transform that is not the last one hands its canonical form on as
+// octets; one that is the last is streamed into the digest. A malformed XML
+// attachment fails either way.
+func TestSwATransformNotLast(t *testing.T) {
+	key := newKey(t, rsaKey)
+	for _, body := range []string{`<a b="1"/>`, `<a>`} {
+		atts, err := xmlsec.NewAttachmentSet(&xmlsec.Attachment{ID: "att-1@example.com", Body: []byte(body),
+			MIMEHeaders: map[string][]string{"Content-Type": {"text/xml"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, transforms := range [][]dsig.TransformSpec{
+			{{Algorithm: xmlsec.TransformAttachmentContentSignature}},
+			{{Algorithm: xmlsec.TransformAttachmentContentSignature}, {Algorithm: string(c14n.Exclusive10)}},
+		} {
+			doc := parse(t, []byte(envelope))
+			_, err := signAt(&doc, key, dsig.SignOptions{
+				SignatureAlgorithm:        xmlsec.SigRSASHA256,
+				CanonicalizationAlgorithm: string(c14n.Exclusive10),
+				References:                []dsig.Reference{{URI: "cid:att-1@example.com", DigestAlgorithm: xmlsec.DigestSHA256, Transforms: transforms}},
+				Attachments:               atts,
+			})
+			if wantErr := body == `<a>`; wantErr != errors.Is(err, xmlsec.ErrMalformed) || !wantErr && err != nil {
+				t.Errorf("%q, %d transforms: %v", body, len(transforms), err)
+			}
+		}
+	}
+}
+
 // XML-DSig 6.6.2: base64 over a node set decodes the concatenated text
 // nodes, in document order, skipping comments and markup. Such a chain ends
 // in octets, so it does not rely on implicit canonicalization.

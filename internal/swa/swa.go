@@ -13,8 +13,10 @@
 package swa
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"maps"
 	"mime"
 	"slices"
@@ -74,11 +76,18 @@ func Selected(h map[string][]string) (map[string]string, error) {
 // Canonicalization without comments, any other text type by normalizing
 // line endings to CRLF, anything else unchanged.
 func Content(att *xmlsec.Attachment) ([]byte, error) {
+	return collect(WriteContent, att)
+}
+
+// WriteContent writes what Content returns to w as it is produced, so the
+// canonical form is never held: digesting an XML attachment then costs its
+// parsed tree, not the tree and its canonical form in a growing buffer.
+func WriteContent(w io.Writer, att *xmlsec.Attachment) error {
 	sel, err := selected(att)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return content(sel["Content-Type"], att.Body)
+	return writeContent(w, sel["Content-Type"], att.Body)
 }
 
 // Complete returns what the Attachment-Complete signature transform digests:
@@ -86,11 +95,18 @@ func Content(att *xmlsec.Attachment) ([]byte, error) {
 // then the canonical content. No empty line separates them: rules 18 and 19
 // read as one CRLF per header, which is how WSS4J reads them.
 func Complete(att *xmlsec.Attachment) ([]byte, error) {
+	return collect(WriteComplete, att)
+}
+
+// WriteComplete writes what Complete returns to w as it is produced, as
+// WriteContent does. The headers are all canonicalized before anything is
+// written, so a malformed header writes nothing.
+func WriteComplete(w io.Writer, att *xmlsec.Attachment) error {
 	sel, err := selected(att)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	var out []byte
+	var headers []byte
 	for _, name := range Headers {
 		v, ok := sel[name]
 		if !ok {
@@ -98,12 +114,24 @@ func Complete(att *xmlsec.Attachment) ([]byte, error) {
 		}
 		c, err := canonicalValue(name, v)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		out = append(out, name+":"+c+"\r\n"...)
+		headers = append(headers, name+":"+c+"\r\n"...)
 	}
-	body, err := content(sel["Content-Type"], att.Body)
-	return append(out, body...), err
+	if _, err := w.Write(headers); err != nil {
+		return err
+	}
+	return writeContent(w, sel["Content-Type"], att.Body)
+}
+
+// collect runs write into memory, for a caller that needs the octets
+// themselves: an SwA transform followed by another transform.
+func collect(write func(io.Writer, *xmlsec.Attachment) error, att *xmlsec.Attachment) ([]byte, error) {
+	var b bytes.Buffer
+	if err := write(&b, att); err != nil {
+		return nil, err
+	}
+	return b.Bytes(), nil
 }
 
 // selected is Selected with the default Content-Type filled in.
@@ -164,25 +192,46 @@ func mediaType(v string) (string, map[string]string, error) {
 	return mime.ParseMediaType(uncomment(v))
 }
 
-// content canonicalizes body by the media type of contentType.
-func content(contentType string, body []byte) ([]byte, error) {
+// writeContent writes body to w canonicalized by the media type of
+// contentType.
+func writeContent(w io.Writer, contentType string, body []byte) error {
 	mt, _, err := mediaType(contentType)
 	if err != nil {
-		return nil, fmt.Errorf("%w: Content-Type: %v", xmlsec.ErrMalformed, err)
+		return fmt.Errorf("%w: Content-Type: %v", xmlsec.ErrMalformed, err)
 	}
 	switch {
 	case mt == "text/xml", mt == "application/xml", strings.HasSuffix(mt, "+xml"):
 		tree, err := xmlsec.Parse(body)
 		if err != nil {
-			return nil, fmt.Errorf("%w: XML attachment: %w", xmlsec.ErrMalformed, err)
+			return fmt.Errorf("%w: XML attachment: %w", xmlsec.ErrMalformed, err)
 		}
-		return c14n.Bytes(tree.Root, c14n.Options{Algorithm: c14n.Exclusive10})
+		// c14n.Write buffers its own output, 64 KiB, and holds no more.
+		return c14n.Write(w, tree.Root, c14n.Options{Algorithm: c14n.Exclusive10})
 	case strings.HasPrefix(mt, "text/"):
-		b := bytes.ReplaceAll(body, []byte("\r\n"), []byte("\n"))
-		b = bytes.ReplaceAll(b, []byte("\r"), []byte("\n"))
-		return bytes.ReplaceAll(b, []byte("\n"), []byte("\r\n")), nil
+		return writeCRLF(w, body)
 	}
-	return body, nil
+	_, err = w.Write(body)
+	return err
+}
+
+// writeCRLF writes body with every line ending, CRLF, lone CR or lone LF,
+// written as CRLF.
+func writeCRLF(w io.Writer, body []byte) error {
+	b := bufio.NewWriterSize(w, 64<<10)
+	for len(body) > 0 {
+		i := bytes.IndexAny(body, "\r\n")
+		if i < 0 {
+			b.Write(body)
+			break
+		}
+		b.Write(body[:i])
+		b.WriteString("\r\n")
+		if body[i] == '\r' && i+1 < len(body) && body[i+1] == '\n' {
+			i++
+		}
+		body = body[i+1:]
+	}
+	return b.Flush()
 }
 
 // uncomment removes RFC 5322 comments outside quoted strings (rule 9).
