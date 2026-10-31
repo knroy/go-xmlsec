@@ -38,17 +38,17 @@ The package names stay `xmlsec`, `dsig`, `wss` and `xenc`.
 
 ## go-xml v2
 
-go-xmlsec v2 requires `github.com/knroy/go-xml/v2` v2.0.1. Code of yours that
+go-xmlsec v2 requires `github.com/knroy/go-xml/v2` v2.0.3. Code of yours that
 reads or builds `xdm.Node`s changes with it: fields become methods
 (`n.Kind()`, `n.Name()`, `n.Parent()`), `Children()` and `Attrs()` are
 iterators, trees are built top-down by appending, and **a parsed tree is
 frozen**: appending to it panics. go-xml's
-[migration guide](https://github.com/knroy/go-xml/blob/v2.0.1/docs/migrating-to-v2.md)
+[migration guide](https://github.com/knroy/go-xml/blob/v2.0.3/docs/migrating-to-v2.md)
 covers each change, and its `nodeaccess` rewriter does most of them; it
 rewrites go-xml imports, not go-xmlsec's.
 
 go-xml's changelog lists no change to canonical output between v1.6.0, the
-last pin of go-xmlsec v1, and v2.0.1: signatures made by v1 verify under v2
+last pin of go-xmlsec v1, and v2.0.3: signatures made by v1 verify under v2
 and the reverse.
 
 ## Why xmlsec.Document exists

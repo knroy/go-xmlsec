@@ -7,7 +7,14 @@ promise and how a release is cut.
 
 ## Unreleased
 
-- The SwA attachment signature transforms stream the canonical form into the digest when they are a reference's last transform; digests are byte-identical, no exported API changed.
+No API change.
+
+### Changed
+
+| Change | Why | Commit |
+|---|---|---|
+| The SwA Attachment-Content and Attachment-Complete signature transforms stream the canonical form into the digest when they are a reference's last transform | An XML attachment's canonical form is no longer held in memory: peak heap falls from about 7× to 4.5× the attachment for invoice-shaped XML, and from 2× to near 0 for text. Digests are byte-identical, checked against the v2.0.0 path by a corpus test and `FuzzWriteContent`. | [`7483b9f`][7483b9f] |
+| `go-xml` v2.0.1 → v2.0.3 | Two cost fixes from an external audit, no API change: parsing was quadratic in the namespace declarations in scope (100k declarations and 300k attributes took 33 s, now 0.35 s), and `fn:normalize-space` allocated a list of every token. `c14n` is unchanged, so canonical output and digests are the same. | — |
 
 ## v2.0.0 — 2026-10-19
 
@@ -259,3 +266,4 @@ First release.
 [94c506f]: https://github.com/knroy/go-xmlsec/commit/94c506f
 [391978c]: https://github.com/knroy/go-xmlsec/commit/391978c
 [fcf935d]: https://github.com/knroy/go-xmlsec/commit/fcf935d
+[7483b9f]: https://github.com/knroy/go-xmlsec/commit/7483b9f
