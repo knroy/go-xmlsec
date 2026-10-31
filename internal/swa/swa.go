@@ -217,15 +217,16 @@ func writeContent(w io.Writer, contentType string, body []byte) error {
 // writeCRLF writes body with every line ending, CRLF, lone CR or lone LF,
 // written as CRLF.
 func writeCRLF(w io.Writer, body []byte) error {
+	// A bufio.Writer keeps its first error, which Flush returns.
 	b := bufio.NewWriterSize(w, 64<<10)
 	for len(body) > 0 {
 		i := bytes.IndexAny(body, "\r\n")
 		if i < 0 {
-			b.Write(body)
+			_, _ = b.Write(body)
 			break
 		}
-		b.Write(body[:i])
-		b.WriteString("\r\n")
+		_, _ = b.Write(body[:i])
+		_, _ = b.WriteString("\r\n")
 		if body[i] == '\r' && i+1 < len(body) && body[i+1] == '\n' {
 			i++
 		}
