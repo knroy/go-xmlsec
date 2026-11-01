@@ -1,8 +1,10 @@
 package wss
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/knroy/go-xml/v2/xdm"
 	"github.com/knroy/go-xmlsec/v2"
@@ -28,7 +30,7 @@ func FindHeader(doc *xdm.Node, soapNS, actor string) (*xdm.Node, error) {
 	if env == nil || !env.IsElement(soapNS, "Envelope") {
 		return nil, fmt.Errorf("%w: document element is not a SOAP Envelope", xmlsec.ErrMalformed)
 	}
-	kids := env.ChildElements()
+	kids := firstElements(env, 1)
 	if len(kids) == 0 || !kids[0].IsElement(soapNS, "Header") {
 		return nil, nil
 	}
@@ -51,7 +53,7 @@ func FindTimestamp(security *xdm.Node) (*xdm.Node, error) {
 		return nil, fmt.Errorf("%w: not a wsse:Security header", xmlsec.ErrMalformed)
 	}
 	var ts *xdm.Node
-	for _, e := range security.ChildElements() {
+	for e := range security.Children() {
 		if !e.IsElement(xmlsec.NSWSU, "Timestamp") {
 			continue
 		}
@@ -74,20 +76,40 @@ func CheckUniqueIDs(doc *xdm.Node, extra ...xdm.QName) error {
 	if doc == nil {
 		return fmt.Errorf("%w: no document", xmlsec.ErrMalformed)
 	}
-	seen := map[string]bool{}
-	var dup string
-	xmltree.Walk(doc.Root(), func(e *xdm.Node) {
-		for a := range e.Attrs() {
-			if dup == "" && (isDefaultID(a.Name()) || slices.ContainsFunc(extra, a.Name().Equal)) {
-				if seen[a.Value()] {
-					dup = a.Value()
+	// Counted, then collected and sorted, rather than a set: a map costs
+	// several times the IDs it holds.
+	type idAt struct {
+		v  string
+		at int
+	}
+	var ids []idAt
+	for pass := range 2 {
+		n := 0
+		xmltree.Walk(doc.Root(), func(e *xdm.Node) {
+			for a := range e.Attrs() {
+				if isDefaultID(a.Name()) || slices.ContainsFunc(extra, a.Name().Equal) {
+					if pass == 1 {
+						ids = append(ids, idAt{a.Value(), n})
+					}
+					n++
 				}
-				seen[a.Value()] = true
 			}
+		})
+		if pass == 0 {
+			ids = make([]idAt, 0, n)
 		}
-	})
-	if dup != "" {
-		return fmt.Errorf("%w: %q appears more than once (BSP R3204)", xmlsec.ErrAmbiguousID, dup)
+	}
+	slices.SortFunc(ids, func(a, b idAt) int { return cmp.Or(strings.Compare(a.v, b.v), cmp.Compare(a.at, b.at)) })
+	// The duplicate named is the first one met in document order: the
+	// repeat that comes earliest.
+	dup := -1
+	for i := 1; i < len(ids); i++ {
+		if ids[i].v == ids[i-1].v && (dup < 0 || ids[i].at < ids[dup].at) {
+			dup = i
+		}
+	}
+	if dup >= 0 {
+		return fmt.Errorf("%w: %s appears more than once (BSP R3204)", xmlsec.ErrAmbiguousID, quote(ids[dup].v))
 	}
 	return nil
 }
@@ -124,7 +146,7 @@ func CheckSecurityTokenReference(str *xdm.Node) error {
 	if str == nil || !str.IsElement(xmlsec.NSWSSE, "SecurityTokenReference") {
 		return fmt.Errorf("%w: not a wsse:SecurityTokenReference", xmlsec.ErrMalformed)
 	}
-	kids := str.ChildElements()
+	kids := firstElements(str, 2)
 	if len(kids) != 1 {
 		return fmt.Errorf("%w: wsse:SecurityTokenReference must hold exactly one reference (BSP R3061)", xmlsec.ErrMalformed)
 	}
@@ -136,7 +158,7 @@ func CheckSecurityTokenReference(str *xdm.Node) error {
 			return fmt.Errorf("%w: wsse:Reference without a URI (BSP R3062)", xmlsec.ErrMalformed)
 		}
 		if k.AttrValue("ValueType") == valueTypeEncryptedKey && tt != valueTypeEncryptedKey {
-			return fmt.Errorf("%w: a reference to an EncryptedKey with wsse11:TokenType %q (BSP R3069)", xmlsec.ErrMalformed, tt)
+			return fmt.Errorf("%w: a reference to an EncryptedKey with wsse11:TokenType %s (BSP R3069)", xmlsec.ErrMalformed, quote(tt))
 		}
 	case k.IsElement(xmlsec.NSWSSE, "Embedded"):
 		if _, err := embeddedToken(k); err != nil {
@@ -146,7 +168,7 @@ func CheckSecurityTokenReference(str *xdm.Node) error {
 		return checkKeyIdentifier(k, tt)
 	case k.IsElement(xmlsec.NSDSig, "X509Data"):
 		if !slices.Contains(x509Types, tt) {
-			return fmt.Errorf("%w: an issuer-serial reference with wsse11:TokenType %q", xmlsec.ErrMalformed, tt)
+			return fmt.Errorf("%w: an issuer-serial reference with wsse11:TokenType %s", xmlsec.ErrMalformed, quote(tt))
 		}
 	default:
 		// ds:KeyName included (R3027).
@@ -172,17 +194,17 @@ func checkKeyIdentifier(k *xdm.Node, tt string) error {
 		// this library reads no SAML token, so any is let through. The
 		// identifier is an xs:string, with no EncodingType (R6604, R6605).
 		if enc := k.Attr("", "EncodingType"); enc != nil {
-			return fmt.Errorf("%w: SAML wsse:KeyIdentifier with EncodingType %q (BSP R6604)", xmlsec.ErrMalformed, enc.Value())
+			return fmt.Errorf("%w: SAML wsse:KeyIdentifier with EncodingType %s (BSP R6604)", xmlsec.ErrMalformed, quote(enc.Value()))
 		}
 		return nil
 	default:
-		return fmt.Errorf("%w: wsse:KeyIdentifier ValueType %q", xmlsec.ErrUnsupportedKeyInfo, vt)
+		return fmt.Errorf("%w: wsse:KeyIdentifier ValueType %s", xmlsec.ErrUnsupportedKeyInfo, quote(vt))
 	}
 	if !slices.Contains(want, tt) {
-		return fmt.Errorf("%w: a %q key identifier with wsse11:TokenType %q (BSP R3069)", xmlsec.ErrMalformed, vt, tt)
+		return fmt.Errorf("%w: a %s key identifier with wsse11:TokenType %s (BSP R3069)", xmlsec.ErrMalformed, quote(vt), quote(tt))
 	}
 	if enc := k.AttrValue("EncodingType"); enc != xmlsec.BSTEncodingBase64 {
-		return fmt.Errorf("%w: wsse:KeyIdentifier EncodingType %q (BSP R3070, R3071)", xmlsec.ErrMalformed, enc)
+		return fmt.Errorf("%w: wsse:KeyIdentifier EncodingType %s (BSP R3070, R3071)", xmlsec.ErrMalformed, quote(enc))
 	}
 	return nil
 }

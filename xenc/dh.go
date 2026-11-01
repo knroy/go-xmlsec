@@ -120,7 +120,7 @@ func sharedSecret(y, x, p *big.Int) []byte {
 // EncryptionAlg | KA-Nonce | KeySize), counter being two upper-case hex
 // digits and KeySize the key's bits in decimal.
 func legacyKDF(h crypto.Hash, zz []byte, alg string, nonce []byte, size int) []byte {
-	var out []byte
+	out := make([]byte, 0, (size+h.Size()-1)/h.Size()*h.Size())
 	for counter := 1; len(out) < size; counter++ {
 		d := h.New()
 		d.Write(zz)
@@ -158,6 +158,7 @@ func agreeDH(ek *xdm.Node, keyAlg string, size int, opts EncryptOptions) ([]byte
 	}
 	eph := (&DHPrivateKey{DHPublicKey: DHPublicKey{P: r.P, Q: r.Q, G: r.G}}).generate()
 	zz := sharedSecret(r.Y, eph.X, r.P)
+	defer clear(zz)
 
 	am := newAgreementMethod(ek, alg)
 	var kek []byte
@@ -272,6 +273,7 @@ func DecryptAgreedKeyDH(el *xdm.Node, priv *DHPrivateKey, opts DecryptOptions) (
 	if err != nil {
 		return nil, err
 	}
+	defer clear(kek)
 	return unwrap(el, a.alg, kek, opts)
 }
 
@@ -319,7 +321,9 @@ func agreedDH(el *xdm.Node, data bool, priv *DHPrivateKey, opts DecryptOptions) 
 	if err != nil {
 		return nil, nil, err
 	}
-	return a, kdf(sharedSecret(y, priv.X, priv.P)), nil
+	zz := sharedSecret(y, priv.X, priv.P)
+	defer clear(zz)
+	return a, kdf(zz), nil
 }
 
 // legacyKDF returns the Legacy KDF of a dh agreement: its ds:DigestMethod,

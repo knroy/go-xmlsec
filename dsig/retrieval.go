@@ -61,7 +61,7 @@ func (c *keyContext) retrievalMethod(rm *xdm.Node) (resolvedKey, error) {
 		if err != nil {
 			return resolvedKey{}, malformed("ds:RetrievalMethod %q: %v", uri.Value(), err)
 		}
-		return withKey(cert, KeyInfoX509Data, nil)
+		return withKey(cert, KeyInfoX509Data, checkKeySize(cert.PublicKey))
 	}
 	unsupported := func() bool {
 		_, ok := retrievalTargets[typ]

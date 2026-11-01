@@ -1,7 +1,9 @@
 package dsig
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"testing"
 
 	"github.com/knroy/go-xml/v2/c14n"
@@ -31,9 +33,9 @@ func TestSTROctets(t *testing.T) {
 			t.Fatal(err)
 		}
 		tok := tree.Root.FirstChild().FirstChild()
-		got, err := strOctets(tok, c.alg, c.prefixes)
-		if err != nil || string(got) != c.want {
-			t.Errorf("%s: %s, %v; want %s", c.name, got, err, c.want)
+		var got bytes.Buffer
+		if err := writeSTR(&got, tok, c.alg, c.prefixes); err != nil || got.String() != c.want {
+			t.Errorf("%s: %s, %v; want %s", c.name, got.String(), err, c.want)
 		}
 	}
 
@@ -42,7 +44,38 @@ func TestSTROctets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := strOctets(tree.Root.FirstChild().FirstChild(), string(c14n.Exclusive10), nil); !errors.Is(err, c14n.ErrRelativeNamespaceURI) {
+	if err := writeSTR(io.Discard, tree.Root.FirstChild().FirstChild(), string(c14n.Exclusive10), nil); !errors.Is(err, c14n.ErrRelativeNamespaceURI) {
 		t.Fatalf("relative namespace: %v", err)
+	}
+}
+
+// errAfter fails every write after the first n.
+type errAfter struct{ n int }
+
+func (w *errAfter) Write(p []byte) (int, error) {
+	if w.n == 0 {
+		return 0, io.ErrShortWrite
+	}
+	w.n--
+	return len(p), nil
+}
+
+// apexWriter takes the apex start tag in pieces, and passes write errors
+// on.
+func TestAPEXWriter(t *testing.T) {
+	var got bytes.Buffer
+	a := &apexWriter{w: &got}
+	for _, c := range []byte(`<t a="1">x</t>`) {
+		if n, err := a.Write([]byte{c}); n != 1 || err != nil {
+			t.Fatalf("write: %d, %v", n, err)
+		}
+	}
+	if want := `<t xmlns="" a="1">x</t>`; got.String() != want {
+		t.Fatalf("%s, want %s", got.String(), want)
+	}
+	for n := range 2 {
+		if _, err := (&apexWriter{w: &errAfter{n}}).Write([]byte(`<t>x</t>`)); err != io.ErrShortWrite {
+			t.Errorf("failing after %d writes: %v", n, err)
+		}
 	}
 }

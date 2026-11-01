@@ -773,7 +773,7 @@ func digestOmitted(h hash.Hash, transforms []TransformSpec, resolve func() ([]by
 	}
 	d := data{octets: b}
 	err = d.digest(h, nil, "(omitted)", transforms, true)
-	return d.covers(nil), err
+	return d.covers(), err
 }
 
 // The default sets: what an empty allow-list accepts. An algorithm

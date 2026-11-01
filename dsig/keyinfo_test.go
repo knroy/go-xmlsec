@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/knroy/go-xml/v2/c14n"
 	"github.com/knroy/go-xml/v2/xdm"
@@ -597,5 +598,42 @@ func TestKeyInfoReferenceForms(t *testing.T) {
 		if _, err := signPKIDoc(t, `<r xmlns:dsig11="urn:other"/>`, p.key, set); err == nil {
 			t.Errorf("%s: signed", name)
 		}
+	}
+}
+
+// An RSA key over keysize.MaxRSABits from the document is refused before
+// any arithmetic with it: a raw ds:Modulus before it is decoded, a
+// DEREncodedKeyValue or certificate key once parsed. A 1 MiB modulus cost
+// minutes of CPU in rsa.VerifyPKCS1v15 before the signature was rejected.
+// With the key pinned, the certificate is an unused hint.
+func TestOversizedRSAKeyRefused(t *testing.T) {
+	b64 := base64.StdEncoding.EncodeToString
+	huge := make([]byte, 1<<20)
+	for i := range huge {
+		huge[i] = 0xff
+	}
+	big16392 := new(big.Int).SetBytes(huge[:16392/8])
+	pub := &rsa.PublicKey{N: big16392, E: 65537}
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1)}
+	cert := issue(t, tmpl, tmpl, pub, rsaKey)
+	for name, ki := range map[string]string{
+		"Modulus": `<ds:KeyValue><ds:RSAKeyValue><ds:Modulus>` + b64(huge) + `</ds:Modulus><ds:Exponent>AQAB</ds:Exponent></ds:RSAKeyValue></ds:KeyValue>`,
+		"DEREncodedKeyValue": `<dsig11:DEREncodedKeyValue xmlns:dsig11="` + xmlsec.NSDSig11 + `">` +
+			b64(must(x509.MarshalPKIXPublicKey(pub))) + `</dsig11:DEREncodedKeyValue>`,
+		"X509Certificate": `<ds:X509Data>` + x509Cert(cert) + `</ds:X509Data>`,
+	} {
+		doc, sig := signedCovDoc(t, covKI(ki))
+		start := time.Now()
+		_, err := dsig.Verify(doc, sig, dsig.VerifyOptions{})
+		if !errors.Is(err, xmlsec.ErrUnsupportedKeyInfo) || !strings.Contains(err.Error(), "16384 bits") {
+			t.Errorf("%s: %v", name, err)
+		}
+		if d := time.Since(start); d > 5*time.Second {
+			t.Errorf("%s: refused after %v", name, d)
+		}
+	}
+	doc, sig := signedCovDoc(t, covKI(`<ds:X509Data>`+x509Cert(cert)+`</ds:X509Data>`))
+	if cov, err := dsig.Verify(doc, sig, dsig.VerifyOptions{PublicKey: &rsaKey.PublicKey}); err != nil || cov.KeyInfoForm != dsig.KeyInfoNone {
+		t.Fatalf("pinned: %v", err)
 	}
 }

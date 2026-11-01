@@ -47,12 +47,15 @@ var lowerParams = map[string]bool{
 
 var quoteEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`)
 
+// unfolder removes the line breaks of folded header lines.
+var unfolder = strings.NewReplacer("\r\n ", " ", "\r\n\t", "\t")
+
 // Selected returns the headers of h that the profile lists, keyed by their
 // names in Headers, each value unfolded. A listed header present more than
 // once is refused, since which one a peer would take is undefined, and so is
 // a value with a line break left after unfolding.
 func Selected(h map[string][]string) (map[string]string, error) {
-	sel := map[string]string{}
+	sel := make(map[string]string, len(Headers))
 	for k, vs := range h {
 		i := slices.IndexFunc(Headers, func(n string) bool { return strings.EqualFold(n, k) })
 		if i < 0 {
@@ -62,7 +65,7 @@ func Selected(h map[string][]string) (map[string]string, error) {
 		if _, dup := sel[name]; dup || len(vs) != 1 {
 			return nil, fmt.Errorf("%w: MIME header %s must appear once", xmlsec.ErrMalformed, name)
 		}
-		v := strings.NewReplacer("\r\n ", " ", "\r\n\t", "\t").Replace(vs[0])
+		v := unfolder.Replace(vs[0])
 		if strings.ContainsAny(v, "\r\n") {
 			return nil, fmt.Errorf("%w: MIME header %s has a line break", xmlsec.ErrMalformed, name)
 		}
@@ -87,7 +90,11 @@ func WriteContent(w io.Writer, att *xmlsec.Attachment) error {
 	if err != nil {
 		return err
 	}
-	return writeContent(w, sel["Content-Type"], att.Body)
+	mt, _, err := mediaType(sel["Content-Type"])
+	if err != nil {
+		return fmt.Errorf("%w: Content-Type: %v", xmlsec.ErrMalformed, err)
+	}
+	return writeContent(w, mt, att.Body)
 }
 
 // Complete returns what the Attachment-Complete signature transform digests:
@@ -107,6 +114,7 @@ func WriteComplete(w io.Writer, att *xmlsec.Attachment) error {
 		return err
 	}
 	var headers []byte
+	var mt string
 	for _, name := range Headers {
 		v, ok := sel[name]
 		if !ok {
@@ -117,11 +125,15 @@ func WriteComplete(w io.Writer, att *xmlsec.Attachment) error {
 			return err
 		}
 		headers = append(headers, name+":"+c+"\r\n"...)
+		if name == "Content-Type" {
+			// The canonical value starts with the media type, which has no ";".
+			mt, _, _ = strings.Cut(c, ";")
+		}
 	}
 	if _, err := w.Write(headers); err != nil {
 		return err
 	}
-	return writeContent(w, sel["Content-Type"], att.Body)
+	return writeContent(w, mt, att.Body)
 }
 
 // collect runs write into memory, for a caller that needs the octets
@@ -192,15 +204,18 @@ func mediaType(v string) (string, map[string]string, error) {
 	return mime.ParseMediaType(uncomment(v))
 }
 
-// writeContent writes body to w canonicalized by the media type of
-// contentType.
-func writeContent(w io.Writer, contentType string, body []byte) error {
-	mt, _, err := mediaType(contentType)
-	if err != nil {
-		return fmt.Errorf("%w: Content-Type: %v", xmlsec.ErrMalformed, err)
-	}
+// writeContent writes body to w canonicalized by the media type mt, as
+// mediaType returns it.
+func writeContent(w io.Writer, mt string, body []byte) error {
+	// Into a buffer, as from collect, the output is sized up front: the body
+	// as it is, or one byte more per CR and LF for text; for XML the body's
+	// length is a first estimate, about the canonical form's size.
+	buf, _ := w.(*bytes.Buffer)
 	switch {
 	case mt == "text/xml", mt == "application/xml", strings.HasSuffix(mt, "+xml"):
+		if buf != nil {
+			buf.Grow(len(body))
+		}
 		tree, err := xmlsec.Parse(body)
 		if err != nil {
 			return fmt.Errorf("%w: XML attachment: %w", xmlsec.ErrMalformed, err)
@@ -208,9 +223,12 @@ func writeContent(w io.Writer, contentType string, body []byte) error {
 		// c14n.Write buffers its own output, 64 KiB, and holds no more.
 		return c14n.Write(w, tree.Root, c14n.Options{Algorithm: c14n.Exclusive10})
 	case strings.HasPrefix(mt, "text/"):
+		if buf != nil {
+			buf.Grow(len(body) + bytes.Count(body, []byte("\r")) + bytes.Count(body, []byte("\n")))
+		}
 		return writeCRLF(w, body)
 	}
-	_, err = w.Write(body)
+	_, err := w.Write(body)
 	return err
 }
 

@@ -1,6 +1,7 @@
 package wss
 
 import (
+	"crypto/rsa"
 	"crypto/x509"
 	"encoding/asn1"
 	"encoding/base64"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/knroy/go-xml/v2/xdm"
 	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/keysize"
 	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
@@ -103,7 +105,8 @@ func (h *Header) addBinarySecurityToken(cert *x509.Certificate, chain []*x509.Ce
 // DER ContentInfo of type signedData, SignedData version 1 with data
 // content, carrying from 1 to 16 X.509 certificates; its CRLs and signer
 // infos are ignored. A token with no single such leaf, or with more
-// certificates, is refused with xmlsec.ErrUnsupportedKeyInfo.
+// certificates, is refused with xmlsec.ErrUnsupportedKeyInfo, as is a
+// certificate whose RSA key has more than 16384 bits, before the key is used.
 //
 // A token that is not what its ValueType names, such as base64 that decodes
 // to no certificate, is also xmlsec.ErrInvalidSecurityToken, the
@@ -129,22 +132,34 @@ func parseBinarySecurityToken(bst *xdm.Node) (*x509.Certificate, error) {
 	// SOAP Message Security 1.1.1 section 6.3: Base64Binary is the
 	// default. BSP R3029 requires it stated; the strict resolver checks.
 	if enc := bst.Attr("", "EncodingType"); enc != nil && enc.Value() != xmlsec.BSTEncodingBase64 {
-		return nil, fmt.Errorf("%w: BST EncodingType %q", xmlsec.ErrUnsupportedKeyInfo, enc.Value())
+		return nil, fmt.Errorf("%w: BST EncodingType %s", xmlsec.ErrUnsupportedKeyInfo, quote(enc.Value()))
 	}
 	der, err := xmltree.Base64(bst)
 	if err != nil {
 		return nil, fmt.Errorf("%w: BST content: %v", xmlsec.ErrMalformed, err)
 	}
+	var cert *x509.Certificate
 	switch vt := bst.AttrValue("ValueType"); vt {
 	case xmlsec.BSTValueTypeX509v3:
-		return x509.ParseCertificate(der)
+		cert, err = x509.ParseCertificate(der)
 	case xmlsec.BSTValueTypeX509PKIPath:
-		return parsePKIPath(der)
+		cert, err = parsePKIPath(der)
 	case xmlsec.BSTValueTypePKCS7:
-		return parsePKCS7(der)
+		cert, err = parsePKCS7(der)
 	default:
-		return nil, fmt.Errorf("%w: BST ValueType %q", xmlsec.ErrUnsupportedKeyInfo, vt)
+		return nil, fmt.Errorf("%w: BST ValueType %s", xmlsec.ErrUnsupportedKeyInfo, quote(vt))
 	}
+	if err != nil {
+		return nil, err
+	}
+	// Bounded before the key verifies anything: an RSA verification costs
+	// the cube of the modulus length.
+	if pub, ok := cert.PublicKey.(*rsa.PublicKey); ok {
+		if err := keysize.CheckRSA(pub.N.BitLen()); err != nil {
+			return nil, err
+		}
+	}
+	return cert, nil
 }
 
 // parsePKIPath returns the target certificate of a PkiPath, the last of a

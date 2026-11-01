@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"math/big"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -174,6 +175,8 @@ func TestMatchSecurityTokenReference(t *testing.T) {
 		{"IssuerSerial reversed", is(serial(number) + name(issuer)), false},
 		{"serial not a number", is(name(issuer) + serial("0x1")), false},
 		{"wrong serial", is(name(issuer) + serial("1")), false},
+		{"serial with a sign and leading zeros", is(name(issuer) + serial("+000"+number)), true},
+		{"serial one digit longer", is(name(issuer) + serial(number+"0")), false},
 		{"wrong issuer", is(name(`CN=Test CA,O=Acme,C=NO`) + serial(number)), false},
 		{"direct reference", `<wsse:Reference URI="#t"/>`, false},
 		{"two references", ki(vt(valueTypeSKI)+enc, ski) + ki(vt(valueTypeSKI)+enc, ski), false},
@@ -197,6 +200,27 @@ func TestMatchSecurityTokenReference(t *testing.T) {
 	}
 	if MatchSecurityTokenReference(str, &x509.Certificate{RawIssuer: cert.RawIssuer}) {
 		t.Error("matched a certificate without a serial number")
+	}
+}
+
+// An X509SerialNumber with more digits than the certificate's serial is
+// refused before big.Int parses it, which takes time and memory quadratic
+// in the digits: a megabyte of them took 0.9 s and 2.4 GB.
+func TestMatchSecurityTokenReferenceLongSerial(t *testing.T) {
+	cert := acmeCert(t, nil)
+	const size = 1 << 20
+	doc := parseDoc(t, `<wsse:SecurityTokenReference xmlns:wsse="`+xmlsec.NSWSSE+`" xmlns:ds="`+xmlsec.NSDSig+
+		`"><ds:X509Data><ds:X509IssuerSerial><ds:X509IssuerName>CN=Test CA,O=Acme\, Inc.,C=NO</ds:X509IssuerName><ds:X509SerialNumber>`+
+		strings.Repeat("9", size)+`</ds:X509SerialNumber></ds:X509IssuerSerial></ds:X509Data></wsse:SecurityTokenReference>`)
+	str := xmltree.DocumentElement(doc)
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	if MatchSecurityTokenReference(str, cert) {
+		t.Fatal("matched")
+	}
+	runtime.ReadMemStats(&after)
+	if got := after.TotalAlloc - before.TotalAlloc; got > 8*size {
+		t.Fatalf("allocated %d bytes for a %d-digit serial", got, size)
 	}
 }
 

@@ -2,6 +2,10 @@ package wss
 
 import (
 	"errors"
+	"fmt"
+	"math/rand/v2"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/knroy/go-xml/v2/xdm"
@@ -162,6 +166,55 @@ func TestCheckSecurityTokenReference(t *testing.T) {
 		err := CheckSecurityTokenReference(str(``, ki(` ValueType="`+vt+`"`+b64)))
 		if !errors.Is(err, xmlsec.ErrUnsupportedKeyInfo) || errors.Is(err, xmlsec.ErrMalformed) {
 			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+// checkUniqueIDsMap is CheckUniqueIDs as it was, with a set of every ID.
+func checkUniqueIDsMap(doc *xdm.Node, extra ...xdm.QName) error {
+	seen := map[string]bool{}
+	var dup string
+	xmltree.Walk(doc.Root(), func(e *xdm.Node) {
+		for a := range e.Attrs() {
+			if dup == "" && (isDefaultID(a.Name()) || slices.ContainsFunc(extra, a.Name().Equal)) {
+				if seen[a.Value()] {
+					dup = a.Value()
+				}
+				seen[a.Value()] = true
+			}
+		}
+	})
+	if dup != "" {
+		return fmt.Errorf("%w: %q appears more than once (BSP R3204)", xmlsec.ErrAmbiguousID, dup)
+	}
+	return nil
+}
+
+// CheckUniqueIDs gives the error the set it replaced gave, naming the same
+// duplicate, over random documents of few ID values.
+func TestCheckUniqueIDsAsMap(t *testing.T) {
+	r := rand.New(rand.NewPCG(1, 2))
+	extra := xdm.QName{Local: "ID"}
+	attrs := []string{`wsu:Id`, `xml:id`, `ID`, `Other`}
+	for range 2000 {
+		var b strings.Builder
+		b.WriteString(`<r xmlns:wsu="` + xmlsec.NSWSU + `">`)
+		for range r.IntN(8) {
+			b.WriteString("<e")
+			for _, a := range attrs {
+				if r.IntN(2) == 0 {
+					fmt.Fprintf(&b, ` %s="v%d"`, a, r.IntN(6))
+				}
+			}
+			b.WriteString("/>")
+		}
+		b.WriteString("</r>")
+		doc := parseDoc(t, b.String())
+		for _, ex := range [][]xdm.QName{nil, {extra}} {
+			got, want := CheckUniqueIDs(doc, ex...), checkUniqueIDsMap(doc, ex...)
+			if fmt.Sprint(got) != fmt.Sprint(want) {
+				t.Fatalf("%s: got %v, want %v", b.String(), got, want)
+			}
 		}
 	}
 }

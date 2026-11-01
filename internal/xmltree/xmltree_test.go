@@ -166,6 +166,25 @@ func TestBase64MatchesOld(t *testing.T) {
 	}
 	r := rand.New(rand.NewPCG(1, 2))
 	alphabet := []string{"A", "b", "9", "+", "/", "=", " ", "\t", "\r", "\n", "!", "\xff", "é", "\v"}
+	// DecodeBase64 of the text in parts, split anywhere, is Base64 of it.
+	split := func(s string) {
+		t.Helper()
+		e := Element(nil, "", "", "e")
+		Text(e, s)
+		want, werr := Base64(e)
+		i, j := r.IntN(len(s)+1), r.IntN(len(s)+1)
+		i, j = min(i, j), max(i, j)
+		got, err := DecodeBase64(s[:i], s[i:j], "", s[j:])
+		gotb, errb := DecodeBase64([]byte(s[:i]), []byte(s[i:j]), []byte(s[j:]))
+		if !bytes.Equal(got, want) || !bytes.Equal(gotb, want) || fmt.Sprint(err) != fmt.Sprint(werr) || fmt.Sprint(errb) != fmt.Sprint(werr) {
+			t.Fatalf("%q split at %d, %d: got %x, %v and %x, %v; want %x, %v", s, i, j, got, err, gotb, errb, want, werr)
+		}
+	}
+	for _, s := range []string{wrapped, long[:4092] + "AA==" + long[:4], long[:4094] + "é" + long[:8], "AA==\nAAAA", "AA AA"} {
+		for range 50 {
+			split(s)
+		}
+	}
 	for range 3000 {
 		var b strings.Builder
 		n := r.IntN(64)
@@ -180,6 +199,7 @@ func TestBase64MatchesOld(t *testing.T) {
 			}
 		}
 		check(b.String())
+		split(b.String())
 	}
 }
 

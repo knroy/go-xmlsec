@@ -268,9 +268,9 @@ func (d *data) memberNamespace(e *xdm.Node, prefix string) bool {
 }
 
 // filter applies an XPath (XML-DSig 6.6.3) or XPath Filter 2.0 transform:
-// the output is the input nodes the expression keeps. Nodes it drops are
-// recorded in d.cut, except those of sig, so that Coverage reports only
-// what was digested.
+// the output is the input nodes the expression keeps. Dropping any but
+// those of sig sets d.cut, so that Coverage reports only what was
+// digested.
 func (d *data) filter(t TransformSpec, sig *xdm.Node) error {
 	if d.ns == nil {
 		// 6.6.3: octets become a node set with comments.
@@ -278,7 +278,7 @@ func (d *data) filter(t TransformSpec, sig *xdm.Node) error {
 		if err != nil {
 			return fmt.Errorf("%w: parsing octets for %s: %w", xmlsec.ErrMalformed, t.Algorithm, err)
 		}
-		d.ns, d.stripComments, d.reparsed = c14n.Document(tree.Root), false, true
+		d.ns, d.octets, d.stripComments, d.reparsed = c14n.Document(tree.Root), nil, false, true
 	}
 	doc := d.ns.Root().Root()
 	// here() is the XPath element bearing each expression: Sign and
@@ -294,11 +294,16 @@ func (d *data) filter(t TransformSpec, sig *xdm.Node) error {
 		if err != nil {
 			return err
 		}
-		// One context for the transform, refocused per node: each Eval
-		// resets the item and byte budgets, and the depth is counted on the
-		// copy WithFocus makes.
+		// One context for the transform, refocused in place per node rather
+		// than copied by WithFocus: each Eval resets the item and byte
+		// budgets, a function call restores the depth it raises on return,
+		// and nothing keeps the context past EvalBool, whose result is a
+		// boolean, so no evaluation sees another's focus.
 		ctx := xpath.NewContext(doc, xpathfilter.Library(here[0], doc))
-		keep = func(n *xdm.Node) (bool, error) { return c.EvalBool(ctx.WithFocus(n, 1, 1)) }
+		keep = func(n *xdm.Node) (bool, error) {
+			ctx.Item = n
+			return c.EvalBool(ctx)
+		}
 	} else {
 		sets := make([]selection, len(t.XPathFilters))
 		for i, f := range t.XPathFilters {
@@ -339,8 +344,8 @@ func (d *data) filter(t TransformSpec, sig *xdm.Node) error {
 	out := newFiltered(d.ns.Root())
 	var err error
 	// decide reports whether the transform keeps n, which is in the input,
-	// and records n in d.cut if not; for a namespace node, n is its element,
-	// which is within the same subtrees.
+	// and sets d.cut if not; for a namespace node, n is its element, which
+	// is within the same subtrees.
 	decide := func(n *xdm.Node, keep func() (bool, error)) bool {
 		k, e := keep()
 		if e != nil {
@@ -348,7 +353,7 @@ func (d *data) filter(t TransformSpec, sig *xdm.Node) error {
 			return false
 		}
 		if !k && !within(n, sig) {
-			d.cut = append(d.cut, n)
+			d.cut = true
 		}
 		return k
 	}
@@ -384,7 +389,7 @@ func (d *data) filter(t TransformSpec, sig *xdm.Node) error {
 	if err != nil {
 		return err
 	}
-	if d.reparsed && len(d.cut) > 0 {
+	if d.reparsed && d.cut {
 		// Dropped nodes of a tree parsed from octets are no node of the
 		// document: nothing it holds can be reported as covered.
 		d.opaque = true

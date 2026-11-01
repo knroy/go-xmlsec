@@ -44,7 +44,7 @@ func isAnyID(n xdm.QName) bool {
 // as an ID.
 func FindByID(doc *xdm.Node, id string, extra ...xdm.QName) (*xdm.Node, error) {
 	if doc == nil {
-		return nil, fmt.Errorf("%w: %q: no document", xmlsec.ErrIDNotFound, id)
+		return nil, fmt.Errorf("%w: %s: no document", xmlsec.ErrIDNotFound, quote(id))
 	}
 	var found *xdm.Node
 	n := 0
@@ -58,11 +58,11 @@ func FindByID(doc *xdm.Node, id string, extra ...xdm.QName) (*xdm.Node, error) {
 	})
 	switch n {
 	case 0:
-		return nil, fmt.Errorf("%w: %q", xmlsec.ErrIDNotFound, id)
+		return nil, fmt.Errorf("%w: %s", xmlsec.ErrIDNotFound, quote(id))
 	case 1:
 		return found, nil
 	}
-	return nil, fmt.Errorf("%w: %q appears %d times", xmlsec.ErrAmbiguousID, id, n)
+	return nil, fmt.Errorf("%w: %s appears %d times", xmlsec.ErrAmbiguousID, quote(id), n)
 }
 
 // AssignID gives an element an ID if it does not already have one, and

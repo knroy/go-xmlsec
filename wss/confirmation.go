@@ -69,11 +69,11 @@ func SignatureValues(security *xdm.Node) ([][]byte, error) {
 		return nil, fmt.Errorf("%w: not a wsse:Security header", xmlsec.ErrMalformed)
 	}
 	var out [][]byte
-	for _, sig := range security.ChildElements() {
+	for sig := range security.Children() {
 		if !sig.IsElement(xmlsec.NSDSig, "Signature") {
 			continue
 		}
-		kids := sig.ChildElements()
+		kids := firstElements(sig, 2)
 		if len(kids) < 2 || !kids[1].IsElement(xmlsec.NSDSig, "SignatureValue") {
 			return nil, fmt.Errorf("%w: ds:Signature without a ds:SignatureValue", xmlsec.ErrMalformed)
 		}
@@ -110,7 +110,7 @@ func CheckSignatureConfirmations(security *xdm.Node, sent [][]byte) error {
 		return fmt.Errorf("%w: not a wsse:Security header", xmlsec.ErrMalformed)
 	}
 	var confs []*xdm.Node
-	for _, e := range security.ChildElements() {
+	for e := range security.Children() {
 		if e.IsElement(xmlsec.NSWSSE11, "SignatureConfirmation") {
 			if e.Attr(xmlsec.NSWSU, "Id") == nil {
 				return fmt.Errorf("%w: wsse11:SignatureConfirmation without a wsu:Id (BSP R5441)", xmlsec.ErrMalformed)

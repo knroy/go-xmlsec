@@ -3,6 +3,7 @@ package dsig
 import (
 	"fmt"
 	"hash"
+	"sync"
 
 	"github.com/knroy/go-xmlsec/v2"
 	"golang.org/x/text/unicode/norm"
@@ -42,6 +43,11 @@ func (h *nfcHash) isNormal() bool {
 	return h.normal && norm.NFC.IsNormal(h.tail)
 }
 
+// nfcTails holds tail buffers for nfcHash, which grow to about two
+// chunks, so that a signature's references reuse them. One that grew
+// further, over a run with no boundary, is not kept.
+var nfcTails = sync.Pool{New: func() any { return new([]byte) }}
+
 // checkNFC runs f, which writes octets into h, and with check set refuses
 // them with xmlsec.ErrNotNFC unless they are in Unicode Normalization Form C
 // (XML-DSig 8.1.3 and 7: a signature over non-NFC content may break when
@@ -53,7 +59,14 @@ func checkNFC(check bool, h hash.Hash, what string, f func(hash.Hash) error) err
 	if !check {
 		return f(h)
 	}
-	w := &nfcHash{Hash: h, normal: true}
+	tail := nfcTails.Get().(*[]byte)
+	w := &nfcHash{Hash: h, tail: (*tail)[:0], normal: true}
+	defer func() {
+		if cap(w.tail) <= 2*nfcChunk {
+			*tail = w.tail
+			nfcTails.Put(tail)
+		}
+	}()
 	if err := f(w); err != nil {
 		return err
 	}

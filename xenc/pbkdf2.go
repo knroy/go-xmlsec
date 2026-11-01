@@ -212,5 +212,7 @@ func UnwrapEncryptedKeyPassword(el *xdm.Node, password []byte, opts DecryptOptio
 	if err != nil {
 		return nil, err
 	}
-	return unwrap(el, alg, derive(password), opts)
+	kek := derive(password)
+	defer clear(kek)
+	return unwrap(el, alg, kek, opts)
 }

@@ -1,6 +1,7 @@
 package dsig_test
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
@@ -477,4 +478,71 @@ func findDigestValue(n *xdm.Node) string {
 		}
 	})
 	return v
+}
+
+// The NFC check of XML-DSig 8.1.3 concerns character data: octets a base64
+// transform decodes, binary here, are digested unchecked, by Sign and by
+// Verify with RequireNFC.
+func TestBase64TransformOfBinaryNotNFCChecked(t *testing.T) {
+	bin := make([]byte, 1000)
+	rand.Read(bin)
+	bin[0] = 0xcc // a lone combining-mark continuation, not NFC as text
+	doc := parse(t, []byte(`<r><o xml:id="o">`+base64.StdEncoding.EncodeToString(bin)+`</o></r>`))
+	sig, err := signAt(&doc, newKey(t, rsaKey), dsig.SignOptions{
+		SignatureAlgorithm: xmlsec.SigRSASHA256, CanonicalizationAlgorithm: string(c14n.Exclusive10),
+		References: []dsig.Reference{{URI: "#o", DigestAlgorithm: xmlsec.DigestSHA256, Transforms: []dsig.TransformSpec{{Algorithm: xmlsec.TransformBase64}}}},
+		Parent:     xmltree.DocumentElement(doc),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := sha256.Sum256(bin)
+	if got := findDigestValue(sig); got != base64.StdEncoding.EncodeToString(want[:]) {
+		t.Fatalf("DigestValue %s", got)
+	}
+	if _, err := dsig.Verify(doc, sig, dsig.VerifyOptions{PublicKey: &rsaKey.PublicKey, RequireNFC: true}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The base64 transform decodes a chunk at a time: across chunk boundaries,
+// with characters outside the alphabet anywhere, it decodes as a whole
+// text would, and a pad ending a chunk with more after it is still data
+// after the pad.
+func TestBase64TransformChunks(t *testing.T) {
+	bin := make([]byte, 20000)
+	rand.Read(bin)
+	enc := base64.StdEncoding.EncodeToString(bin)
+	var noisy strings.Builder
+	for i := 0; i < len(enc); i += 7 {
+		noisy.WriteString(enc[i:min(i+7, len(enc))] + " é!\n")
+	}
+	pad := strings.Repeat("A", 4094) + "==AAAA" // the pad ends the first 4096-octet chunk
+	for _, c := range []struct {
+		name, text string
+		want       []byte
+	}{
+		{"noisy", noisy.String(), bin},
+		{"plain", enc, bin},
+		{"empty", "", []byte{}},
+		{"pad ending a chunk", pad, nil},
+		{"unfinished quantum", enc[:len(enc)-1], nil},
+	} {
+		doc := parse(t, []byte(`<r><o xml:id="o">`+c.text+`</o></r>`))
+		sig, err := signAt(&doc, newKey(t, rsaKey), dsig.SignOptions{
+			SignatureAlgorithm: xmlsec.SigRSASHA256, CanonicalizationAlgorithm: string(c14n.Exclusive10),
+			References: []dsig.Reference{{URI: "#o", DigestAlgorithm: xmlsec.DigestSHA256, Transforms: []dsig.TransformSpec{{Algorithm: xmlsec.TransformBase64}}}},
+			Parent:     xmltree.DocumentElement(doc),
+		})
+		if c.want == nil {
+			if !errors.Is(err, xmlsec.ErrMalformed) {
+				t.Errorf("%s: %v", c.name, err)
+			}
+			continue
+		}
+		want := sha256.Sum256(c.want)
+		if err != nil || findDigestValue(sig) != base64.StdEncoding.EncodeToString(want[:]) {
+			t.Errorf("%s: %v", c.name, err)
+		}
+	}
 }

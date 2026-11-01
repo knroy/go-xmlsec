@@ -86,6 +86,8 @@ nil, has no surroundings to change and is exempt.
 `Reference.Type` that is not a URI. It refuses with `xmlsec.ErrNotNFC` to
 sign a same-document reference, or a `ds:SignedInfo`, whose canonical form is
 not in Unicode Normalization Form C (§8.1.3): normalize your content first.
+The octets a final base64 transform decodes are not character data and are
+not checked, so binary content signs.
 
 `ds:KeyInfo` and every `ds:Object` are built before any reference is
 digested, so a reference to `"#"+KeyInfoID` signs the key information as it
@@ -734,8 +736,9 @@ What `Verify` accepts, with at most one `ds:KeyName` beside, reported in
   public key, such as a certificate and its re-issue, count as one (§4.5.4).
   That leaf is the signing certificate, the first of them in document order
   when several carry its key; the rest are `Coverage.Intermediates`. Leaves
-  for different keys are refused with `ErrUnsupportedKeyInfo`. Each `ds:X509CRL`
-  is in `Coverage.CRLs`, none of them checked. An `X509IssuerSerial`,
+  for different keys are refused with `ErrUnsupportedKeyInfo`. Each `ds:X509CRL`,
+  up to 16, is in `Coverage.CRLs`, none of them checked; with a key pinned
+  they are neither decoded nor reported. An `X509IssuerSerial`,
   `X509SKI`, `X509SubjectName` or `dsig11:X509Digest` beside the
   certificates selects nothing and is ignored: real signers renew a
   certificate and leave a stale one. With `StrictX509Data` each must
@@ -784,7 +787,7 @@ More options:
 | `ResolveOmittedURI func() ([]byte, error)` | Supplies the data of the one `ds:Reference` without a URI that XML Signature §4.4.3.1 allows; `Coverage.OmittedURISigned` reports that it was covered. Without it, such a reference is refused. |
 | `ResolveURI xmlsec.URIResolver` | Supplies the octets of a reference to an absolute URI such as `http:`; see External references below. Without it, such a reference is refused. |
 | `BaseURI string` | The absolute URI a relative reference URI is resolved against before `ResolveURI` sees it; never taken from the document. Without it, a relative URI is refused. |
-| `RequireNFC` | Refuse with `ErrNotNFC` a `ds:SignedInfo`, or the canonical octets of a same-document reference, that is not in Unicode Normalization Form C. Off by default. |
+| `RequireNFC` | Refuse with `ErrNotNFC` a `ds:SignedInfo`, or the canonical octets of a same-document reference, that is not in Unicode Normalization Form C; the octets a final base64 transform decodes are not checked. Off by default. |
 | `StrictX509Data` | Refuse an `X509IssuerSerial`, `X509SKI`, `X509SubjectName` or `dsig11:X509Digest` beside the carried certificates that describes none of them (XML Signature §4.5.4). Off by default: a descriptor beside a certificate selects nothing, and real signers leave stale ones after renewing. |
 | `ResolveKeyName`, `ResolveX509`, `ResolveKeyInfoURI` | Resolve a key the message names without carrying it; see [KeyInfo forms](#keyinfo-forms). |
 

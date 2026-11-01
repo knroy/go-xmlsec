@@ -103,11 +103,13 @@ func admitXPath(t *xdm.Node, allowed []dsig.XPathExpression) (*xpathStep, error)
 // decode applies the XPath transform and then base64 to the node set of
 // top's subtree. Base64 reads a node set's text nodes (XML-DSig 6.6.2), so
 // the expression is evaluated for text nodes only, which leaves the same
-// text as filtering every node would; the selected text is concatenated in
-// document order, as xmlsec1 and Santuario do.
+// text as filtering every node would; the selected text is decoded as
+// concatenated in document order, as xmlsec1 and Santuario do, without
+// being concatenated.
 func (x *xpathStep) decode(top *xdm.Node) ([]byte, error) {
-	lib := xpathfilter.Library(x.here, top.Root())
-	var b strings.Builder
+	// One context, refocused per node, as dsig's XPath transform does.
+	ctx := xpath.NewContext(top, xpathfilter.Library(x.here, top.Root()))
+	var texts []string
 	var err error
 	var walk func(n *xdm.Node)
 	walk = func(n *xdm.Node) {
@@ -120,8 +122,8 @@ func (x *xpathStep) decode(top *xdm.Node) ([]byte, error) {
 			}
 			if c.Kind() == xdm.KindText {
 				var keep bool
-				if keep, err = x.expr.EvalBool(xpath.NewContext(c, lib).WithFocus(c, 1, 1)); keep {
-					b.WriteString(c.Value())
+				if keep, err = x.expr.EvalBool(ctx.WithFocus(c, 1, 1)); keep {
+					texts = append(texts, c.Value())
 				}
 			}
 			walk(c)
@@ -131,5 +133,5 @@ func (x *xpathStep) decode(top *xdm.Node) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: evaluating the CipherReference XPath: %v", xmlsec.ErrMalformed, err)
 	}
-	return decode64(b.String())
+	return decode64(texts...)
 }

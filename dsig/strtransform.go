@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"hash"
+	"io"
 	"slices"
 	"strings"
 
@@ -123,35 +124,56 @@ func x509Token(str *xdm.Node, cert *x509.Certificate) *xdm.Node {
 	return bst
 }
 
-// strOctets is the output of the STR Dereference Transform for token,
-// canonicalized by alg: under Exclusive C14N with prefixes and the default
+// writeSTR writes into w the output of the STR Dereference Transform for
+// token, canonicalized by alg: under Exclusive C14N with prefixes and the default
 // namespace inclusive, and with xmlns="" on the apex when no default
 // namespace is in scope there, as section 8.3 requires. That is WSS4J's
 // reading, which canonicalizes with "#default" inclusive and Santuario's
 // propagateDefaultNamespace, whatever PrefixList the transform states; a
 // default namespace in scope is therefore rendered. Sign states the
 // "#default" it digests (see strTransformParams).
-func strOctets(token *xdm.Node, alg string, prefixes []string) ([]byte, error) {
+func writeSTR(w io.Writer, token *xdm.Node, alg string, prefixes []string) error {
 	if !slices.Contains(prefixes, "") {
 		prefixes = append(slices.Clone(prefixes), "")
 	}
-	b, err := c14n.Bytes(token, c14n.Options{Algorithm: c14n.Algorithm(alg), InclusiveNamespacePrefixes: prefixes})
-	if err != nil {
-		return nil, err
+	return c14n.Write(&apexWriter{w: w}, token, c14n.Options{Algorithm: c14n.Algorithm(alg), InclusiveNamespacePrefixes: prefixes})
+}
+
+// apexWriter passes the canonical form of an element on to w, holding back
+// only its start tag, to which it adds xmlns="" when the tag declares no
+// default namespace. Canonical form escapes '>' and '"' in attribute
+// values and has no empty-element tags: the start tag ends at the first
+// '>', and a default namespace declaration in it is written ` xmlns="`. It
+// sorts first, straight after the element name.
+type apexWriter struct {
+	w    io.Writer
+	tag  []byte
+	done bool
+}
+
+func (a *apexWriter) Write(p []byte) (int, error) {
+	if a.done {
+		return a.w.Write(p)
 	}
-	// Canonical form escapes '>' and '"' in attribute values and has no
-	// empty-element tags: the apex start tag ends at the first '>', and a
-	// default namespace declaration in it is written ` xmlns="`. It sorts
-	// first, straight after the element name.
-	tag := b[:bytes.IndexByte(b, '>')]
+	i := bytes.IndexByte(p, '>')
+	if i < 0 {
+		a.tag = append(a.tag, p...)
+		return len(p), nil
+	}
+	a.done = true
+	tag := append(a.tag, p[:i]...)
 	if !bytes.Contains(tag, []byte(` xmlns="`)) {
 		name := len(tag)
-		if i := bytes.IndexByte(tag, ' '); i >= 0 {
-			name = i
+		if j := bytes.IndexByte(tag, ' '); j >= 0 {
+			name = j
 		}
-		b = slices.Insert(b, name, []byte(` xmlns=""`)...)
+		tag = slices.Insert(tag, name, []byte(` xmlns=""`)...)
 	}
-	return b, nil
+	if _, err := a.w.Write(tag); err != nil {
+		return 0, err
+	}
+	n, err := a.w.Write(p[i:])
+	return i + n, err
 }
 
 // strC14N is the canonicalization algorithm of an STR Dereference
@@ -173,11 +195,9 @@ func (d *data) digestSTR(w hash.Hash, t TransformSpec, only bool) error {
 	if err != nil {
 		return err
 	}
-	b, err := strOctets(tok, strC14N(t), t.InclusiveNamespacePrefixes)
-	if err != nil {
+	if err := writeSTR(w, tok, strC14N(t), t.InclusiveNamespacePrefixes); err != nil {
 		return err
 	}
-	w.Write(b)
 	d.token = tok
 	return nil
 }
@@ -214,7 +234,7 @@ func parseSTRTransform(spec TransformSpec) (TransformSpec, error) {
 // Dereference Transform that Sign emits: Exclusive C14N, with
 // t.InclusiveNamespacePrefixes and the default namespace as its PrefixList.
 // The transform renders the default namespace whatever the PrefixList says
-// (see strOctets), so "#default" is always stated: the parameter then names
+// (see writeSTR), so "#default" is always stated: the parameter then names
 // the octets digested, and WSS4J, which ignores the PrefixList, verifies it
 // all the same.
 func strTransformParams(tr *xdm.Node, t TransformSpec) error {

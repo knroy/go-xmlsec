@@ -1,9 +1,11 @@
 package dsig
 
 import (
+	"bytes"
 	"encoding/base64"
 	"fmt"
 	"hash"
+	"io"
 	"net/url"
 	"regexp"
 	"strings"
@@ -173,7 +175,7 @@ func digestReference(h hash.Hash, doc, sig *xdm.Node, uri string, transforms []T
 	if err := in.digest(h, sig, uri, transforms, implicit); err != nil {
 		return out, err
 	}
-	if !in.covers(out.element) {
+	if !in.covers() {
 		// A filter dropped part of the target: it is not covered.
 		out = dereferenced{}
 	}
@@ -198,13 +200,13 @@ type data struct {
 	// attachment is the cid: target, for the SwA transforms.
 	attachment *xmlsec.Attachment
 
-	// cut holds the nodes of the document an XPath or XPath Filter 2.0
-	// transform dropped, other than the signature's own. reparsed marks a
+	// cut is set once an XPath or XPath Filter 2.0 transform dropped a node
+	// of its input, other than the signature's own. reparsed marks a
 	// node set parsed from octets, whose nodes are not the document's;
 	// opaque marks data that no longer shows what of the target it came
 	// from: an XSLT output, or a filter over a reparsed node set that
 	// dropped something.
-	cut      []*xdm.Node
+	cut      bool
 	reparsed bool
 	opaque   bool
 
@@ -214,19 +216,10 @@ type data struct {
 	token    *xdm.Node
 }
 
-// covers reports whether the transforms kept all of el's subtree, or with
-// el nil, all of the data object.
-func (d *data) covers(el *xdm.Node) bool {
-	if d.opaque {
-		return false
-	}
-	for _, x := range d.cut {
-		if el == nil || within(x, el) {
-			return false
-		}
-	}
-	return true
-}
+// covers reports whether the transforms kept all of the data object. A
+// filter's input is never more than the dereferenced subtree, or else
+// reparsed, so a cut node always lies within it.
+func (d *data) covers() bool { return !d.opaque && !d.cut }
 
 // digest applies transforms to d and writes the resulting octets into h;
 // sig, uri and implicit are as for digestReference.
@@ -263,7 +256,7 @@ func (d *data) digest(h hash.Hash, sig *xdm.Node, uri string, transforms []Trans
 				if err != nil {
 					return fmt.Errorf("%w: parsing octets for %s: %w", xmlsec.ErrMalformed, alg, err)
 				}
-				d.ns, d.stripComments, d.reparsed = c14n.Document(tree.Root), false, true
+				d.ns, d.octets, d.stripComments, d.reparsed = c14n.Document(tree.Root), nil, false, true
 			}
 			c := c14n.Algorithm(alg)
 			if plain, ok := withoutComments[c]; ok && d.stripComments {
@@ -284,18 +277,32 @@ func (d *data) digest(h hash.Hash, sig *xdm.Node, uri string, transforms []Trans
 			d.ns, d.octets = nil, b
 
 		case alg == xmlsec.TransformBase64:
+			// The decoded octets go straight into the digest when nothing
+			// follows. They are not character data, so they are not checked
+			// for NFC (XML-DSig 8.1.3): only canonical XML is.
+			var out bytes.Buffer
+			dec := base64Decoder{w: &out}
+			if last {
+				dec.w = h
+				if n, ok := h.(*nfcHash); ok {
+					dec.w = n.Hash
+				}
+			}
 			if d.ns != nil {
 				// XML-DSig 6.6.2: a node set becomes octets as self::text(),
 				// in document order, concatenated.
-				d.ns, d.octets = nil, []byte(textOf(d.ns))
+				eachText(d.ns, dec.write)
+			} else {
+				out.Grow(len(d.octets) / 4 * 3)
+				dec.write(string(d.octets))
 			}
-			// RFC 2045 section 6.8, which XML-DSig 6.6.2 names: characters
-			// outside the base64 alphabet are ignored, not only whitespace.
-			b, err := base64.StdEncoding.DecodeString(strings.Map(base64Alphabet, string(d.octets)))
-			if err != nil {
+			if err := dec.close(); err != nil {
 				return fmt.Errorf("%w: base64 transform: %v", xmlsec.ErrMalformed, err)
 			}
-			d.octets = b
+			if last {
+				return nil
+			}
+			d.ns, d.octets = nil, out.Bytes()
 
 		case alg == xmlsec.TransformAttachmentContentSignature, alg == xmlsec.TransformAttachmentCompleteSignature:
 			// SwA profile 5.3 and 5.4.4: the first transform of a cid:
@@ -331,7 +338,12 @@ func (d *data) digest(h hash.Hash, sig *xdm.Node, uri string, transforms []Trans
 			}
 
 		case alg == xmlsec.TransformXSLT:
-			if err := d.transformXSLT(t); err != nil {
+			var w io.Writer
+			if last {
+				// Streamed into the digest, not collected first.
+				w = h
+			}
+			if err := d.transformXSLT(t, w); err != nil || last {
 				return err
 			}
 
@@ -353,27 +365,71 @@ func (d *data) digest(h hash.Hash, sig *xdm.Node, uri string, transforms []Trans
 	return nil
 }
 
-// base64Alphabet keeps r if it is in the base64 alphabet or the pad, for
-// strings.Map, and drops it otherwise.
-func base64Alphabet(r rune) rune {
-	if 'A' <= r && r <= 'Z' || 'a' <= r && r <= 'z' || '0' <= r && r <= '9' || r == '+' || r == '/' || r == '=' {
-		return r
-	}
-	return -1
+// base64Decoder decodes base64 text written to it into w, a chunk at a
+// time, ignoring every octet outside the base64 alphabet and the pad (RFC
+// 2045 section 6.8, which XML-DSig 6.6.2 names). That is what filtering the
+// runes of the text would do: no UTF-8 sequence, valid or not, holds an
+// ASCII octet. Chunks are whole quanta, so each decodes as it would within
+// the whole text, except that a pad ending a chunk with text after it is
+// trailing garbage there.
+type base64Decoder struct {
+	w   io.Writer
+	buf [4096]byte
+	n   int // octets in buf
+	at  int // octets of filtered text before buf
+	out [3072]byte
+	err error
 }
 
-// textOf concatenates the text nodes of ns in document order.
-func textOf(ns c14n.NodeSet) string {
-	var b strings.Builder
+func (d *base64Decoder) write(s string) {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !('A' <= c && c <= 'Z' || 'a' <= c && c <= 'z' || '0' <= c && c <= '9' || c == '+' || c == '/' || c == '=') {
+			continue
+		}
+		if d.n == len(d.buf) {
+			if d.flush(true); d.err != nil {
+				return
+			}
+		}
+		d.buf[d.n] = c
+		d.n++
+	}
+}
+
+// flush decodes buf, which ends the text unless more is set.
+func (d *base64Decoder) flush(more bool) {
+	if d.err != nil {
+		return
+	}
+	k, err := base64.StdEncoding.Decode(d.out[:], d.buf[:d.n])
+	if err == nil && more && d.buf[d.n-1] == '=' {
+		err = base64.CorruptInputError(d.n - 1)
+	}
+	if err != nil {
+		d.err = err.(base64.CorruptInputError) + base64.CorruptInputError(d.at)
+		return
+	}
+	_, _ = d.w.Write(d.out[:k]) // a hash or a bytes.Buffer, which never fail
+	d.at, d.n = d.at+d.n, 0
+}
+
+// close decodes what is left and reports the first error.
+func (d *base64Decoder) close() error {
+	d.flush(false)
+	return d.err
+}
+
+// eachText calls f with each text node of ns in document order.
+func eachText(ns c14n.NodeSet, f func(string)) {
 	var walk func(n *xdm.Node)
 	walk = func(n *xdm.Node) {
 		if n.Kind() == xdm.KindText && ns.Contains(n) {
-			b.WriteString(n.Value())
+			f(n.Value())
 		}
 		for c := range n.Children() {
 			walk(c)
 		}
 	}
 	walk(ns.Root())
-	return b.String()
 }

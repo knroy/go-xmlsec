@@ -7,27 +7,48 @@ promise and how a release is cut.
 
 ## Unreleased
 
-A pre-authentication memory fix, and the go-xmlsec findings of a memory audit.
-No exported API changes. Digests, signatures and ciphertext are byte-identical
-to v2.0.1, which tests pin with golden hashes taken from it.
+Fixes for resource exhaustion before authentication, two correctness fixes,
+and the go-xmlsec findings of two memory audits. No exported API changes.
+Digests, signatures and ciphertext are byte-identical to v2.0.1, which tests
+pin with golden hashes taken from it; the one changed output is the
+`DecryptHeader` namespace fix under *Fixed*. The new refusals are listed
+under *Fixed — security*, each far above anything deployed.
 
 ### Fixed — security
 
 | Change | Problem → solution | Commit |
 |---|---|---|
 | A PkiPath or PKCS7 `BinarySecurityToken` of many tiny elements exhausted memory before authentication | Resolving the signer's key decoded a PkiPath into a slice of every element, and read every SignedData field, before the signature was checked: a 60 MiB message of 2-byte NULLs allocated 4.2 GB (PkiPath) or 3.3 GB (PKCS7), about 77× and 59× the token. The PkiPath is walked one element at a time, keeping only the last, and refused past 16 certificates with `ErrUnsupportedKeyInfo`, as PKCS7 already was; a seventh SignedData field is `ErrMalformed`. Peak heap is now 0.76× the token (the base64 decode). `AddBinarySecurityToken` refuses a PkiPath chain of more than 15 beside the certificate. | *this commit* |
+| `xenc.ReferencedData` walked the document once per reference | A received `ReferenceList` of n references cost n walks of the message before any decryption: 20,000 took 6 s, and the parse limits allow far more. One walk now finds every requested ID; results and errors, in order, are unchanged. 20,000 references: 0.08 s. | *this commit* |
+| An RSA key had no maximum size | A 1 MiB `ds:Modulus` in `ds:KeyValue` cost 110 s of CPU and 37 GB in RSA verification before the signature was rejected, and nothing in `crypto/rsa` or `crypto/x509` caps it. RSA keys over 16,384 bits (OpenSSL's limit) are refused with `ErrUnsupportedKeyInfo`, raw keys before they are decoded, in `ds:KeyValue`, `dsig11:DEREncodedKeyValue`, every `ds:X509Certificate` and every `BinarySecurityToken` certificate. A pinned key still tolerates such a certificate in `ds:KeyInfo`. | *this commit* |
+| An `InclusiveNamespaces` PrefixList was deduplicated quadratically | 1 MiB of distinct prefixes took 12 s in go-xml's `c14n.ParsePrefixList`. More than 1,024 prefixes is `ErrMalformed`, before parsing. | *this commit* |
+| `X509SerialNumber` was parsed quadratically | `big.Int.SetString` on 1 MiB of digits took 0.9 s and 2.4 GB. In `ds:X509IssuerSerial` more than 128 digits is `ErrMalformed`; `wss.MatchSecurityTokenReference` reports no match, before parsing, for more digits than the certificate's serial. At most 16 `ds:X509CRL` are read, and none with a pinned key. | *this commit* |
+
+### Fixed
+
+| Change | Problem → solution | Commit |
+|---|---|---|
+| `Sign`, and `Verify` with `RequireNFC`, refused a base64 transform over binary content | The Unicode normalization check (XML-DSig 8.1.3) ran over the octets the transform decoded, so random bytes were `ErrNotNFC`. Decoded octets are no longer checked; canonical XML and XSLT output still are. | *this commit* |
+| `DecryptHeader` put a decrypted block in the SOAP Header's default namespace | An `EncryptedHeader` carrying `xmlns=""` under a Header with a default namespace gave its block's unprefixed elements the Header's namespace, in the parse and in the output (XML Encryption 1.1 section 4.5.4). The undeclaration is kept. | *this commit* |
 
 ### Changed — memory
 
 | Change | Problem → solution | Commit |
 |---|---|---|
-| An `xmlsec.Document` kept every earlier tree | Each change kept a map from every node to its copy, whose keys pinned every old tree: the send flow (`AssignID`, `NewHeader`, timestamp, token, `dsig.Sign`, `Prepend`) peaked at 55× and retained 53× a 1 MiB message. Each change now keeps runs of positions (`Node.Index`) and holds earlier trees only by weak pointer; `Node` answers as before. Peak 16×, retained 5.3×, allocation −57%. A `wss.Header` holds its element in the latest tree. | *this commit* |
+| An `xmlsec.Document` kept every earlier tree | Each change kept a map from every node to its copy, whose keys pinned every old tree: the send flow (`AssignID`, `NewHeader`, timestamp, token, `dsig.Sign`, `Prepend`) peaked at 55× and retained 53× a 1 MiB message. Each change now keeps runs of positions (`Node.Index`) and holds earlier trees only by weak pointer; `Node` answers as before. Peak 11×, retained 5.3×, allocation −57%. A `wss.Header` holds its element in the latest tree. | *this commit* |
 | The BSP R5205 token-order check and every new ID built a map over the document | Outside a header, the order check numbered every element (10× the document at 1 MiB); it compares `Node.Index`. A new or supplied ID was checked against a set of every ID value (2.3× on an ID-dense document); each candidate is looked for by walking. Results and errors are unchanged. | *this commit* |
 | The NFC check of `Sign`, and of `Verify` with `RequireNFC`, buffered the whole canonical form | It is checked as written, keeping only the text after the last normalization boundary: a detached `Sign` at 10 MiB peaks at 0.017× the reference (from 2.65×), `Verify` with `RequireNFC` at 0.016×. Tested against whole-buffer `IsNormal` over random write splits. | *this commit* |
 | The XPath transform made an evaluation context for every node, and both XPath transforms kept a map entry per node of their output | One context per transform, refocused per node; the output node set is a bitset by `Node.Index`. XPath 1.0 allocation 133× → 54× the document, XPath Filter 2.0 subtract peak 16.8× → 0.88×. The go-xml node budget (`MaxNodes`) is now charged across the transform rather than per node: stricter, and unreachable by an XPath 1.0 filter, which constructs no nodes. | *this commit* |
 | Encryption and decryption copied their buffers | `EncryptElement`, `EncryptContent` and `EncryptHeader` seal AES-GCM in place and write base64 straight into the text (allocation 6.0× → 3.8× at 10 MiB); decryption opens in the buffer it decoded, never in bytes the caller supplied (`DecryptData` 2× → 1×); `DecryptAndReplace` and `DecryptHeader` rebuild the document without a node map (peak 8.7× → 7.1×); `EncryptAttachment` Complete seals one buffer (2× → 1×); a wrapped `CipherValue` is decoded in chunks (1.73 → 0.73 bytes per text byte, twice as fast). | *this commit* |
+| `DecryptAndReplace` and `DecryptHeader` copied the decrypted tree into the document | The document is rebuilt and canonicalized with a random comment in the `EncryptedData`'s place, and the plaintext, parsed straight from the decrypted bytes under a wrapper declaring the namespaces in scope there, is canonicalized into that spot. Peak 7.1× → 4.75×, allocation 8.65× → 4.78× at 10 MiB. A document element, a comment already in the document, or content near the canonicalization depth limit takes the old path. Byte-identical: `TestSpliceMatchesEmit` holds 519 decryptions to the v2.0.1 path. | *this commit* |
+| `EncryptElement`, `EncryptContent` and `EncryptHeader` held the ciphertext's base64 as text twice | The `CipherValue` holds a random marker while the document is canonicalized, and the base64 is encoded straight into the output allocated once: 3.76× → 2.33× at 10 MiB, golden hashes unchanged. A document that already holds the marker is refused, by chance only. | *this commit* |
+| An external base64 `CipherReference`, and one an XPath selects, joined their text before decoding | The text is decoded in place, a chunk at a time, from the resolved bytes or the selected text nodes: base64 3.94× → 0.74×; the XPath transform also uses one evaluation context, refocused per text node: 23.1× → 10.8× allocated at 10 MiB. White space other than XML's takes the old decoding, so results and errors are unchanged. | *this commit* |
+| Derived key material stayed in memory | Agreed, DH and password KEKs, shared secrets, derived data keys, failed unwrap outputs, CBC plaintext with bad padding and parsed plaintext are cleared after use; caller keys never are. | *this commit* |
 | `go-xml` v2.0.3 → v2.1.0 | Its memory release, which addressed what go-xmlsec reported: pooled c14n buffers (a 50-reference `Verify` 8.3 MB → 0.15 MB), sized `c14n.Bytes` (3.6× → 1.2× the output), long text handed to the tree (base64 text parse 2.0× → 1.1×), and `Node.Index` and `Tree.NodeAt`, which the `Document` change uses. Canonical output is unchanged. | *this commit* |
 | `Parse` memory figures | Re-measured on go-xml v2.1.0: about 20 times the input at worst, from about 40; [docs/security.md](docs/security.md) has the table. | *this commit* |
+| The base64, XSLT and STR transforms buffered their output | Base64 decodes a chunk at a time and, as the last transform, streams into the digest (peak 3.75× → 0.01× at 10 MiB); XSLT and the STR Dereference Transform stream when last (XSLT allocation −5×); octets are released once re-parsed; the NFC buffer is pooled. XPath Filter 2.0 records only whether anything was cut (intersect peak 2.65× → 1.48×), and the XPath 1.0 transform reuses one context (allocation 54× → 41×). | *this commit* |
+| wss walked or collected every child of wide elements, and quoted whole attacker values in errors | Lookups stop at the elements they need (about 10× → 0 on a wide header or Security element); a value quoted in an error is cut at 64 bytes (an error was 3× the input); issuer names fold in one pass (10× → 2×); `CheckUniqueIDs` sorts instead of mapping (4× → 1.2×). | *this commit* |
+| SwA transforms not last in a reference grew their buffer by doubling | A regression from v2.0.1's streaming: XML 7.4× → 5.5×, text 2.8× → 1.1×. `Selected` builds its replacer once (62 → 17 allocations), and Content-Type is parsed once. | *this commit* |
 
 ## v2.0.1 — 2026-10-31
 

@@ -2,8 +2,12 @@ package xmlsec
 
 import (
 	"errors"
+	"fmt"
+	"io"
 	"strings"
 	"testing"
+
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // Assert the effective DOCTYPE behaviour rather than trust the upstream
@@ -90,6 +94,22 @@ func TestParseWithLimits(t *testing.T) {
 	} {
 		if _, err := ParseWithLimits([]byte(`<a/>`), l); err == nil {
 			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+// The reader parse the internal packages use is Parse, limits and errors
+// included, over the octets a reader holds.
+func TestParseReader(t *testing.T) {
+	for _, doc := range []string{`<a><b/>t</a>`, `<!DOCTYPE a><a/>`, `<a>`, strings.Repeat("<a>", MaxParseDepth+1)} {
+		want, werr := Parse([]byte(doc))
+		got, err := xmltree.Parse(io.MultiReader(strings.NewReader(doc[:len(doc)/2]), strings.NewReader(doc[len(doc)/2:])))
+		if fmt.Sprint(err) != fmt.Sprint(werr) || errors.Is(err, ErrLimitExceeded) != errors.Is(werr, ErrLimitExceeded) ||
+			errors.Is(err, ErrMalformed) != errors.Is(werr, ErrMalformed) || (got == nil) != (want == nil) {
+			t.Fatalf("%.20q: got %v, want %v", doc, err, werr)
+		}
+		if got != nil && got.Root.StringValue() != want.Root.StringValue() {
+			t.Fatalf("%q: different trees", doc)
 		}
 	}
 }

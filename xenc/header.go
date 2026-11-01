@@ -127,9 +127,22 @@ func DecryptHeader(doc, eh *xdm.Node, sessionKey []byte, opts DecryptOptions) ([
 	if err != nil {
 		return nil, err
 	}
-	nodes, err := parseIn(pt, eh)
+	// Parsed nested in the SOAP Header's namespaces, for splice; within
+	// a limit only the outer wrapper exceeds, as before.
+	size := len(pt)
+	nodes, err := parseIn(pt, eh, eh.Parent())
+	nested := !errors.Is(err, xmlsec.ErrLimitExceeded)
+	if !nested {
+		nodes, err = parseIn(pt, eh)
+	}
+	clear(pt)
 	if err != nil || len(nodes) != 1 || nodes[0].Kind() != xdm.KindElement {
 		return nil, errDecrypt
+	}
+	if nested {
+		if out, ok := splice(doc, eh, nodes, size); ok {
+			return out, nil
+		}
 	}
 	// Declare on the block what eh's context binds, so it keeps its
 	// meaning under eh's parent.
@@ -144,6 +157,17 @@ func DecryptHeader(doc, eh *xdm.Node, sessionKey []byte, opts DecryptOptions) ([
 		}
 		if p != "xml" && ns[p] != "" && !declared {
 			e.Declare(block, p, ns[p])
+		}
+	}
+	// An xmlns="" in eh's context is absent from ns; under a parent with a
+	// default namespace the block must undeclare it too.
+	if _, ok := ns[""]; !ok && eh.Parent().InScopeNamespaces()[""] != "" {
+		declared := false
+		for q := range block.DeclaredNamespaces() {
+			declared = declared || q == ""
+		}
+		if !declared {
+			e.Declare(block, "", "")
 		}
 	}
 	return emit(doc, &e)

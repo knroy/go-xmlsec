@@ -3,7 +3,6 @@ package wss
 import (
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/knroy/go-xml/v2/xdm"
@@ -68,7 +67,7 @@ func NewHeader(doc *xmlsec.Document, soapNS string, actor string, mustUnderstand
 	}
 
 	var hdr *xdm.Node
-	if kids := env.ChildElements(); len(kids) > 0 && kids[0].IsElement(soapNS, "Header") {
+	if kids := firstElements(env, 1); len(kids) > 0 && kids[0].IsElement(soapNS, "Header") {
 		hdr = kids[0]
 		if len(securityHeaders(hdr, soapNS, actor)) > 0 {
 			return nil, fmt.Errorf("wss: a wsse:Security header for actor %q already exists", actor)
@@ -148,16 +147,20 @@ func (h *Header) Prepend(el *xdm.Node) error {
 		return errors.New("wss: Prepend needs a detached element")
 	}
 	tokens := refs(el, xmlsec.NSWSSE, "Reference")
-	kids := slices.Collect(h.sec().Children())
-	i := h.front()
-	for j, c := range kids {
-		if hasAnyID(c, tokens) {
-			i = max(i, j+1)
+	sec := h.sec()
+	i, j := h.front(), 0
+	for c := range sec.Children() {
+		if j++; hasAnyID(c, tokens) {
+			i = max(i, j)
 		}
 	}
 	data := refs(el, xmlsec.NSXEnc, "DataReference")
-	for _, c := range kids[:i] {
-		if hasAnyID(c, data) {
+	j = 0
+	for c := range sec.Children() {
+		if j == i {
+			break
+		}
+		if j++; hasAnyID(c, data) {
 			return fmt.Errorf("wss: %s would follow an xenc:EncryptedData it lists", el.Name().Local)
 		}
 	}
@@ -256,7 +259,7 @@ func securityHeaders(hdr *xdm.Node, soapNS, actor string) []*xdm.Node {
 		return a
 	}
 	var out []*xdm.Node
-	for _, e := range hdr.ChildElements() {
+	for e := range hdr.Children() {
 		if e.IsElement(xmlsec.NSWSSE, "Security") && recipient(xmltree.AttrValue(e, soapNS, actorAttribute(soapNS))) == recipient(actor) {
 			out = append(out, e)
 		}

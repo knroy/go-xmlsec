@@ -1,6 +1,7 @@
 package dsig_test
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"runtime"
@@ -141,6 +142,42 @@ func BenchmarkNFCMemory(b *testing.B) {
 	}
 }
 
+// BenchmarkNFCRefsMemory measures the NFC check over 50 references of
+// 9 KB, where its working buffer is a large part of what it costs.
+func BenchmarkNFCRefsMemory(b *testing.B) {
+	var src strings.Builder
+	src.WriteString(`<r>`)
+	var refs []dsig.Reference
+	for i := range 50 {
+		fmt.Fprintf(&src, `<e xml:id="e%d">%s</e>`, i, strings.Repeat("café ünïcode line ", 500))
+		refs = append(refs, dsig.Reference{URI: fmt.Sprintf("#e%d", i), Transforms: []dsig.TransformSpec{xpExc}, DigestAlgorithm: xmlsec.DigestSHA256})
+	}
+	src.WriteString(`</r>`)
+	doc := parse(b, []byte(src.String()))
+	opts := dsig.SignOptions{
+		SignatureAlgorithm:        xmlsec.SigRSASHA256,
+		CanonicalizationAlgorithm: string(c14n.Exclusive10),
+		References:                refs,
+		Parent:                    xmltree.DocumentElement(doc),
+	}
+	var signed, sig *xdm.Node
+	b.Run("sign", func(b *testing.B) {
+		memRun(b, src.Len(), func() error {
+			d := xmlsec.NewDocument(doc)
+			var err error
+			sig, err = dsig.Sign(d, newKey(b, rsaKey), opts)
+			signed = d.Root()
+			return err
+		})
+	})
+	b.Run("verify", func(b *testing.B) {
+		memRun(b, src.Len(), func() error {
+			_, err := dsig.Verify(signed, sig, dsig.VerifyOptions{PublicKey: &rsaKey.PublicKey, RequireNFC: true})
+			return err
+		})
+	})
+}
+
 // BenchmarkXPathMemory measures an XPath transform, which evaluates its
 // expression once per input node.
 func BenchmarkXPathMemory(b *testing.B) {
@@ -173,5 +210,86 @@ func BenchmarkXPathFilter2Memory(b *testing.B) {
 				})
 			})
 		}
+	}
+}
+
+// BenchmarkBase64TransformMemory measures the base64 transform over the
+// text of an element, wrapped at 76 columns: as the last transform, and
+// followed by canonicalization of the XML it decodes to.
+func BenchmarkBase64TransformMemory(b *testing.B) {
+	for _, mib := range memSizes() {
+		enc := base64.StdEncoding.EncodeToString([]byte(memDoc(mib)))
+		var w strings.Builder
+		w.WriteString(`<r><o xml:id="o">`)
+		for len(enc) > 76 {
+			w.WriteString(enc[:76] + "\n")
+			enc = enc[76:]
+		}
+		w.WriteString(enc + `</o></r>`)
+		src := w.String()
+		for _, c := range []struct {
+			name string
+			ts   []dsig.TransformSpec
+		}{
+			{"last", []dsig.TransformSpec{{Algorithm: xmlsec.TransformBase64}}},
+			{"then-c14n", []dsig.TransformSpec{{Algorithm: xmlsec.TransformBase64}, xpExc}},
+		} {
+			doc := parse(b, []byte(src))
+			opts := dsig.SignOptions{
+				SignatureAlgorithm:        xmlsec.SigRSASHA256,
+				CanonicalizationAlgorithm: string(c14n.Exclusive10),
+				References:                []dsig.Reference{{URI: "#o", Transforms: c.ts, DigestAlgorithm: xmlsec.DigestSHA256}},
+				Parent:                    xmltree.DocumentElement(doc),
+			}
+			var signed, sig *xdm.Node
+			b.Run(fmt.Sprintf("sign/%s/%dMiB", c.name, mib), func(b *testing.B) {
+				memRun(b, len(src), func() error {
+					d := xmlsec.NewDocument(doc)
+					var err error
+					sig, err = dsig.Sign(d, newKey(b, rsaKey), opts)
+					signed = d.Root()
+					return err
+				})
+			})
+			b.Run(fmt.Sprintf("verify/%s/%dMiB", c.name, mib), func(b *testing.B) {
+				memRun(b, len(src), func() error {
+					_, err := dsig.Verify(signed, sig, dsig.VerifyOptions{PublicKey: &rsaKey.PublicKey})
+					return err
+				})
+			})
+		}
+	}
+}
+
+// memSheet copies its input.
+const memSheet = `<xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0">` +
+	`<xsl:template match="@*|node()"><xsl:copy><xsl:apply-templates select="@*|node()"/></xsl:copy></xsl:template>` +
+	`</xsl:stylesheet>`
+
+// BenchmarkXSLTMemory measures an XSLT transform that copies a document, as
+// the last transform.
+func BenchmarkXSLTMemory(b *testing.B) {
+	for _, mib := range memSizes() {
+		src := memDoc(mib)
+		sheet := xmltree.DocumentElement(parse(b, []byte(memSheet)))
+		doc := parse(b, []byte(src))
+		ts := dsig.TransformSpec{Algorithm: xmlsec.TransformXSLT, Stylesheet: sheet}
+		b.Run(fmt.Sprintf("sign/%dMiB", mib), func(b *testing.B) {
+			memRun(b, len(src), func() error {
+				_, _, err := memSign(b, doc, false, ts)
+				return err
+			})
+		})
+		signed, sig, err := memSign(b, doc, true, ts)
+		if err != nil {
+			b.Fatal(err)
+		}
+		b.Run(fmt.Sprintf("verify/%dMiB", mib), func(b *testing.B) {
+			opts := dsig.VerifyOptions{Certificate: newKey(b, rsaKey).Certificate, AllowedXSLTStylesheets: []*xdm.Node{sheet}}
+			memRun(b, len(src), func() error {
+				_, err := dsig.Verify(signed, sig, opts)
+				return err
+			})
+		})
 	}
 }

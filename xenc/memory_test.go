@@ -3,6 +3,7 @@ package xenc_test
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -316,5 +317,45 @@ func BenchmarkEncryptAttachmentMemory(b *testing.B) {
 			_, _, err := xenc.EncryptAttachment(att, memKey, xmlsec.TransformAttachmentComplete, memOpts)
 			return err
 		}
+	})
+}
+
+// wrap64 is the base64 encoding of b in lines of 76, joined by sep.
+func wrap64(b []byte, sep string) string {
+	e := base64.StdEncoding.EncodeToString(b)
+	var s strings.Builder
+	for len(e) > 76 {
+		s.WriteString(e[:76] + sep)
+		e = e[76:]
+	}
+	s.WriteString(e)
+	return s.String()
+}
+
+// BenchmarkCipherReferenceMemory measures DecryptData of an external
+// CipherReference whose octets are base64 in lines, and of one whose
+// ciphertext is selected by an XPath from an XML document, a text node per
+// line.
+func BenchmarkCipherReferenceMemory(b *testing.B) {
+	run := func(name, chain string, octets func(ct []byte) string) {
+		b.Run(name, func(b *testing.B) {
+			memBench(b, func(b *testing.B, n int) (int, func() error) {
+				src := []byte(octets(sealGCM(memKey, string(make([]byte, n*3/4)))))
+				tree, err := xmlsec.Parse([]byte(cipherRef("https://example.com/ct", chain)))
+				if err != nil {
+					b.Fatal(err)
+				}
+				opts := xenc.DecryptOptions{
+					AllowedXPathExpressions: allowExample13,
+					ResolveURI:              func(string) ([]byte, error) { return src, nil },
+				}
+				return len(src), func() error { _, err := xenc.DecryptData(xmltree.DocumentElement(tree.Root), memKey, opts); return err }
+			})
+		})
+	}
+	run("base64", base64T, func(ct []byte) string { return wrap64(ct, "\n") })
+	run("XPath", xpathT(repNS, example13)+base64T, func(ct []byte) string {
+		return `<rep:CipherValues xmlns:rep="` + repNS + `"><rep:CipherValue Id="example1">` +
+			wrap64(ct, "<!---->\n") + `</rep:CipherValue></rep:CipherValues>`
 	})
 }

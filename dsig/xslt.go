@@ -3,6 +3,7 @@ package dsig
 import (
 	"context"
 	"fmt"
+	"io"
 	"maps"
 	"slices"
 
@@ -82,8 +83,9 @@ func copyStylesheet(tr, s *xdm.Node) {
 // schema or package resolver, so xsl:include, xsl:import and their kin load
 // nothing, and no document, collection, text or environment resolver, so
 // document(), fn:doc and the rest read nothing. The output is bounded by
-// the largest document xmlsec.Parse accepts.
-func (d *data) transformXSLT(t TransformSpec) error {
+// the largest document xmlsec.Parse accepts. With out set, the output is
+// written to it as it is produced, within the same bound, and not kept.
+func (d *data) transformXSLT(t TransformSpec, out io.Writer) error {
 	src := d.octets
 	if d.ns != nil {
 		b, err := c14n.BytesNodeSet(d.ns, c14n.Options{Algorithm: c14n.Inclusive10})
@@ -107,7 +109,7 @@ func (d *data) transformXSLT(t TransformSpec) error {
 	if err != nil {
 		return fmt.Errorf("%w: XSLT transform: %v", xmlsec.ErrMalformed, err)
 	}
-	w := &boundedWriter{max: maxXSLTOutput}
+	w := &boundedWriter{w: out, max: maxXSLTOutput}
 	if err := res.Serialize(w); err != nil {
 		if w.over {
 			return fmt.Errorf("%w: XSLT output over %d bytes", xmlsec.ErrLimitExceeded, w.max)
@@ -119,17 +121,24 @@ func (d *data) transformXSLT(t TransformSpec) error {
 	return nil
 }
 
-// boundedWriter collects at most max bytes.
+// boundedWriter passes at most max bytes on to w, or collects them in b
+// when w is nil.
 type boundedWriter struct {
+	w    io.Writer
 	b    []byte
+	n    int
 	max  int
 	over bool
 }
 
 func (w *boundedWriter) Write(p []byte) (int, error) {
-	if len(w.b)+len(p) > w.max {
+	if w.n+len(p) > w.max {
 		w.over = true
 		return 0, xmlsec.ErrLimitExceeded
+	}
+	w.n += len(p)
+	if w.w != nil {
+		return w.w.Write(p)
 	}
 	w.b = append(w.b, p...)
 	return len(p), nil

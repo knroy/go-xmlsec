@@ -2,6 +2,7 @@ package xenc_test
 
 import (
 	"bytes"
+	"crypto/elliptic"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -270,5 +271,74 @@ func TestEncryptedKeyCipherReference(t *testing.T) {
 	if _, err := xenc.UnwrapEncryptedKey(covParse(t, kwEK(xmlsec.KeyWrapAES128, ``, ref("http://example.com/k", ``))), kek,
 		xenc.DecryptOptions{ResolveURI: resolve, AllowedKeyWrapAlgorithms: []string{xmlsec.KeyWrapAES256}}); !errors.Is(err, xmlsec.ErrAlgorithmNotAllowed) || called != calls {
 		t.Fatalf("resolver called before the allow-list: %v", err)
+	}
+}
+
+// The key material the package derives is cleared after use; what the
+// caller passes in, a KEK, a session key, a password, a master key or an
+// unwrapped key returned to it, never is.
+func TestCallerKeysKept(t *testing.T) {
+	kept := func(name string, keys ...[]byte) func() {
+		saved := make([][]byte, len(keys))
+		for i, k := range keys {
+			saved[i] = bytes.Clone(k)
+		}
+		return func() {
+			t.Helper()
+			for i, k := range keys {
+				if !bytes.Equal(k, saved[i]) {
+					t.Errorf("%s: caller key %d changed", name, i)
+				}
+			}
+		}
+	}
+	kek, pw, master := bytes.Repeat([]byte{3}, 16), []byte("a password, long"), bytes.Repeat([]byte{4}, 32)
+	opts := xenc.EncryptOptions{DataAlgorithm: xmlsec.EncAES128GCM, KeyTransportAlgorithm: xmlsec.KeyWrapAES128, KeyEncryptionKey: kek}
+	check := kept("KeyEncryptionKey", kek)
+	ek, err := xenc.GenerateEncryptedKey(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check()
+	check = kept("UnwrapEncryptedKey", kek, ek.SessionKey)
+	key, err := xenc.UnwrapEncryptedKey(ek.Element, kek, xenc.DecryptOptions{})
+	if err != nil || !bytes.Equal(key, ek.SessionKey) {
+		t.Fatal(err)
+	}
+	check()
+
+	check = kept("session key", ek.SessionKey)
+	doc := covParse(t, dkDoc)
+	out, err := xenc.EncryptElement(doc.Root(), firstNamed(doc, "p"), ek.SessionKey, xenc.EncryptOptions{DataAlgorithm: xmlsec.EncAES128GCM})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := xenc.DecryptData(firstNamed(covParse(t, string(out)), "EncryptedData"), ek.SessionKey, xenc.DecryptOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	check()
+
+	check = kept("Password and MasterKey", pw, master)
+	pwOpts := xenc.EncryptOptions{DataAlgorithm: xmlsec.EncAES128GCM, KeyTransportAlgorithm: xmlsec.KeyWrapAES128, Password: pw, PBKDF2Iterations: xenc.MinPBKDF2Iterations}
+	pek, err := xenc.GenerateEncryptedKey(pwOpts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := xenc.UnwrapEncryptedKeyPassword(pek.Element, pw, xenc.DecryptOptions{AllowedKeyDerivationAlgorithms: []string{xmlsec.KeyDerivationPBKDF2}})
+	if err != nil || !bytes.Equal(got, pek.SessionKey) {
+		t.Fatalf("password unwrap: %v", err)
+	}
+	dkEncrypt(t, xenc.EncryptOptions{DataAlgorithm: xmlsec.EncAES128GCM, Password: pw, PBKDF2Iterations: xenc.MinPBKDF2Iterations})
+	dkEncrypt(t, xenc.EncryptOptions{DataAlgorithm: xmlsec.EncAES128GCM, DigestAlgorithm: xmlsec.DigestSHA256, MasterKey: master})
+	check()
+
+	// An agreed KEK is cleared after the unwrap, not the key it unwraps.
+	r := newECRecipient(t, elliptic.P256(), xmlsec.KeyWrapAES128)
+	aek, err := xenc.GenerateEncryptedKey(r.opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := xenc.DecryptAgreedKey(aek.Element, r.priv, xenc.DecryptOptions{}); err != nil || !bytes.Equal(got, aek.SessionKey) {
+		t.Fatalf("agreed unwrap: %x, %v", got, err)
 	}
 }

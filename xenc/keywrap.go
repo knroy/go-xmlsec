@@ -73,6 +73,7 @@ func kwUnwrap(b cipher.Block, ct []byte) ([]byte, error) {
 		}
 	}
 	if subtle.ConstantTimeCompare(a[:], kwIV[:]) != 1 {
+		clear(out)
 		return nil, errUnwrap
 	}
 	return out, nil
@@ -89,6 +90,7 @@ func keyWrap(ek *xdm.Node, key []byte, opts EncryptOptions) ([]byte, error) {
 	// GenerateEncryptedKey has refused more than one of these.
 	kek := opts.KeyEncryptionKey
 	var err error
+	derived := true
 	switch {
 	case opts.Recipient != nil:
 		kek, err = agree(ek, opts.KeyTransportAlgorithm, size, opts)
@@ -96,9 +98,15 @@ func keyWrap(ek *xdm.Node, key []byte, opts EncryptOptions) ([]byte, error) {
 		kek, err = agreeDH(ek, opts.KeyTransportAlgorithm, size, opts)
 	case len(opts.Password) > 0:
 		kek, err = passwordKEK(ek, size, opts)
+	default:
+		derived = false
 	}
 	if err != nil {
 		return nil, err
+	}
+	if derived {
+		// Never the caller's KeyEncryptionKey.
+		defer clear(kek)
 	}
 	b, err := kwCipher(opts.KeyTransportAlgorithm, kek)
 	if err != nil {

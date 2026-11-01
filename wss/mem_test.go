@@ -2,10 +2,12 @@ package wss
 
 import (
 	"bytes"
+	"crypto/x509"
 	"encoding/asn1"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"runtime"
 	"runtime/debug"
@@ -211,6 +213,147 @@ func BenchmarkIDForMemory(b *testing.B) {
 			for b.Loop() {
 				peak := peakHeap(func() { _, _ = idFor(tree.Root, "fresh") })
 				b.ReportMetric(float64(peak)/float64(s.Len()), "peak-B/B")
+			}
+		})
+	}
+}
+
+// mustParse parses s for a benchmark.
+func mustParse(tb testing.TB, s string) *xdm.Node {
+	tree, err := xmlsec.Parse([]byte(s))
+	if err != nil {
+		tb.Fatal(err)
+	}
+	return tree.Root
+}
+
+// wideShapes returns, for a document of about size bytes, receive-side
+// calls on an element with very many element children.
+func wideShapes(tb testing.TB, size int) map[string]func() {
+	fill := strings.Repeat("<x/>", size/4)
+	env := `<soap:Envelope xmlns:soap="` + xmlsec.NSSOAP11 + `" xmlns:wsse="` + xmlsec.NSWSSE + `" xmlns:wsu="` + xmlsec.NSWSU +
+		`" xmlns:wsse11="` + xmlsec.NSWSSE11 + `" xmlns:ds="` + xmlsec.NSDSig + `">`
+	envDoc := mustParse(tb, env+`<soap:Header>`+fill+`<wsse:Security/></soap:Header><soap:Body/></soap:Envelope>`)
+	secDoc := mustParse(tb, env+`<soap:Header><wsse:Security><wsse:BinarySecurityToken wsu:Id="t" ValueType="`+xmlsec.BSTValueTypeX509v3+`">AA==</wsse:BinarySecurityToken>`+fill+
+		`<ds:Signature><ds:SignedInfo/><ds:SignatureValue>AA==</ds:SignatureValue><ds:KeyInfo><wsse:SecurityTokenReference><wsse:Reference URI="#t" ValueType="`+xmlsec.BSTValueTypeX509v3+
+		`"/></wsse:SecurityTokenReference></ds:KeyInfo></ds:Signature><wsse11:SignatureConfirmation wsu:Id="c" Value="AA=="/></wsse:Security></soap:Header><soap:Body/></soap:Envelope>`)
+	sec, err := FindHeader(secDoc, xmlsec.NSSOAP11, "")
+	if err != nil {
+		tb.Fatal(err)
+	}
+	ref := sec.LastChild().PrevSibling().LastChild().FirstChild()
+	ts := xmltree.DocumentElement(mustParse(tb, `<wsu:Timestamp xmlns:wsu="`+xmlsec.NSWSU+`">`+fill+`</wsu:Timestamp>`))
+	str := xmltree.DocumentElement(mustParse(tb, `<wsse:SecurityTokenReference xmlns:wsse="`+xmlsec.NSWSSE+`">`+fill+`</wsse:SecurityTokenReference>`))
+	cert := &x509.Certificate{SerialNumber: big.NewInt(1)}
+	return map[string]func(){
+		"FindHeader":                  func() { _, _ = FindHeader(envDoc, xmlsec.NSSOAP11, "") },
+		"FindTimestamp":               func() { _, _ = FindTimestamp(sec) },
+		"SignatureValues":             func() { _, _ = SignatureValues(sec) },
+		"CheckSignatureConfirmations": func() { _ = CheckSignatureConfirmations(sec, [][]byte{{0}}) },
+		"ResolveStrict":               func() { _, _ = ResolveSecurityTokenReferenceStrict(secDoc, ref) },
+		"ParseTimestamp":              func() { _, _ = ParseTimestamp(ts) },
+		"CheckSTR":                    func() { _ = CheckSecurityTokenReference(str) },
+		"MatchSTR":                    func() { _ = MatchSecurityTokenReference(str, cert) },
+	}
+}
+
+// Each receive-side check of an element with very many element children
+// reads only the children it needs, and holds no slice of them.
+func TestWideElementHeap(t *testing.T) {
+	const size = 4 << 20
+	for name, f := range wideShapes(t, size) {
+		if peak := peakHeap(f); peak > size/4 {
+			t.Errorf("%s: peak heap %d for a %d-byte element", name, peak, size)
+		}
+	}
+}
+
+// BenchmarkWideElementMemory reports the peak heap per document byte of
+// each receive-side check of an element with very many element children.
+// WSS_PEAK_MIB sets the sizes.
+func BenchmarkWideElementMemory(b *testing.B) {
+	for _, mib := range memSizes() {
+		for name, f := range wideShapes(b, mib<<20) {
+			b.Run(fmt.Sprintf("%s/%dMiB", name, mib), func(b *testing.B) {
+				for b.Loop() {
+					b.ReportMetric(float64(peakHeap(f))/float64(mib<<20), "peak-B/B")
+				}
+			})
+		}
+	}
+}
+
+// longValueShapes returns the errors for received values of about size
+// bytes that an error message quotes.
+func longValueShapes(tb testing.TB, size int) map[string]func() error {
+	long := strings.Repeat("\u0085", size/2)
+	ts := xmltree.DocumentElement(mustParse(tb, `<wsu:Timestamp xmlns:wsu="`+xmlsec.NSWSU+`"><wsu:Created>`+long+`</wsu:Created></wsu:Timestamp>`))
+	tok := xmltree.DocumentElement(mustParse(tb, bst(`ValueType="`+long+`"`, "AA==")))
+	strDoc := mustParse(tb, `<wsse:SecurityTokenReference xmlns:wsse="`+xmlsec.NSWSSE+`"><wsse:Reference URI="#`+long+`"/></wsse:SecurityTokenReference>`)
+	ki := xmltree.DocumentElement(mustParse(tb, `<wsse:SecurityTokenReference xmlns:wsse="`+xmlsec.NSWSSE+`"><wsse:KeyIdentifier ValueType="`+long+`"/></wsse:SecurityTokenReference>`))
+	return map[string]func() error{
+		"ParseTimestamp":     func() error { _, err := ParseTimestamp(ts); return err },
+		"BSTValueType":       func() error { _, err := ParseBinarySecurityToken(tok); return err },
+		"ReferencedToken":    func() error { _, err := ReferencedToken(strDoc, xmltree.DocumentElement(strDoc)); return err },
+		"KeyIdentifierCheck": func() error { return CheckSecurityTokenReference(ki) },
+	}
+}
+
+// An error about a long received value quotes 64 bytes of it, not all.
+func TestLongValueError(t *testing.T) {
+	for name, f := range longValueShapes(t, 1<<16) {
+		if err := f(); err == nil || len(err.Error()) > 512 || !strings.Contains(err.Error(), `\u0085"...`) {
+			t.Errorf("%s: %d-byte error %.200v", name, len(err.Error()), err)
+		}
+	}
+}
+
+// BenchmarkLongValueErrorMemory reports the peak heap per value byte of
+// refusing a long received value an error message quotes. WSS_PEAK_MIB
+// sets the sizes.
+func BenchmarkLongValueErrorMemory(b *testing.B) {
+	for _, mib := range memSizes() {
+		for name, f := range longValueShapes(b, mib<<20) {
+			b.Run(fmt.Sprintf("%s/%dMiB", name, mib), func(b *testing.B) {
+				for b.Loop() {
+					b.ReportMetric(float64(peakHeap(func() { _ = f() }))/float64(mib<<20), "peak-B/B")
+				}
+			})
+		}
+	}
+}
+
+// BenchmarkIssuerNameMemory reports the peak heap per name byte of matching
+// a long X509IssuerName. WSS_PEAK_MIB sets the sizes.
+func BenchmarkIssuerNameMemory(b *testing.B) {
+	cert := &x509.Certificate{SerialNumber: big.NewInt(1), RawIssuer: []byte{0x30, 0}}
+	for _, mib := range memSizes() {
+		str := xmltree.DocumentElement(mustParse(b, `<wsse:SecurityTokenReference xmlns:wsse="`+xmlsec.NSWSSE+`" xmlns:ds="`+xmlsec.NSDSig+
+			`"><ds:X509Data><ds:X509IssuerSerial><ds:X509IssuerName>CN=`+strings.Repeat("a b ", mib<<18)+
+			`</ds:X509IssuerName><ds:X509SerialNumber>1</ds:X509SerialNumber></ds:X509IssuerSerial></ds:X509Data></wsse:SecurityTokenReference>`))
+		b.Run(fmt.Sprintf("%dMiB", mib), func(b *testing.B) {
+			for b.Loop() {
+				b.ReportMetric(float64(peakHeap(func() { _ = MatchSecurityTokenReference(str, cert) }))/float64(mib<<20), "peak-B/B")
+			}
+		})
+	}
+}
+
+// BenchmarkCheckUniqueIDsMemory reports the peak heap per document byte of
+// checking a document where every element has an ID. WSS_PEAK_MIB sets the
+// sizes.
+func BenchmarkCheckUniqueIDsMemory(b *testing.B) {
+	for _, mib := range memSizes() {
+		var s strings.Builder
+		s.WriteString(`<r xmlns:wsu="` + xmlsec.NSWSU + `">`)
+		for i := 0; s.Len() < mib<<20; i++ {
+			fmt.Fprintf(&s, `<i wsu:Id="i%d"/>`, i)
+		}
+		s.WriteString("</r>")
+		doc := mustParse(b, s.String())
+		b.Run(fmt.Sprintf("%dMiB", mib), func(b *testing.B) {
+			for b.Loop() {
+				b.ReportMetric(float64(peakHeap(func() { _ = CheckUniqueIDs(doc) }))/float64(s.Len()), "peak-B/B")
 			}
 		})
 	}

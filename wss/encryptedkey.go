@@ -66,7 +66,7 @@ func MatchEncryptedKeySHA1(str, ek *xdm.Node) bool {
 	if tt := str.Attr(xmlsec.NSWSSE11, "TokenType"); tt != nil && tt.Value() != valueTypeEncryptedKey {
 		return false
 	}
-	kids := str.ChildElements()
+	kids := firstElements(str, 2)
 	if len(kids) != 1 || !kids[0].IsElement(xmlsec.NSWSSE, "KeyIdentifier") || kids[0].AttrValue("ValueType") != valueTypeEncryptedKeySHA1 {
 		return false
 	}
@@ -93,11 +93,11 @@ func encryptedKeySHA1(ek *xdm.Node) ([]byte, error) {
 	if ek == nil || !ek.IsElement(xmlsec.NSXEnc, "EncryptedKey") {
 		return nil, fmt.Errorf("%w: not an xenc:EncryptedKey", xmlsec.ErrMalformed)
 	}
-	for _, cd := range ek.ChildElements() {
+	for cd := range ek.Children() {
 		if !cd.IsElement(xmlsec.NSXEnc, "CipherData") {
 			continue
 		}
-		if cv := cd.ChildElements(); len(cv) == 1 && cv[0].IsElement(xmlsec.NSXEnc, "CipherValue") {
+		if cv := firstElements(cd, 2); len(cv) == 1 && cv[0].IsElement(xmlsec.NSXEnc, "CipherValue") {
 			octets, err := xmltree.Base64(cv[0])
 			if err != nil || len(octets) == 0 {
 				return nil, fmt.Errorf("%w: xenc:CipherValue is not base64", xmlsec.ErrMalformed)

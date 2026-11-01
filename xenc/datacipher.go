@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/knroy/go-xml/v2/c14n"
 	"github.com/knroy/go-xml/v2/xdm"
@@ -161,30 +162,59 @@ func isSOAP(e *xdm.Node, local string) bool {
 }
 
 // encryptedData encrypts plaintext, which this package owns and overwrites,
-// into an xenc:EncryptedData of Type typ.
-func encryptedData(typ string, plaintext, sessionKey []byte, opts EncryptOptions) (*xdm.Node, error) {
-	ed, err := newEncryptedData(typ, "", opts)
+// into an xenc:EncryptedData of Type typ, and returns it with the
+// ciphertext: its CipherValue holds mark, a random string, for emitCipher
+// to replace with the ciphertext's base64.
+func encryptedData(typ string, plaintext, sessionKey []byte, opts EncryptOptions) (ed *xdm.Node, ct []byte, mark string, err error) {
+	if ed, err = newEncryptedData(typ, "", opts); err != nil {
+		return nil, nil, "", err
+	}
+	key, err := dataKey(ed, sessionKey, opts)
 	if err != nil {
-		return nil, err
+		return nil, nil, "", err
 	}
-	if sessionKey, err = dataKey(ed, sessionKey, opts); err != nil {
-		return nil, err
+	if sessionKey == nil {
+		// Derived here, not the caller's.
+		defer clear(key)
 	}
-	ct, err := seal(opts.DataAlgorithm, sessionKey, ownSealBuf(plaintext))
-	if err != nil {
-		return nil, err
+	if ct, err = seal(opts.DataAlgorithm, key, ownSealBuf(plaintext)); err != nil {
+		return nil, nil, "", err
 	}
-	xmltree.Text(element(element(ed, "CipherData"), "CipherValue"), base64Text(ct))
+	mark = randomID()
+	xmltree.Text(element(element(ed, "CipherData"), "CipherValue"), mark)
 	if err := addProperties(ed, opts); err != nil {
-		return nil, err
+		return nil, nil, "", err
 	}
-	return ed, nil
+	return ed, ct, mark, nil
 }
 
 // emit returns the canonical octets of a copy of doc with e applied. doc
 // itself is left as it was.
 func emit(doc *xdm.Node, e *xmltree.Edits) ([]byte, error) {
 	return c14n.Bytes(xmltree.RebuildTree(doc, e), c14n.Options{Algorithm: c14n.Inclusive10WithComments})
+}
+
+// emitCipher is emit for a document holding the EncryptedData whose
+// CipherValue holds mark: the output, allocated once, has the base64 of ct
+// encoded straight into it in mark's place, which is the octets a
+// CipherValue holding that text would canonicalize to.
+func emitCipher(doc *xdm.Node, e *xmltree.Edits, mark string, ct []byte) ([]byte, error) {
+	b, err := emit(doc, e)
+	if err != nil {
+		return nil, err
+	}
+	if bytes.Count(b, []byte(mark)) != 1 {
+		// ponytail: 128 random bits, which no document holds but by
+		// chance; refused, not written ambiguously.
+		return nil, errors.New("xenc: the document holds the random CipherValue marker")
+	}
+	i := bytes.Index(b, []byte(mark))
+	n := base64.StdEncoding.EncodedLen(len(ct))
+	out := make([]byte, len(b)-len(mark)+n)
+	copy(out, b[:i])
+	base64.StdEncoding.Encode(out[i:], ct)
+	copy(out[i+n:], b[i+len(mark):])
+	return out, nil
 }
 
 // replaceElement encrypts target and emits doc with wrap(EncryptedData) in
@@ -197,7 +227,7 @@ func replaceElement(doc, target *xdm.Node, sessionKey []byte, opts EncryptOption
 	if err := nfc(plain); err != nil {
 		return nil, err
 	}
-	ed, err := encryptedData(TypeElement, plain, sessionKey, opts)
+	ed, ct, mark, err := encryptedData(TypeElement, plain, sessionKey, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +237,7 @@ func replaceElement(doc, target *xdm.Node, sessionKey []byte, opts EncryptOption
 	}
 	var e xmltree.Edits
 	e.ReplaceNode(target, repl)
-	return emit(doc, &e)
+	return emitCipher(doc, &e, mark, ct)
 }
 
 // EncryptElement replaces target with an xenc:EncryptedData of Type
@@ -279,7 +309,7 @@ func EncryptContent(doc *xdm.Node, target *xdm.Node, sessionKey []byte, opts Enc
 	if err := nfc(plain); err != nil {
 		return nil, err
 	}
-	ed, err := encryptedData(TypeContent, plain, sessionKey, opts)
+	ed, ct, mark, err := encryptedData(TypeContent, plain, sessionKey, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -296,7 +326,7 @@ func EncryptContent(doc *xdm.Node, target *xdm.Node, sessionKey []byte, opts Enc
 	if first {
 		e.Insert(target, 0, ed)
 	}
-	return emit(doc, &e)
+	return emitCipher(doc, &e, mark, ct)
 }
 
 // join concatenates parts, which this package owns, in the storage of the
@@ -321,6 +351,7 @@ func join(parts [][]byte) []byte {
 	for i, p := range parts {
 		if i != k {
 			copy(out[at:], p)
+			clear(p)
 		}
 		at += len(p)
 	}
@@ -451,16 +482,38 @@ func externalCiphertext(uri string, algs []string, xp *xpathStep, resolve xmlsec
 		}
 		return xp.decode(tree.Root)
 	}
-	return decode64(string(b))
+	return decode64(b)
 }
 
-// decode64 decodes base64 text, ignoring whitespace.
-func decode64(s string) ([]byte, error) {
-	b, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(s), ""))
+// decode64 decodes the base64 text of parts, concatenated, ignoring the
+// white space strings.Fields splits on. Text whose white space is only
+// XML's, as an encoder writes it, is decoded in place, a chunk at a time.
+func decode64[T string | []byte](parts ...T) ([]byte, error) {
+	decode := xmltree.DecodeBase64[T]
+	for _, p := range parts {
+		for i := range len(p) {
+			if c := p[i]; c == '\v' || c == '\f' || c >= utf8.RuneSelf {
+				// ponytail: white space beyond XML's, or a non-ASCII
+				// octet: joined and decoded as before, at its copies' cost.
+				decode = fieldsBase64[T]
+			}
+		}
+	}
+	b, err := decode(parts...)
 	if err != nil {
 		return nil, malformed("CipherReference content: %v", err)
 	}
 	return b, nil
+}
+
+// fieldsBase64 decodes parts, concatenated, without the white space
+// strings.Fields splits on.
+func fieldsBase64[T string | []byte](parts ...T) ([]byte, error) {
+	var s strings.Builder
+	for _, p := range parts {
+		s.WriteString(string(p))
+	}
+	return base64.StdEncoding.DecodeString(strings.Join(strings.Fields(s.String()), ""))
 }
 
 // dataAlgorithm validates el as xenc:EncryptedData and returns its allowed,

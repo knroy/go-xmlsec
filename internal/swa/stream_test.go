@@ -266,7 +266,8 @@ func peakHeap(fn func()) uint64 {
 
 // BenchmarkContentPeakHeap reports the peak heap per attachment byte of
 // digesting an attachment, the old way (canonical form built in memory, then
-// hashed) and streamed: an element-dense XML document, one shaped like
+// hashed), collected by Content for a transform that follows, and streamed:
+// an element-dense XML document, one shaped like
 // invoice lines, and a text/plain one with LF line endings. SWA_PEAK_MIB sets the sizes, comma-separated.
 // xmlsec.Parse refuses more than 64 MiB or 10,000,000 nodes, which an
 // element-dense document reaches at about 38 MiB.
@@ -303,6 +304,21 @@ func BenchmarkContentPeakHeap(b *testing.B) {
 					b.ReportMetric(float64(peak)/size, "peak-B/B")
 				}
 			})
+			b.Run(shape.name+"/"+mib+"MiB/collected", func(b *testing.B) {
+				for b.Loop() {
+					var err error
+					peak := peakHeap(func() {
+						var out []byte
+						if out, err = Content(att); err == nil {
+							sha256.Sum256(out)
+						}
+					})
+					if err != nil {
+						b.Skip(err)
+					}
+					b.ReportMetric(float64(peak)/size, "peak-B/B")
+				}
+			})
 			b.Run(shape.name+"/"+mib+"MiB/streamed", func(b *testing.B) {
 				for b.Loop() {
 					var err error
@@ -313,6 +329,23 @@ func BenchmarkContentPeakHeap(b *testing.B) {
 					b.ReportMetric(float64(peak)/size, "peak-B/B")
 				}
 			})
+		}
+	}
+}
+
+// BenchmarkSelectedMemory reports the allocations of selecting and
+// unfolding the headers of an attachment that carries all of them and one
+// header the profile does not list.
+func BenchmarkSelectedMemory(b *testing.B) {
+	h := map[string][]string{
+		"Content-Description": {"an\r\n invoice"}, "Content-Disposition": {`attachment; filename="a.xml"`},
+		"Content-Id": {"<a@b>"}, "Content-Location": {"cid:a"}, "Content-Type": {"text/xml;\r\n\tcharset=utf-8"},
+		"Content-Transfer-Encoding": {"binary"},
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := Selected(h); err != nil {
+			b.Fatal(err)
 		}
 	}
 }

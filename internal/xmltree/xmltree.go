@@ -5,7 +5,7 @@ package xmltree
 import (
 	"encoding/base64"
 	"fmt"
-	"strings"
+	"io"
 
 	"github.com/knroy/go-xml/v2/xdm"
 )
@@ -96,12 +96,21 @@ func Walk(n *xdm.Node, f func(*xdm.Node)) {
 // It strips octets where the strings.Map it replaced stripped runes, which
 // never changes the result: no UTF-8 sequence holds an ASCII octet, and
 // decoding stops at the first non-ASCII octet, whatever follows.
-func Base64(e *xdm.Node) ([]byte, error) {
-	const space = " \t\r\n"
-	s := e.StringValue()
-	n := len(s)
-	for _, c := range space {
-		n -= strings.Count(s, string(c))
+func Base64(e *xdm.Node) ([]byte, error) { return DecodeBase64(e.StringValue()) }
+
+// DecodeBase64 is Base64 for the concatenation of parts, which it never
+// makes: the parts are read in place, twice, to size the result and to
+// decode into it.
+func DecodeBase64[T string | []byte](parts ...T) ([]byte, error) {
+	space := func(c byte) bool { return c <= ' ' && (c == ' ' || c == '\t' || c == '\r' || c == '\n') }
+	n := 0
+	for _, s := range parts {
+		n += len(s)
+		for i := range len(s) {
+			if space(s[i]) {
+				n--
+			}
+		}
 	}
 	enc := base64.StdEncoding
 	dst := make([]byte, enc.DecodedLen(n))
@@ -124,21 +133,23 @@ func Base64(e *xdm.Node) ([]byte, error) {
 		chunk = chunk[:0]
 		return err
 	}
-	for len(s) > 0 {
-		k := strings.IndexAny(s, space)
-		if k < 0 {
-			k = len(s)
-		}
-		for run := s[:k]; len(run) > 0; {
-			if len(chunk) == cap(chunk) {
-				if err := decode(true); err != nil {
-					return dst[:w], err
-				}
+	for _, s := range parts {
+		for len(s) > 0 {
+			k := 0
+			for k < len(s) && !space(s[k]) {
+				k++
 			}
-			m := copy(buf[len(chunk):], run)
-			chunk, run = buf[:len(chunk)+m], run[m:]
+			for run := s[:k]; len(run) > 0; {
+				if len(chunk) == cap(chunk) {
+					if err := decode(true); err != nil {
+						return dst[:w], err
+					}
+				}
+				m := copy(buf[len(chunk):], run)
+				chunk, run = buf[:len(chunk)+m], run[m:]
+			}
+			s = s[min(k+1, len(s)):]
 		}
-		s = s[min(k+1, len(s)):]
 	}
 	err := decode(false)
 	return dst[:w], err
@@ -152,6 +163,11 @@ func AttrValue(e *xdm.Node, uri, local string) string {
 	}
 	return ""
 }
+
+// Parse parses the octets r holds as xmlsec.Parse parses a slice of them,
+// with the same pinned options and errors. Package xmlsec sets it, so that
+// a document assembled from pieces is parsed without being copied whole.
+var Parse func(r io.Reader) (*xdm.Tree, error)
 
 // Clone returns a detached deep copy of n: its attributes, namespace
 // declarations and descendants.

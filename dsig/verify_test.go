@@ -10,10 +10,12 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/knroy/go-xml/v2/c14n"
 	"github.com/knroy/go-xml/v2/xdm"
@@ -565,5 +567,33 @@ func TestCoverageNil(t *testing.T) {
 	var c *dsig.Coverage
 	if c.Covers() || c.Covers("a") || c.CoversNodes() || c.CoversNodes(xdm.NewNode(xdm.KindDocument, xdm.QName{}, "")) || c.CoversAttachments() || c.CoversAttachments("a") {
 		t.Fatal("a nil Coverage covers something")
+	}
+}
+
+// An ec:InclusiveNamespaces PrefixList of more than 1024 prefixes is
+// refused before it is parsed, which deduplicates in quadratic time: 1 MiB
+// of distinct prefixes took 12 s.
+func TestInclusivePrefixListBounded(t *testing.T) {
+	list := func(n int) string {
+		var b strings.Builder
+		for i := range n {
+			fmt.Fprintf(&b, "p%d ", i)
+		}
+		return b.String()
+	}
+	tr := func(prefixes string) string {
+		return `<ds:Reference URI="#a"><ds:Transforms><ds:Transform Algorithm="` + covExc + `"><ec:InclusiveNamespaces xmlns:ec="` +
+			xmlsec.NSExcC14N + `" PrefixList="` + prefixes + `"/></ds:Transform></ds:Transforms>` + covDigest + `</ds:Reference>`
+	}
+	for _, n := range []int{1024, 1025, 150000} { // the last about 1 MiB
+		doc := parse(t, []byte(covDoc(covSI(covCM+covSM+tr(list(n)))+covSV)))
+		start := time.Now()
+		_, err := dsig.Verify(doc, findSignature(doc), dsig.VerifyOptions{PublicKey: &rsaKey.PublicKey})
+		if refused := errors.Is(err, xmlsec.ErrMalformed) && strings.Contains(err.Error(), "PrefixList"); refused != (n > 1024) {
+			t.Errorf("%d prefixes: %v", n, err)
+		}
+		if d := time.Since(start); d > 2*time.Second {
+			t.Errorf("%d prefixes: %v", n, d)
+		}
 	}
 }

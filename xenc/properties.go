@@ -45,8 +45,7 @@ func withChild(parent, el *xdm.Node) *xdm.Node {
 	}
 	var e xmltree.Edits
 	e.Insert(parent, i, el)
-	root, _ := xmltree.Rebuild(parent, &e)
-	return root
+	return xmltree.RebuildTree(parent, &e)
 }
 
 // checkDataAttrs refuses options that do not apply to an EncryptedData

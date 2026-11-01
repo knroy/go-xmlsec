@@ -22,9 +22,13 @@ func TestXSLTOutputBound(t *testing.T) {
 	}
 	tr := xdm.NewNode(xdm.KindElement, xdm.QName{}, "")
 	tr.AppendCopy(xmltree.DocumentElement(sheet.Root))
-	d := data{octets: []byte(`<a/>`)}
-	err = d.digest(sha256.New(), nil, "", []TransformSpec{{Algorithm: xmlsec.TransformXSLT, el: tr}}, false)
-	if !errors.Is(err, xmlsec.ErrLimitExceeded) {
-		t.Fatalf("got %v", err)
+	// Streamed into the digest as the last transform, and collected before
+	// another.
+	xsl := TransformSpec{Algorithm: xmlsec.TransformXSLT, el: tr}
+	for _, ts := range [][]TransformSpec{{xsl}, {xsl, {Algorithm: xmlsec.TransformBase64}}} {
+		d := data{octets: []byte(`<a/>`)}
+		if err := d.digest(sha256.New(), nil, "", ts, false); !errors.Is(err, xmlsec.ErrLimitExceeded) {
+			t.Fatalf("%d transforms: %v", len(ts), err)
+		}
 	}
 }

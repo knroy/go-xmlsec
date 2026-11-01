@@ -27,7 +27,7 @@ var curveURIs = map[ecdh.Curve]string{
 // 5.8.1 with a hash: size octets of H(counter || z || otherInfo), counter
 // from 1, 32-bit big-endian.
 func concatKDF(h crypto.Hash, z, otherInfo []byte, size int) []byte {
-	var out []byte
+	out := make([]byte, 0, (size+h.Size()-1)/h.Size()*h.Size())
 	for counter := uint32(1); len(out) < size; counter++ {
 		d := h.New()
 		d.Write(binary.BigEndian.AppendUint32(nil, counter))
@@ -108,6 +108,7 @@ func agree(ek *xdm.Node, alg string, size int, opts EncryptOptions) ([]byte, err
 	eph, _ := rpub.Curve().GenerateKey(rand.Reader)
 	z, _ := eph.ECDH(rpub)
 	kek := concatKDF(h, z, []byte(alg), size)
+	clear(z)
 
 	am := newAgreementMethod(ek, xmlsec.KeyAgreementECDHES)
 	concatKDFMethod(am, alg, nil, opts.DigestAlgorithm)
@@ -354,6 +355,7 @@ func DecryptAgreedKey(el *xdm.Node, priv *ecdh.PrivateKey, opts DecryptOptions) 
 	if err != nil {
 		return nil, err
 	}
+	defer clear(kek)
 	return unwrap(el, a.alg, kek, opts)
 }
 
@@ -393,5 +395,6 @@ func agreedECDH(el *xdm.Node, data bool, priv *ecdh.PrivateKey, opts DecryptOpti
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: originator key: %v", xmlsec.ErrUnsupportedKeyInfo, err)
 	}
+	defer clear(z)
 	return a, kdf(z), nil
 }

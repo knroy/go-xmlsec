@@ -159,7 +159,7 @@ func parseDSAKeyValue(e *xdm.Node) (crypto.PublicKey, error) {
 		if i == len(names) {
 			return nil, malformed("unexpected or out-of-order %s in ds:DSAKeyValue", k.Name().Local)
 		}
-		n, err := cryptoBinary(k)
+		n, err := cryptoBinary(k, nil)
 		if err != nil {
 			return nil, err
 		}

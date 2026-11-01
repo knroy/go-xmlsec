@@ -5,9 +5,11 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"encoding/base64"
 	"errors"
 	"math/big"
 	"regexp"
@@ -18,6 +20,7 @@ import (
 	"github.com/knroy/go-xml/v2/c14n"
 	"github.com/knroy/go-xml/v2/xdm"
 	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/keysize"
 	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
@@ -204,5 +207,52 @@ func TestPKIPathBound(t *testing.T) {
 	}
 	if _, err := h.AddBinarySecurityToken(leaf, append(chain, ca), xmlsec.BSTValueTypeX509PKIPath); !errors.Is(err, xmlsec.ErrUnsupportedKeyInfo) {
 		t.Fatalf("16 in chain: got %v", err)
+	}
+}
+
+// rsaCert returns a certificate for an RSA public key of the given modulus
+// length, signed by an ECDSA key: the modulus is 2^bits-1, never factored,
+// so no key of that size is generated.
+func rsaCert(t *testing.T, bits int) *x509.Certificate {
+	t.Helper()
+	k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), uint(bits)), big.NewInt(1))
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "rsa"},
+		NotBefore: time.Unix(0, 0), NotAfter: time.Unix(1<<32, 0)}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &rsa.PublicKey{N: n, E: 65537}, k)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// A token whose certificate has an RSA key over keysize.MaxRSABits is
+// refused as unsupported, in every form, before the key verifies anything;
+// one at the limit is returned.
+func TestBinarySecurityTokenRSAKeySize(t *testing.T) {
+	enc := `EncodingType="` + xmlsec.BSTEncodingBase64 + `" `
+	for bits, want := range map[int]error{keysize.MaxRSABits: nil, keysize.MaxRSABits + 16: xmlsec.ErrUnsupportedKeyInfo} {
+		cert := rsaCert(t, bits)
+		for vt, d := range map[string][]byte{
+			xmlsec.BSTValueTypeX509v3:      cert.Raw,
+			xmlsec.BSTValueTypeX509PKIPath: der(asn1.ClassUniversal, asn1.TagSequence, cert.Raw),
+			xmlsec.BSTValueTypePKCS7:       marshalPKCS7([]*x509.Certificate{cert}),
+		} {
+			el := xmltree.DocumentElement(parseDoc(t, bst(enc+`ValueType="`+vt+`"`, base64.StdEncoding.EncodeToString(d))))
+			got, err := ParseBinarySecurityToken(el)
+			if !errors.Is(err, want) || want == nil && !got.Equal(cert) {
+				t.Errorf("%d bits, %s: certificate %v, %v; want %v", bits, vt, got != nil, err, want)
+			}
+			if want != nil && (got != nil || errors.Is(err, xmlsec.ErrInvalidSecurityToken)) {
+				t.Errorf("%d bits, %s: certificate %v, %v", bits, vt, got != nil, err)
+			}
+		}
 	}
 }

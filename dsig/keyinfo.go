@@ -12,6 +12,7 @@ import (
 
 	"github.com/knroy/go-xml/v2/xdm"
 	"github.com/knroy/go-xmlsec/v2"
+	"github.com/knroy/go-xmlsec/v2/internal/keysize"
 	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 	"github.com/knroy/go-xmlsec/v2/wss"
 )
@@ -109,6 +110,9 @@ func (c *keyContext) resolveForms(forms []*xdm.Node, keyName string, hopped bool
 		switch k := forms[0]; {
 		case k.IsElement(xmlsec.NSWSSE, "SecurityTokenReference"):
 			cert, err := resolveSTR(c.doc, k, c.opts.StrictSecurityTokenReference || c.opts.StrictBSP, c.opts.ResolveSecurityToken)
+			if err == nil {
+				err = checkKeySize(cert.PublicKey)
+			}
 			return withKey(cert, KeyInfoSecurityTokenReference, err)
 		case k.IsElement(xmlsec.NSDSig, "KeyValue"):
 			pub, err := parseKeyValue(k, c.dsaAlg != "")
@@ -234,11 +238,11 @@ func parseRSAKeyValue(e *xdm.Node) (crypto.PublicKey, error) {
 	if len(kids) != 2 || !kids[0].IsElement(xmlsec.NSDSig, "Modulus") || !kids[1].IsElement(xmlsec.NSDSig, "Exponent") {
 		return nil, malformed("ds:RSAKeyValue must hold ds:Modulus, ds:Exponent")
 	}
-	n, err := cryptoBinary(kids[0])
+	n, err := cryptoBinary(kids[0], keysize.CheckRSA)
 	if err != nil {
 		return nil, err
 	}
-	exp, err := cryptoBinary(kids[1])
+	exp, err := cryptoBinary(kids[1], nil)
 	if err != nil {
 		return nil, err
 	}
@@ -250,11 +254,17 @@ func parseRSAKeyValue(e *xdm.Node) (crypto.PublicKey, error) {
 }
 
 // cryptoBinary decodes a ds:CryptoBinary: base64 of a big-endian unsigned
-// integer.
-func cryptoBinary(e *xdm.Node) (*big.Int, error) {
+// integer. bound, if set, is given an upper bound of its bit length, eight
+// times its octets, before it is decoded into a big.Int.
+func cryptoBinary(e *xdm.Node, bound func(bits int) error) (*big.Int, error) {
 	b, err := xmltree.Base64(e)
 	if err != nil || len(b) == 0 {
 		return nil, malformed("ds:%s is not a base64 integer", e.Name().Local)
+	}
+	if bound != nil {
+		if err := bound(8 * len(b)); err != nil {
+			return nil, err
+		}
 	}
 	return new(big.Int).SetBytes(b), nil
 }
@@ -304,7 +314,19 @@ func parseDEREncodedKeyValue(e *xdm.Node, dsaAlg string) (crypto.PublicKey, erro
 	if err != nil {
 		return nil, malformed("dsig11:DEREncodedKeyValue: %v", err)
 	}
+	if err := checkKeySize(pub); err != nil {
+		return nil, err
+	}
 	return pub, checkReceivedKey(pub, dsaAlg)
+}
+
+// checkKeySize bounds a received RSA key, from a certificate or raw
+// (keysize.CheckRSA), before it verifies anything.
+func checkKeySize(pub crypto.PublicKey) error {
+	if k, ok := pub.(*rsa.PublicKey); ok {
+		return keysize.CheckRSA(k.N.BitLen())
+	}
+	return nil
 }
 
 // checkRSASize refuses an RSA key under minRSABits: as a raw key from

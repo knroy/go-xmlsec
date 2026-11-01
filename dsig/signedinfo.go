@@ -2,6 +2,7 @@ package dsig
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/knroy/go-xml/v2/c14n"
 	"github.com/knroy/go-xml/v2/xdm"
@@ -126,6 +127,10 @@ func parseReference(r *xdm.Node) (parsedReference, error) {
 	return ref, nil
 }
 
+// maxInclusivePrefixes bounds the prefixes of one ec:InclusiveNamespaces
+// PrefixList. A real one names a handful.
+const maxInclusivePrefixes = 1024
+
 // parseTransform reads a ds:Transform or ds:CanonicalizationMethod. The only
 // child accepted is ec:InclusiveNamespaces, and only under an exclusive
 // algorithm.
@@ -146,7 +151,16 @@ func parseTransform(t *xdm.Node) (TransformSpec, error) {
 			// XSLT transform carries its program as a child.
 			return spec, malformed("unexpected %s under %s", k.Name().Local, t.Name().Local)
 		}
-		spec.InclusiveNamespacePrefixes = c14n.ParsePrefixList(k.AttrValue("PrefixList"))
+		list := k.AttrValue("PrefixList")
+		n := 0
+		for range strings.FieldsSeq(list) {
+			n++
+		}
+		if n > maxInclusivePrefixes {
+			// c14n.ParsePrefixList deduplicates in quadratic time.
+			return spec, malformed("ec:InclusiveNamespaces PrefixList of %d prefixes; at most %d accepted", n, maxInclusivePrefixes)
+		}
+		spec.InclusiveNamespacePrefixes = c14n.ParsePrefixList(list)
 		if spec.InclusiveNamespacePrefixes == nil {
 			spec.InclusiveNamespacePrefixes = []string{}
 		}

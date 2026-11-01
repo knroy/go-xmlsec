@@ -42,7 +42,7 @@ func (h *Header) addTimestamp(now time.Time, ttl time.Duration, id string) (stri
 	if ttl < 0 {
 		return "", fmt.Errorf("wss: negative timestamp ttl %v", ttl)
 	}
-	for _, e := range h.sec().ChildElements() {
+	for e := range h.sec().Children() {
 		if e.IsElement(xmlsec.NSWSU, "Timestamp") {
 			return "", errors.New("wss: the header already has a wsu:Timestamp")
 		}
@@ -93,7 +93,7 @@ func ParseTimestamp(el *xdm.Node) (Timestamp, error) {
 	if el == nil || !el.IsElement(xmlsec.NSWSU, "Timestamp") {
 		return ts, fmt.Errorf("%w: not a wsu:Timestamp", xmlsec.ErrMalformed)
 	}
-	kids := el.ChildElements()
+	kids := firstElements(el, 3)
 	if len(kids) == 0 || len(kids) > 2 || !kids[0].IsElement(xmlsec.NSWSU, "Created") ||
 		len(kids) == 2 && !kids[1].IsElement(xmlsec.NSWSU, "Expires") {
 		return ts, fmt.Errorf("%w: wsu:Timestamp must hold wsu:Created and at most a wsu:Expires after it", xmlsec.ErrMalformed)
@@ -117,7 +117,7 @@ func timestampTime(e *xdm.Node) (time.Time, error) {
 	s := strings.Trim(e.StringValue(), " \t\r\n")
 	t, err := time.Parse(time.RFC3339, s)
 	if !dateTimeUTC.MatchString(s) || err != nil {
-		return time.Time{}, fmt.Errorf("%w: wsu:%s %q is not a UTC xs:dateTime", xmlsec.ErrMalformed, e.Name().Local, s)
+		return time.Time{}, fmt.Errorf("%w: wsu:%s %s is not a UTC xs:dateTime", xmlsec.ErrMalformed, e.Name().Local, quote(s))
 	}
 	return t, nil
 }

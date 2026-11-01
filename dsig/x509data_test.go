@@ -388,3 +388,44 @@ func TestX509DataReissuedCertificate(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A ds:X509SerialNumber of more than 128 digits is refused before
+// big.Int.SetString, which is quadratic: 1 MiB of digits took 0.9 s and
+// 2.4 GB. RFC 5280 serials are at most 49.
+func TestX509SerialNumberBounded(t *testing.T) {
+	p := newPKI(t)
+	resolve := func(dsig.X509Identifier) (*x509.Certificate, error) { return p.leaf, nil }
+	for _, c := range []struct {
+		digits int
+		want   error
+	}{
+		{128, xmlsec.ErrUnsupportedKeyInfo}, // parsed, and describes another certificate
+		{129, xmlsec.ErrMalformed},
+		{1 << 20, xmlsec.ErrMalformed},
+	} {
+		doc, sig := signedCovDoc(t, covKI(`<ds:X509Data>`+issuerSerial("CN=x", strings.Repeat("9", c.digits))+`</ds:X509Data>`))
+		start := time.Now()
+		if _, err := dsig.Verify(doc, sig, dsig.VerifyOptions{ResolveX509: resolve}); !errors.Is(err, c.want) {
+			t.Errorf("%d digits: %v", c.digits, err)
+		}
+		if d := time.Since(start); d > 2*time.Second {
+			t.Errorf("%d digits: %v", c.digits, d)
+		}
+	}
+}
+
+// At most 16 ds:X509CRL are decoded, and none with the key pinned, where
+// they are not reported.
+func TestX509CRLsBounded(t *testing.T) {
+	p := newPKI(t)
+	crls := strings.Repeat(`<ds:X509CRL>AQID</ds:X509CRL>`, 17)
+	doc, sig := signedCovDoc(t, covKI(`<ds:X509Data>`+x509Cert(p.leaf)+crls+`</ds:X509Data>`))
+	if _, err := dsig.Verify(doc, sig, dsig.VerifyOptions{}); !errors.Is(err, xmlsec.ErrUnsupportedKeyInfo) || !strings.Contains(err.Error(), "X509CRL") {
+		t.Fatalf("17 CRLs: %v", err)
+	}
+	doc, sig = signedCovDoc(t, covKI(`<ds:X509Data>`+x509Cert(p.leaf)+crls+`<ds:X509CRL>!!</ds:X509CRL></ds:X509Data>`))
+	cov, err := dsig.Verify(doc, sig, dsig.VerifyOptions{Certificate: p.leaf})
+	if err != nil || cov.CRLs != nil {
+		t.Fatalf("pinned: %v, %+v", err, cov)
+	}
+}

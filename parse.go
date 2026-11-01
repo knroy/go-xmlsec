@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/knroy/go-xml/v2/c14n"
 	"github.com/knroy/go-xml/v2/xdm"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // Resource limits, set explicitly so that a change to an upstream default
@@ -25,6 +27,7 @@ func init() {
 	// ponytail: process-global, as c14n exposes it; this also bounds any
 	// other c14n user in the process.
 	c14n.MaxDepth = MaxC14NDepth
+	xmltree.Parse = func(r io.Reader) (*xdm.Tree, error) { return parse(r, ParseLimits{}) }
 }
 
 // ParseLimits tightens the pinned parse limits for one call. A zero field
@@ -41,6 +44,11 @@ type ParseLimits struct {
 // sets them to what its profile needs. Exceeding a limit is
 // ErrLimitExceeded.
 func ParseWithLimits(b []byte, l ParseLimits) (*xdm.Tree, error) {
+	return parse(bytes.NewReader(b), l)
+}
+
+// parse is ParseWithLimits for the octets r holds.
+func parse(r io.Reader, l ParseLimits) (*xdm.Tree, error) {
 	bytesLimit, err := tighten("MaxBytes", l.MaxBytes, MaxParseBytes)
 	if err != nil {
 		return nil, err
@@ -58,7 +66,7 @@ func ParseWithLimits(b []byte, l ParseLimits) (*xdm.Tree, error) {
 		MaxBytes: bytesLimit,
 		MaxNodes: int(nodes),
 	}.WithEntityBudget(xdm.NewEntityBudget())
-	tree, err := xdm.Parse(bytes.NewReader(b), opts)
+	tree, err := xdm.Parse(r, opts)
 	switch {
 	case errors.Is(err, xdm.ErrResourceLimit):
 		return nil, fmt.Errorf("%w: %w", ErrLimitExceeded, err)

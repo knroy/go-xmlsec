@@ -84,10 +84,15 @@ func EncryptAttachment(att *xmlsec.Attachment, sessionKey []byte, transform stri
 	if err != nil {
 		return nil, nil, err
 	}
-	if sessionKey, err = dataKey(ed, sessionKey, opts); err != nil {
+	key, err := dataKey(ed, sessionKey, opts)
+	if err != nil {
 		return nil, nil, err
 	}
-	ct, err := seal(opts.DataAlgorithm, sessionKey, buf)
+	if sessionKey == nil {
+		// Derived here, not the caller's.
+		defer clear(key)
+	}
+	ct, err := seal(opts.DataAlgorithm, key, buf)
 	if err != nil {
 		return nil, nil, err
 	}

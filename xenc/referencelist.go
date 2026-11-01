@@ -1,12 +1,13 @@
 package xenc
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 
 	"github.com/knroy/go-xml/v2/xdm"
 	"github.com/knroy/go-xmlsec/v2"
-	"github.com/knroy/go-xmlsec/v2/internal/idref"
+	"github.com/knroy/go-xmlsec/v2/internal/xmltree"
 )
 
 // ReferencedData returns the xenc:EncryptedData elements that list, an
@@ -26,6 +27,7 @@ func ReferencedData(list *xdm.Node) ([]*xdm.Node, error) {
 	if list == nil || !list.IsElement(xmlsec.NSXEnc, "ReferenceList") {
 		return nil, malformed("not an xenc:ReferenceList")
 	}
+	find := findIDs(list)
 	var out []*xdm.Node
 	for _, r := range list.ChildElements() {
 		if r.IsElement(xmlsec.NSXEnc, "KeyReference") {
@@ -39,7 +41,7 @@ func ReferencedData(list *xdm.Node) ([]*xdm.Node, error) {
 		if !ok || id == "" {
 			return nil, malformed("xenc:DataReference URI %q is not a local #id", uri)
 		}
-		t, err := idref.Find(list, id, idAttr)
+		t, err := find(id)
 		if err != nil {
 			return nil, err
 		}
@@ -60,4 +62,43 @@ func ReferencedData(list *xdm.Node) ([]*xdm.Node, error) {
 		return nil, malformed("an xenc:ReferenceList without xenc:DataReference")
 	}
 	return out, nil
+}
+
+// findIDs returns a function that does for list's DataReference IDs what
+// idref.Find(list, id, idAttr) does, from one walk of the document made at
+// its first call, not one per reference. The attributes counted and the
+// errors are Find's.
+func findIDs(list *xdm.Node) func(id string) (*xdm.Node, error) {
+	counted := []xdm.QName{{URI: xmlsec.NSWSU, Local: "Id"}, {URI: xdm.NSXML, Local: "id"}, idAttr}
+	type hit struct {
+		el    *xdm.Node
+		count int
+	}
+	var hits map[string]*hit
+	return func(id string) (*xdm.Node, error) {
+		if hits == nil {
+			hits = map[string]*hit{}
+			for _, r := range list.ChildElements() {
+				if id, ok := strings.CutPrefix(r.AttrValue("URI"), "#"); ok && r.IsElement(xmlsec.NSXEnc, "DataReference") {
+					hits[id] = &hit{}
+				}
+			}
+			xmltree.Walk(list.Root(), func(e *xdm.Node) {
+				for a := range e.Attrs() {
+					if h := hits[a.Value()]; h != nil && slices.ContainsFunc(counted, a.Name().Equal) {
+						h.el = e
+						h.count++
+					}
+				}
+			})
+		}
+		switch h := hits[id]; h.count {
+		case 0:
+			return nil, fmt.Errorf("%w: %q", xmlsec.ErrIDNotFound, id)
+		case 1:
+			return h.el, nil
+		default:
+			return nil, fmt.Errorf("%w: %q appears %d times", xmlsec.ErrAmbiguousID, id, h.count)
+		}
+	}
 }

@@ -26,6 +26,15 @@ import (
 // a real certificate path is a handful.
 const maxX509Certificates = 16
 
+// maxX509CRLs bounds the ds:X509CRL elements one ds:KeyInfo may carry,
+// which are decoded and reported.
+const maxX509CRLs = 16
+
+// maxSerialDigits bounds the decimal digits of a ds:X509SerialNumber, whose
+// parsing takes time quadratic in them. RFC 5280 section 4.1.2.2 allows 20
+// octets, 49 digits.
+const maxSerialDigits = 128
+
 // X509Descriptor is a ds:X509Data child that identifies a certificate
 // without carrying it (XML-DSig 4.5.4), for SignOptions.X509Descriptors.
 type X509Descriptor int
@@ -179,6 +188,9 @@ func (c *keyContext) readX509Data(els []*xdm.Node) (x509Data, error) {
 			if e.Name().URI != xmlsec.NSDSig && e.Name().URI != xmlsec.NSDSig11 {
 				continue // XML-DSig 4.5.4: external elements from other namespaces
 			}
+			if e.IsElement(xmlsec.NSDSig, "X509CRL") && c.pinned {
+				continue // reported only for a key from ds:KeyInfo
+			}
 			var b []byte
 			var err error
 			switch {
@@ -204,9 +216,15 @@ func (c *keyContext) readX509Data(els []*xdm.Node) (x509Data, error) {
 					}
 					return d, fmt.Errorf("%w: ds:X509Certificate: %v", sentinel, err)
 				}
+				if err := checkKeySize(cert.PublicKey); err != nil {
+					return d, err
+				}
 				d.certs = append(d.certs, cert)
 				continue
 			case e.IsElement(xmlsec.NSDSig, "X509CRL"):
+				if len(d.crls) == maxX509CRLs {
+					return d, fmt.Errorf("%w: more than %d ds:X509CRL", xmlsec.ErrUnsupportedKeyInfo, maxX509CRLs)
+				}
 				d.crls = append(d.crls, b)
 				continue
 			case e.IsElement(xmlsec.NSDSig, "X509SKI"):
@@ -231,7 +249,11 @@ func (c *keyContext) readX509Data(els []*xdm.Node) (x509Data, error) {
 				if len(kids) != 2 || !kids[0].IsElement(xmlsec.NSDSig, "X509IssuerName") || !kids[1].IsElement(xmlsec.NSDSig, "X509SerialNumber") {
 					return d, malformed("ds:X509IssuerSerial must hold ds:X509IssuerName, ds:X509SerialNumber")
 				}
-				serial, ok := new(big.Int).SetString(strings.TrimSpace(kids[1].StringValue()), 10)
+				digits := strings.TrimSpace(kids[1].StringValue())
+				serial, ok := new(big.Int), len(digits) <= maxSerialDigits
+				if ok {
+					_, ok = serial.SetString(digits, 10)
+				}
 				if !ok {
 					return d, malformed("ds:X509SerialNumber is not an integer")
 				}

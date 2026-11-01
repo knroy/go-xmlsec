@@ -3,6 +3,9 @@ package wss
 import (
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"encoding/hex"
+	"math/rand/v2"
+	"strings"
 	"testing"
 )
 
@@ -85,6 +88,74 @@ func TestDNValueEscapes(t *testing.T) {
 		v, rest, ok := dnValue(in)
 		if !ok || v != want || rest != "" {
 			t.Errorf("%q: %q, %q, %v; want %q", in, v, rest, ok, want)
+		}
+	}
+}
+
+// foldJoin and dnValueAppend are fold and dnValue as they were.
+func foldJoin(v string) string { return strings.ToLower(strings.Join(strings.Fields(v), " ")) }
+
+func dnValueAppend(s string) (value, rest string, ok bool) {
+	s = strings.TrimLeft(s, " ")
+	if h, isHex := strings.CutPrefix(s, "#"); isHex {
+		end := strings.IndexAny(h, ",;+")
+		if end < 0 {
+			end = len(h)
+		}
+		v, ok := derString(strings.TrimSpace(h[:end]))
+		return v, h[end:], ok
+	}
+	quoted := strings.HasPrefix(s, `"`)
+	if quoted {
+		s = s[1:]
+	}
+	var b []byte
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '\\' && i+1 < len(s):
+			if x, err := hex.DecodeString(s[i+1 : min(i+3, len(s))]); err == nil {
+				b = append(b, x[0])
+				i += 2
+			} else {
+				b = append(b, s[i+1])
+				i++
+			}
+		case c == '\\':
+			return "", "", false
+		case quoted && c == '"':
+			rest := strings.TrimLeft(s[i+1:], " ")
+			return string(b), rest, rest == "" || strings.IndexByte(",;+", rest[0]) >= 0
+		case !quoted && strings.IndexByte(",;+", c) >= 0:
+			return string(b), s[i:], true
+		default:
+			b = append(b, c)
+		}
+	}
+	return string(b), "", !quoted
+}
+
+// fold and dnValue give what they gave before they were made one pass,
+// over edge cases and random strings of the characters that matter.
+func TestFoldAndDNValueUnchanged(t *testing.T) {
+	pieces := []string{"a", "Z", " ", "  ", "\t", "\n", "\u0085", "\u00a0", "\u2028", "\xff", "\xc3", "É", "İ", "Ⱥ", "ß",
+		`\`, `"`, ",", ";", "+", "#", "4", "1", "c", "zz", `\41`, `\c3\a6`, `\,`, `\ `, "=", "#1601"}
+	cases := []string{"", " ", "\t\n", `"`, `""`, `\`, `"a\"b"`, `x\4`, `\4g`, ` "a" ,b`, `"a" x`, `#160161`, `#zz,b`}
+	r := rand.New(rand.NewPCG(3, 4))
+	for range 20000 {
+		var b strings.Builder
+		for range r.IntN(12) {
+			b.WriteString(pieces[r.IntN(len(pieces))])
+		}
+		cases = append(cases, b.String())
+	}
+	for _, s := range cases {
+		if got, want := fold(s), foldJoin(s); got != want {
+			t.Fatalf("fold(%q) = %q, want %q", s, got, want)
+		}
+		v, rest, ok := dnValue(s)
+		wv, wrest, wok := dnValueAppend(s)
+		if ok != wok || ok && (v != wv || rest != wrest) {
+			t.Fatalf("dnValue(%q) = %q, %q, %v; want %q, %q, %v", s, v, rest, ok, wv, wrest, wok)
 		}
 	}
 }

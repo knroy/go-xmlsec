@@ -34,7 +34,7 @@ func (ek *EncryptedKey) addReference(local, id string) {
 		if k.IsElement(xmlsec.NSXEnc, "ReferenceList") {
 			var e xmltree.Edits
 			e.Insert(k, k.NumChildren(), ref)
-			ek.Element, _ = xmltree.Rebuild(ek.Element, &e)
+			ek.Element = xmltree.RebuildTree(ek.Element, &e)
 			return
 		}
 	}

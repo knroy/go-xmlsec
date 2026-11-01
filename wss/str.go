@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"slices"
 	"strings"
 
 	"github.com/knroy/go-xml/v2/xdm"
@@ -50,7 +49,7 @@ func NewSecurityTokenReference(doc *xdm.Node, tokenID, valueType string) (*xdm.N
 			return nil, fmt.Errorf("wss: no ValueType given: %w", err)
 		}
 		if valueType = tok.AttrValue("ValueType"); valueType == "" {
-			return nil, fmt.Errorf("%w: token %q has no ValueType", xmlsec.ErrUnsupportedKeyInfo, tokenID)
+			return nil, fmt.Errorf("%w: token %s has no ValueType", xmlsec.ErrUnsupportedKeyInfo, quote(tokenID))
 		}
 	}
 	str := newSTR()
@@ -177,11 +176,11 @@ func ResolveSecurityTokenReferenceStrict(doc, str *xdm.Node) (*x509.Certificate,
 	vt := tok.AttrValue("ValueType")
 	tt := xmltree.AttrValue(str, xmlsec.NSWSSE11, "TokenType")
 	if tt != "" && tt != vt || tt == "" && (vt == xmlsec.BSTValueTypeX509PKIPath || vt == xmlsec.BSTValueTypePKCS7) {
-		return nil, fmt.Errorf("%w: wsse11:TokenType %q for a %q token (BSP R5215, R5212)", xmlsec.ErrMalformed, tt, vt)
+		return nil, fmt.Errorf("%w: wsse11:TokenType %s for a %s token (BSP R5215, R5212)", xmlsec.ErrMalformed, quote(tt), quote(vt))
 	}
-	if ref := str.ChildElements()[0]; ref.IsElement(xmlsec.NSWSSE, "Reference") {
+	if ref := firstElements(str, 1)[0]; ref.IsElement(xmlsec.NSWSSE, "Reference") {
 		if got := ref.AttrValue("ValueType"); got == "" || got != vt {
-			return nil, fmt.Errorf("%w: wsse:Reference ValueType %q, token %q (BSP R3059, R3058)", xmlsec.ErrMalformed, got, vt)
+			return nil, fmt.Errorf("%w: wsse:Reference ValueType %s, token %s (BSP R3059, R3058)", xmlsec.ErrMalformed, quote(got), quote(vt))
 		}
 		if err := checkTokenOrder(doc, str, tok); err != nil {
 			return nil, err
@@ -214,8 +213,8 @@ func checkTokenOrder(doc, str, tok *xdm.Node) error {
 	for step.Parent() != sec {
 		step = step.Parent()
 	}
-	kids := slices.Collect(sec.Children())
-	if tok.Parent() != sec || slices.Index(kids, step) <= slices.Index(kids, tok) {
+	// Both are children of sec, so document order is their order.
+	if tok.Parent() != sec || step.Index() <= tok.Index() {
 		return fmt.Errorf("%w: the token must precede the reference in the same wsse:Security (BSP R5205, R3066)", xmlsec.ErrMalformed)
 	}
 	return nil
@@ -242,7 +241,7 @@ func ReferencedToken(doc, str *xdm.Node, extra ...xdm.QName) (*xdm.Node, error) 
 	if doc == nil || str == nil || !str.IsElement(xmlsec.NSWSSE, "SecurityTokenReference") {
 		return nil, fmt.Errorf("%w: not a wsse:SecurityTokenReference", xmlsec.ErrUnsupportedKeyInfo)
 	}
-	kids := str.ChildElements()
+	kids := firstElements(str, 2)
 	if len(kids) == 1 && kids[0].IsElement(xmlsec.NSWSSE, "Embedded") {
 		return embeddedToken(kids[0])
 	}
@@ -267,7 +266,7 @@ func ReferencedToken(doc, str *xdm.Node, extra ...xdm.QName) (*xdm.Node, error) 
 
 // embeddedToken returns the one token a wsse:Embedded holds.
 func embeddedToken(e *xdm.Node) (*xdm.Node, error) {
-	kids := e.ChildElements()
+	kids := firstElements(e, 2)
 	if len(kids) != 1 || kids[0].IsElement(xmlsec.NSWSSE, "SecurityTokenReference") {
 		return nil, fmt.Errorf("%w: wsse:Embedded must hold exactly one security token (BSP R3060, R3056)", xmlsec.ErrMalformed)
 	}
@@ -289,12 +288,14 @@ func embeddedToken(e *xdm.Node) (*xdm.Node, error) {
 //
 // Issuer names are compared as distinguished names, attribute by attribute,
 // ignoring case and repeated or surrounding spaces, as peers write them
-// differently: "CN=a,O=b" and "CN=a, O=b" are the same issuer.
+// differently: "CN=a,O=b" and "CN=a, O=b" are the same issuer. A serial
+// number with more significant digits than cert's is false before it is
+// parsed.
 func MatchSecurityTokenReference(str *xdm.Node, cert *x509.Certificate) bool {
 	if str == nil || cert == nil || !str.IsElement(xmlsec.NSWSSE, "SecurityTokenReference") {
 		return false
 	}
-	kids := str.ChildElements()
+	kids := firstElements(str, 2)
 	if len(kids) != 1 {
 		return false
 	}
@@ -316,17 +317,26 @@ func MatchSecurityTokenReference(str *xdm.Node, cert *x509.Certificate) bool {
 			return bytes.Equal(v, thumbprintSHA1(cert))
 		}
 	case k.IsElement(xmlsec.NSDSig, "X509Data"):
-		d := k.ChildElements()
+		d := firstElements(k, 2)
 		if len(d) != 1 || !d[0].IsElement(xmlsec.NSDSig, "X509IssuerSerial") {
 			return false
 		}
-		is := d[0].ChildElements()
+		is := firstElements(d[0], 3)
 		if len(is) != 2 || !is[0].IsElement(xmlsec.NSDSig, "X509IssuerName") || !is[1].IsElement(xmlsec.NSDSig, "X509SerialNumber") {
 			return false
 		}
-		serial, ok := new(big.Int).SetString(strings.TrimSpace(is[1].StringValue()), 10)
-		return ok && cert.SerialNumber != nil && serial.Cmp(cert.SerialNumber) == 0 &&
-			sameIssuer(is[0].StringValue(), cert.RawIssuer)
+		if cert.SerialNumber == nil {
+			return false
+		}
+		// big.Int's decimal parse is quadratic in the digits: a value with
+		// more significant digits than the certificate's serial cannot
+		// match, and is refused before it is parsed.
+		s := strings.TrimSpace(is[1].StringValue())
+		if len(strings.TrimLeft(strings.TrimLeft(s, "+-"), "0")) > len(strings.TrimPrefix(cert.SerialNumber.String(), "-")) {
+			return false
+		}
+		serial, ok := new(big.Int).SetString(s, 10)
+		return ok && serial.Cmp(cert.SerialNumber) == 0 && sameIssuer(is[0].StringValue(), cert.RawIssuer)
 	}
 	return false
 }

@@ -13,7 +13,9 @@ import (
 // found in the parsed document before a header was added, are still
 // accepted wherever a Document is passed beside them; Node finds their
 // counterpart in the latest tree, for a function that takes only a tree,
-// such as xenc.EncryptElement or dsig.Verify.
+// such as xenc.EncryptElement or dsig.Verify. Holding any node of an
+// earlier tree, such as the parsed document's Body, keeps that whole tree
+// alive beside the latest one.
 //
 // A Document is not safe for concurrent use.
 type Document struct {

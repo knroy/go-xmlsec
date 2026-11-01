@@ -108,6 +108,7 @@ func cbcOpen(alg string, key, data []byte, own bool) ([]byte, error) {
 	cipher.NewCBCDecrypter(b, data[:bs]).CryptBlocks(pt, data[bs:])
 	n := int(pt[len(pt)-1])
 	if subtle.ConstantTimeLessOrEq(1, n)&subtle.ConstantTimeLessOrEq(n, bs) != 1 {
+		clear(pt)
 		return nil, errDecrypt
 	}
 	return pt[:len(pt)-n], nil
@@ -137,6 +138,7 @@ func cmsUnwrap(b cipher.Block, ct []byte) ([]byte, error) {
 	// parity bits, so such a key decrypts correctly, and a 24-octet CEK
 	// may be an AES-192 key, which has no parity (section 5.7.1).
 	if subtle.ConstantTimeCompare(sum[:8], cks) != 1 {
+		clear(wkcks)
 		return nil, errUnwrap
 	}
 	return wk, nil

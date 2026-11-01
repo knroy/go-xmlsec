@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"slices"
 	"strings"
+	"unicode"
 )
 
 // An issuer name arrives as a string whose form each peer chooses: RFC 4514
@@ -28,8 +29,25 @@ var dnKeywords = map[string]string{
 type atv struct{ oid, value string }
 
 // fold makes a value comparable ignoring case and insignificant spaces, as
-// LDAP's caseIgnoreMatch does.
-func fold(v string) string { return strings.ToLower(strings.Join(strings.Fields(v), " ")) }
+// LDAP's caseIgnoreMatch does: strings.ToLower of the strings.Fields of v
+// joined by one space, in one pass.
+func fold(v string) string {
+	var b strings.Builder
+	b.Grow(len(v))
+	space := false
+	for _, r := range v {
+		if unicode.IsSpace(r) {
+			space = b.Len() > 0
+			continue
+		}
+		if space {
+			b.WriteByte(' ')
+			space = false
+		}
+		b.WriteRune(unicode.ToLower(r))
+	}
+	return b.String()
+}
 
 // sameIssuer reports whether the string s names the distinguished name
 // whose DER is raw. Attribute values that are not strings never match.
@@ -118,29 +136,41 @@ func dnValue(s string) (value, rest string, ok bool) {
 	if quoted {
 		s = s[1:]
 	}
-	var b []byte
+	// Read twice, first to count the octets, so the value is built in one
+	// allocation of its own size.
+	n := 0
+	unescapeDN(s, quoted, func(byte) { n++ })
+	var b strings.Builder
+	b.Grow(n)
+	rest, ok = unescapeDN(s, quoted, func(c byte) { b.WriteByte(c) })
+	return b.String(), rest, ok
+}
+
+// unescapeDN is dnValue on s, after any opening quote, calling emit with
+// each octet of the value.
+func unescapeDN(s string, quoted bool, emit func(byte)) (rest string, ok bool) {
 	for i := 0; i < len(s); i++ {
 		switch c := s[i]; {
 		case c == '\\' && i+1 < len(s):
 			if x, err := hex.DecodeString(s[i+1 : min(i+3, len(s))]); err == nil {
-				b = append(b, x[0])
+				emit(x[0])
 				i += 2
 			} else {
-				b = append(b, s[i+1])
+				emit(s[i+1])
 				i++
 			}
 		case c == '\\':
-			return "", "", false
+			return "", false
 		case quoted && c == '"':
 			rest := strings.TrimLeft(s[i+1:], " ")
-			return string(b), rest, rest == "" || strings.IndexByte(",;+", rest[0]) >= 0
+			return rest, rest == "" || strings.IndexByte(",;+", rest[0]) >= 0
 		case !quoted && strings.IndexByte(",;+", c) >= 0:
-			return string(b), s[i:], true
+			return s[i:], true
 		default:
-			b = append(b, c)
+			emit(c)
 		}
 	}
-	return string(b), "", !quoted
+	return "", !quoted
 }
 
 // derString decodes an RFC 4514 hex value: the DER of a string.
