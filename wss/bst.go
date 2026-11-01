@@ -23,8 +23,9 @@ import (
 // cert), or xmlsec.BSTValueTypePKCS7 for cert plus chain as a DER,
 // certificates-only PKCS#7 SignedData. A PKCS#7 set is unordered, so the
 // receiver finds the leaf as the one certificate that issued none of the
-// others: cert must be that certificate, and at most 15 may accompany it,
-// or the call fails with xmlsec.ErrUnsupportedKeyInfo. The returned id is
+// others: cert must be that certificate. For PKIPath and PKCS7 at most 15
+// may accompany cert, or the call fails with xmlsec.ErrUnsupportedKeyInfo,
+// as the receiver refuses more. The returned id is
 // the token's wsu:Id, for use in a SecurityTokenReference.
 func (h *Header) AddBinarySecurityToken(cert *x509.Certificate, chain []*x509.Certificate, valueType string) (string, error) {
 	return h.addBinarySecurityToken(cert, chain, valueType, "")
@@ -53,6 +54,9 @@ func (h *Header) addBinarySecurityToken(cert *x509.Certificate, chain []*x509.Ce
 	case xmlsec.BSTValueTypeX509v3:
 		der = cert.Raw
 	case xmlsec.BSTValueTypeX509PKIPath:
+		if len(chain) >= maxPKCS7Certificates {
+			return "", fmt.Errorf("%w: BST PkiPath carries more than %d certificates", xmlsec.ErrUnsupportedKeyInfo, maxPKCS7Certificates)
+		}
 		// PkiPath is ordered from the trust anchor down, target last.
 		path := []asn1.RawValue{{FullBytes: cert.Raw}}
 		for _, c := range chain {
@@ -93,7 +97,7 @@ func (h *Header) addBinarySecurityToken(cert *x509.Certificate, chain []*x509.Ce
 
 // ParseBinarySecurityToken returns the certificate a
 // wsse:BinarySecurityToken carries: the token itself for X509v3, the target
-// (last) certificate for X509PKIPathv1, and for PKCS7 the one certificate
+// (last) certificate for X509PKIPathv1, a path of from 1 to 16, and for PKCS7 the one certificate
 // that issued none of the others, by issuer and subject name and, where both
 // are present, authority and subject key identifier. A PKCS7 token must be a
 // DER ContentInfo of type signedData, SignedData version 1 with data
@@ -135,15 +139,38 @@ func parseBinarySecurityToken(bst *xdm.Node) (*x509.Certificate, error) {
 	case xmlsec.BSTValueTypeX509v3:
 		return x509.ParseCertificate(der)
 	case xmlsec.BSTValueTypeX509PKIPath:
-		var path []asn1.RawValue
-		rest, err := asn1.Unmarshal(der, &path)
-		if err != nil || len(rest) > 0 || len(path) == 0 {
-			return nil, fmt.Errorf("%w: BST PkiPath", xmlsec.ErrMalformed)
-		}
-		return x509.ParseCertificate(path[len(path)-1].FullBytes)
+		return parsePKIPath(der)
 	case xmlsec.BSTValueTypePKCS7:
 		return parsePKCS7(der)
 	default:
 		return nil, fmt.Errorf("%w: BST ValueType %q", xmlsec.ErrUnsupportedKeyInfo, vt)
 	}
+}
+
+// parsePKIPath returns the target certificate of a PkiPath, the last of a
+// DER SEQUENCE OF certificates. It walks the sequence one element at a time
+// and keeps only the last, so a token of many tiny elements costs nothing
+// to refuse; more than maxPKCS7Certificates is ErrUnsupportedKeyInfo, the
+// same bound as a PKCS7 token.
+func parsePKIPath(der []byte) (*x509.Certificate, error) {
+	malformed := fmt.Errorf("%w: BST PkiPath", xmlsec.ErrMalformed)
+	var seq asn1.RawValue
+	if rest, err := asn1.Unmarshal(der, &seq); err != nil || len(rest) > 0 || !isTag(seq, asn1.ClassUniversal, asn1.TagSequence) {
+		return nil, malformed
+	}
+	var last asn1.RawValue
+	n := 0
+	for b := seq.Bytes; len(b) > 0; n++ {
+		if n == maxPKCS7Certificates {
+			return nil, fmt.Errorf("%w: BST PkiPath carries more than %d certificates", xmlsec.ErrUnsupportedKeyInfo, maxPKCS7Certificates)
+		}
+		var err error
+		if b, err = asn1.Unmarshal(b, &last); err != nil {
+			return nil, malformed
+		}
+	}
+	if n == 0 {
+		return nil, malformed
+	}
+	return x509.ParseCertificate(last.FullBytes)
 }

@@ -15,7 +15,8 @@ var (
 	oidSignedData = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 2}
 )
 
-// maxPKCS7Certificates bounds the certificates a PKCS7 token may carry.
+// maxPKCS7Certificates bounds the certificates a PKCS7 or PkiPath token
+// may carry.
 // Every one is parsed, and finding the leaf compares every pair; a real
 // certificate path is a handful.
 const maxPKCS7Certificates = 16
@@ -68,9 +69,13 @@ func parsePKCS7(der []byte) (*x509.Certificate, error) {
 		return nil, malformed
 	}
 	// The fields of SignedData: version, digestAlgorithms, contentInfo,
-	// [0] certificates, [1] crls, signerInfos.
+	// [0] certificates, [1] crls, signerInfos. A seventh is refused before
+	// it is read, so a SignedData of many tiny fields costs nothing.
 	var f []asn1.RawValue
 	for b := sd.Bytes; len(b) > 0; {
+		if len(f) == 6 {
+			return nil, malformed
+		}
 		var v asn1.RawValue
 		var err error
 		if b, err = asn1.Unmarshal(b, &v); err != nil {

@@ -276,6 +276,7 @@ func TestParsePKCS7Errors(t *testing.T) {
 		{"contentInfo of type signedData", signed(v1, set(), seq(mustMarshal(oidSignedData)), certs(leaf), set()), xmlsec.ErrMalformed, nil},
 		{"signerInfos not a SET", signed(v1, set(), data, certs(leaf), seq()), xmlsec.ErrMalformed, nil},
 		{"a field after signerInfos", signed(v1, set(), data, certs(leaf), set(), set()), xmlsec.ErrMalformed, nil},
+		{"seven fields", signed(v1, set(), data, certs(leaf), ctx(1), set(), set()), xmlsec.ErrMalformed, nil},
 		{"no certificates", signed(v1, set(), data, set()), xmlsec.ErrMalformed, nil},
 		{"empty certificates", signed(v1, set(), data, certs(), set()), xmlsec.ErrMalformed, nil},
 		{"certificates not DER", signed(v1, set(), data, ctx(0, []byte{0x30}), set()), xmlsec.ErrMalformed, nil},

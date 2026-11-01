@@ -1,14 +1,17 @@
 package wss
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"errors"
 	"math/big"
 	"regexp"
+	"slices"
 	"testing"
 	"time"
 
@@ -159,6 +162,8 @@ func TestParseBinarySecurityTokenErrors(t *testing.T) {
 		{"PkiPath not DER", bst(enc+pki, "AAAA"), xmlsec.ErrMalformed},
 		{"PkiPath empty sequence", bst(enc+pki, "MAA="), xmlsec.ErrMalformed},
 		{"PkiPath trailing data", bst(enc+pki, "MAAA"), xmlsec.ErrMalformed},
+		{"PkiPath a SET", bst(enc+pki, "MQA="), xmlsec.ErrMalformed},
+		{"PkiPath element truncated", bst(enc+pki, "MAIwBQ=="), xmlsec.ErrMalformed},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -173,5 +178,31 @@ func TestParseBinarySecurityTokenErrors(t *testing.T) {
 				t.Fatalf("%v: unsupported %v, invalid %v", err, unsupported, !unsupported)
 			}
 		})
+	}
+}
+
+// A PkiPath carries at most 16 certificates, the target last, as a PKCS7
+// token; the sender refuses to build a longer one.
+func TestPKIPathBound(t *testing.T) {
+	leaf, ca := testCert(t, "leaf"), testCert(t, "ca")
+	path := func(n int) []byte {
+		return der(asn1.ClassUniversal, asn1.TagSequence, bytes.Repeat(ca.Raw, n-1), leaf.Raw)
+	}
+	if got, err := parsePKIPath(path(maxPKCS7Certificates)); err != nil || !got.Equal(leaf) {
+		t.Fatalf("16: got %v, %v", got, err)
+	}
+	if _, err := parsePKIPath(path(maxPKCS7Certificates + 1)); !errors.Is(err, xmlsec.ErrUnsupportedKeyInfo) {
+		t.Fatalf("17: got %v", err)
+	}
+	h, err := NewHeader(newDoc(t, env11), xmlsec.NSSOAP11, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chain := slices.Repeat([]*x509.Certificate{ca}, maxPKCS7Certificates-1)
+	if _, err := h.AddBinarySecurityToken(leaf, chain, xmlsec.BSTValueTypeX509PKIPath); err != nil {
+		t.Fatalf("15 in chain: %v", err)
+	}
+	if _, err := h.AddBinarySecurityToken(leaf, append(chain, ca), xmlsec.BSTValueTypeX509PKIPath); !errors.Is(err, xmlsec.ErrUnsupportedKeyInfo) {
+		t.Fatalf("16 in chain: got %v", err)
 	}
 }
