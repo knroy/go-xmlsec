@@ -203,9 +203,8 @@ func checkTokenOrder(doc, str, tok *xdm.Node) error {
 		sec = sec.Parent()
 	}
 	if sec == nil {
-		pos := map[*xdm.Node]int{}
-		xmltree.Walk(doc.Root(), func(e *xdm.Node) { pos[e] = len(pos) + 1 })
-		if pos[str] <= pos[tok] {
+		// Node.Index is document order within a tree.
+		if root := doc.Root(); str.Root() != root || tok.Root() != root || str.Index() <= tok.Index() {
 			return fmt.Errorf("%w: the token must precede the reference (BSP R5205)", xmlsec.ErrMalformed)
 		}
 		return nil

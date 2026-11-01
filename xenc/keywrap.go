@@ -186,5 +186,6 @@ func UnwrapEncryptedKey(el *xdm.Node, kek []byte, opts DecryptOptions) ([]byte, 
 // or what its CipherReference names, found as for an EncryptedData
 // (section 3.3.1). Every caller has checked the algorithms first.
 func keyCiphertext(el *xdm.Node, opts DecryptOptions) ([]byte, error) {
-	return dataCiphertext(el, opts)
+	ct, _, err := dataCiphertext(el, opts)
+	return ct, err
 }

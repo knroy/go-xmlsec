@@ -45,7 +45,7 @@ func signTransform(t *testing.T, kp xmlsec.KeyProvider, ts ...dsig.TransformSpec
 
 // replaceChildren returns a copy of el's document in which kids replace el's
 // children, and the map from each original node to its copy.
-func replaceChildren(el *xdm.Node, kids ...*xdm.Node) (*xdm.Node, map[*xdm.Node]*xdm.Node) {
+func replaceChildren(el *xdm.Node, kids ...*xdm.Node) (*xdm.Node, *xmltree.Copies) {
 	e := &xmltree.Edits{Append: map[*xdm.Node][]*xdm.Node{el: kids}}
 	for c := range el.Children() {
 		e.ReplaceNode(c)
@@ -100,7 +100,7 @@ func TestAttackerProgramRefusedBeforeEvaluation(t *testing.T) {
 			}
 		})
 		doc, m := replaceChildren(tr, xmltree.DocumentElement(evil.Root))
-		sig = m[sig]
+		sig = m.Of(sig)
 		for _, opts := range []dsig.VerifyOptions{
 			{Certificate: victim.Certificate},
 			{Certificate: victim.Certificate, AllowedXSLTStylesheets: []*xdm.Node{xmltree.DocumentElement(benign.Root)}},

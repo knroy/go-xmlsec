@@ -14,3 +14,9 @@ func SetRandReader(t testing.TB, r io.Reader) {
 	randReader = r
 	t.Cleanup(func() { randReader = old })
 }
+
+// PeakHeap is peakHeap, for the memory benchmarks in package wss_test.
+var PeakHeap = peakHeap
+
+// MemSizes is memSizes, for the memory benchmarks in package wss_test.
+var MemSizes = memSizes

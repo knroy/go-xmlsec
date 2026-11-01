@@ -46,7 +46,7 @@
 // fixed: the parse is part of the signature, so two different parse
 // configurations can make one set of octets verify one way and not another.
 //
-// Parsing can cost about 40 times the input in memory, and a signature that
+// Parsing can cost about 20 times the input in memory, and a signature that
 // is not checked against a pinned certificate can be the attacker's own. A
 // server caps input size and pins certificates where it can; docs/security.md
 // has the measurements.

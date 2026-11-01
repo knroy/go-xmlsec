@@ -492,7 +492,7 @@ func TestReferencedToken(t *testing.T) {
 	var e xmltree.Edits
 	e.SetAttr(emb, xdm.QName{Prefix: "wsse11", URI: xmlsec.NSWSSE11, Local: "TokenType"}, xmlsec.BSTValueTypePKCS7)
 	d, m := xmltree.Rebuild(d, &e)
-	if _, err := ResolveSecurityTokenReferenceStrict(d, m[emb]); !errors.Is(err, xmlsec.ErrMalformed) {
+	if _, err := ResolveSecurityTokenReferenceStrict(d, m.Of(emb)); !errors.Is(err, xmlsec.ErrMalformed) {
 		t.Errorf("strict embedded, wrong TokenType: %v", err)
 	}
 }

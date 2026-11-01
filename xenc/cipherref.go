@@ -49,21 +49,28 @@ func EncryptAttachment(att *xmlsec.Attachment, sessionKey []byte, transform stri
 	if att == nil {
 		return nil, nil, errors.New("xenc: no attachment")
 	}
-	plaintext := att.Body
+	// buf is the buffer seal encrypts in place: IV room, then the
+	// plaintext, sized for the tag.
+	var buf []byte
 	switch transform {
 	case xmlsec.TransformAttachmentContentOnly:
+		buf = sealBuf(att.Body)
 	case xmlsec.TransformAttachmentComplete:
 		sel, err := swa.Selected(att.MIMEHeaders)
 		if err != nil {
 			return nil, nil, err
 		}
-		var part []byte
+		n := len("\r\n")
+		for name, v := range sel {
+			n += len(name) + len(": \r\n") + len(v)
+		}
+		buf = make([]byte, ivSize, ivSize+n+len(att.Body)+tagSize)
 		for _, name := range swa.Headers {
 			if v, ok := sel[name]; ok {
-				part = append(part, name+": "+v+"\r\n"...)
+				buf = append(append(append(append(buf, name...), ": "...), v...), "\r\n"...)
 			}
 		}
-		plaintext = append(append(part, "\r\n"...), att.Body...)
+		buf = append(append(buf, "\r\n"...), att.Body...)
 	default:
 		return nil, nil, fmt.Errorf("%w: attachment transform %q", xmlsec.ErrUnsupportedAlgorithm, transform)
 	}
@@ -80,7 +87,7 @@ func EncryptAttachment(att *xmlsec.Attachment, sessionKey []byte, transform stri
 	if sessionKey, err = dataKey(ed, sessionKey, opts); err != nil {
 		return nil, nil, err
 	}
-	ct, err := seal(opts.DataAlgorithm, sessionKey, plaintext)
+	ct, err := seal(opts.DataAlgorithm, sessionKey, buf)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -185,7 +192,7 @@ func DecryptAttachment(el *xdm.Node, ciphertext []byte, sessionKey []byte, opts 
 	if len(algs) != 1 || algs[0] != xmlsec.TransformAttachmentCiphertext {
 		return nil, unsupported("attachment CipherReference transforms %q: exactly %s is required", algs, xmlsec.TransformAttachmentCiphertext)
 	}
-	pt, err := open(alg, sessionKey, ciphertext)
+	pt, err := open(alg, sessionKey, ciphertext, false)
 	if err != nil {
 		return nil, err
 	}

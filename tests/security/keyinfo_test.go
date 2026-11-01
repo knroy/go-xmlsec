@@ -38,7 +38,7 @@ func setKeyInfo(t *testing.T, doc *xdm.Node, inner string) (*xdm.Node, *xdm.Node
 	e := &xmltree.Edits{}
 	e.ReplaceNode(ki, xmltree.DocumentElement(fresh.Root))
 	root, m := xmltree.Rebuild(doc, e)
-	return root, m[sig]
+	return root, m.Of(sig)
 }
 
 // issued is a certificate for signer, issued by the CA key and name.

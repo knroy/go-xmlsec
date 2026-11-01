@@ -88,16 +88,60 @@ func Walk(n *xdm.Node, f func(*xdm.Node)) {
 }
 
 // Base64 decodes element content as xs:base64Binary, which permits
-// whitespace between characters.
+// whitespace between characters. The text is stripped of space, tab, CR
+// and LF and decoded a chunk at a time, not copied whole first: wrapped
+// values, as xmlsec1, WSS4J and Santuario write them, would cost a third
+// more than their decoded size again.
+//
+// It strips octets where the strings.Map it replaced stripped runes, which
+// never changes the result: no UTF-8 sequence holds an ASCII octet, and
+// decoding stops at the first non-ASCII octet, whatever follows.
 func Base64(e *xdm.Node) ([]byte, error) {
-	s := strings.Map(func(r rune) rune {
-		switch r {
-		case ' ', '\t', '\r', '\n':
-			return -1
+	const space = " \t\r\n"
+	s := e.StringValue()
+	n := len(s)
+	for _, c := range space {
+		n -= strings.Count(s, string(c))
+	}
+	enc := base64.StdEncoding
+	dst := make([]byte, enc.DecodedLen(n))
+	var buf [4096]byte
+	chunk, at, w := buf[:0], 0, 0
+	// decode decodes chunk, at octet at of the stripped text, which it ends
+	// unless more follows. Chunks are whole quanta, so Decode treats each as
+	// it would within the whole text, except that padding ending a chunk
+	// with text after it is trailing garbage there.
+	decode := func(more bool) error {
+		k, err := enc.Decode(dst[w:], chunk)
+		w += k
+		if err == nil && more && chunk[len(chunk)-1] == '=' {
+			err = base64.CorruptInputError(len(chunk))
 		}
-		return r
-	}, e.StringValue())
-	return base64.StdEncoding.DecodeString(s)
+		if err != nil {
+			err = err.(base64.CorruptInputError) + base64.CorruptInputError(at)
+		}
+		at += len(chunk)
+		chunk = chunk[:0]
+		return err
+	}
+	for len(s) > 0 {
+		k := strings.IndexAny(s, space)
+		if k < 0 {
+			k = len(s)
+		}
+		for run := s[:k]; len(run) > 0; {
+			if len(chunk) == cap(chunk) {
+				if err := decode(true); err != nil {
+					return dst[:w], err
+				}
+			}
+			m := copy(buf[len(chunk):], run)
+			chunk, run = buf[:len(chunk)+m], run[m:]
+		}
+		s = s[min(k+1, len(s)):]
+	}
+	err := decode(false)
+	return dst[:w], err
 }
 
 // AttrValue returns the value of the attribute with the given expanded name,

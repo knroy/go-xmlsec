@@ -45,7 +45,7 @@ func withKeyInfo(ed *xdm.Node, kids ...*xdm.Node) (root, newED *xdm.Node) {
 	var e xmltree.Edits
 	e.Insert(ed, 1, ki)
 	root, m := xmltree.Rebuild(ed, &e)
-	return root, m[ed]
+	return root, m.Of(ed)
 }
 
 func canonicalOf(t *testing.T, n *xdm.Node) []byte {

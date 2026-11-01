@@ -462,3 +462,46 @@ func TestXPathShadowedPrefixes(t *testing.T) {
 		}
 	}
 }
+
+// digestOf signs xpDoc with one reference to uri and returns its
+// DigestValue.
+func digestOf(t *testing.T, uri string, ts ...dsig.TransformSpec) string {
+	t.Helper()
+	_, sig := mustSignInPlace(t, xpDoc, uri, ts...)
+	return find(sig, xmlsec.NSDSig, "DigestValue").StringValue()
+}
+
+// The output node set, whether the transform keeps most nodes or few, and
+// whether its namespace nodes follow their elements or not, digests as it
+// did when it was a map of every kept node (the digests are that version's).
+func TestXPathNodeSetShapes(t *testing.T) {
+	ns := map[string]string{"x": "urn:x", "ds": xmlsec.NSDSig}
+	noNS := "count(. | ../namespace::*) != count(../namespace::*)"
+	cases := []struct {
+		name, uri string
+		ts        []dsig.TransformSpec
+		want      string
+	}{
+		{"most kept", "", []dsig.TransformSpec{xpEnv, filter2(ns, "subtract", "//x:drop"), xpIncl}, "dmp6z6kPNDE/Gj6XNTgffR7CNTFeJ/nAGwsikFYr5qg="},
+		{"few kept", "", []dsig.TransformSpec{xpEnv, filter2(ns, "intersect", "//b"), xpIncl}, "Cef79bugyspVLxdO7v4M/GKyPNBXANhT2nzHnwbcnpA="},
+		{"XPath", "", []dsig.TransformSpec{xpEnv, xp(xpNoX, ns), xpIncl}, "dmp6z6kPNDE/Gj6XNTgffR7CNTFeJ/nAGwsikFYr5qg="},
+		// Namespace nodes apart from their elements, and dropped before an
+		// enveloped-signature transform.
+		{"namespace dropped", "#a", []dsig.TransformSpec{filter2(ns, "subtract", "//namespace::x"), xpEnv, xpIncl}, "vUiXnFp4jCwM6VNi1H195hXHOWCw6a13AB8YSOZ8G/g="},
+		{"XPath namespaces dropped", "", []dsig.TransformSpec{xpEnv, xp(noNS, ns), xpIncl}, "U+GyRhUIAO/oJSfSW0FHHPYJZ9ds5PaApDtbsTdsrlg="},
+	}
+	allow := dsig.VerifyOptions{AllowedXPathExpressions: []dsig.XPathExpression{
+		{Expr: "//x:drop", Namespaces: xpNS}, {Expr: "//b"}, {Expr: xpNoX, Namespaces: xpNS}, {Expr: "//namespace::x"}, {Expr: noNS},
+	}}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := digestOf(t, c.uri, c.ts...); got != c.want {
+				t.Fatalf("digest %s, want %s", got, c.want)
+			}
+			doc, sig := mustSignInPlace(t, xpDoc, c.uri, c.ts...)
+			if _, err := xpVerify(t, doc, sig, allow); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

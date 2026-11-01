@@ -27,8 +27,12 @@ func (h *Header) check() error {
 	return nil
 }
 
-// sec returns the wsse:Security element in the document's latest tree.
-func (h *Header) sec() *xdm.Node { return h.doc.Node(h.el) }
+// sec returns the wsse:Security element in the document's latest tree,
+// and keeps it, so that the Header pins no earlier tree.
+func (h *Header) sec() *xdm.Node {
+	h.el = h.doc.Node(h.el)
+	return h.el
+}
 
 // NewHeader creates a wsse:Security element in the SOAP header of doc,
 // creating the SOAP Header if there is none.
@@ -110,7 +114,7 @@ func NewHeader(doc *xmlsec.Document, soapNS string, actor string, mustUnderstand
 	// env and hdr are in the latest tree, so the edit needs no rekeying.
 	root, m := xmltree.Rebuild(d.Root(), &e)
 	d.Commit(root, m)
-	return &Header{doc: d, el: m[sec]}, nil
+	return &Header{doc: d, el: m.Of(sec)}, nil
 }
 
 // Prepend places an already-constructed element, such as a ds:Signature, an
@@ -207,6 +211,7 @@ func (h *Header) insert(i int, el *xdm.Node) {
 	e.Insert(h.sec(), i, el)
 	root, m := xmltree.Rebuild(h.doc.Root(), &e)
 	h.doc.Commit(root, m)
+	h.sec()
 }
 
 // refs returns the local IDs that the URI of each ns:local element inside el

@@ -1,7 +1,6 @@
 package xenc
 
 import (
-	"encoding/base64"
 	"fmt"
 	"net/url"
 
@@ -36,13 +35,13 @@ func EncryptOctets(plaintext, sessionKey []byte, opts EncryptOptions) ([]byte, *
 	if err != nil {
 		return nil, nil, err
 	}
-	ct, err := seal(opts.DataAlgorithm, sessionKey, plaintext)
+	ct, err := seal(opts.DataAlgorithm, sessionKey, sealBuf(plaintext))
 	if err != nil {
 		return nil, nil, err
 	}
 	cd := element(ed, "CipherData")
 	if uri == "" {
-		xmltree.Text(element(cd, "CipherValue"), base64.StdEncoding.EncodeToString(ct))
+		xmltree.Text(element(cd, "CipherValue"), base64Text(ct))
 		ct = nil
 	} else {
 		xmltree.SetAttr(element(cd, "CipherReference"), "", "", "URI", uri)

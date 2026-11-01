@@ -196,39 +196,75 @@ type nsKey struct {
 // filtered is the node set an XPath or XPath Filter 2.0 transform outputs.
 // It decides namespace-node membership itself (c14n.NamespaceSet), since
 // both transforms filter namespace nodes like any other.
+//
+// kept has a bit for each node of root's subtree, by Index from root's. A
+// namespace node, which has no index, is in the set when its element is,
+// unless ns lists it: ns holds only the namespace nodes that differ from
+// their element, which in practice is few or none.
 type filtered struct {
-	root  *xdm.Node
-	nodes map[*xdm.Node]bool
-	ns    map[nsKey]bool
+	root *xdm.Node
+	kept []uint64
+	ns   map[nsKey]bool
 }
 
-func (s filtered) Root() *xdm.Node           { return s.root }
-func (s filtered) Contains(n *xdm.Node) bool { return s.nodes[n] }
+func newFiltered(root *xdm.Node) filtered {
+	return filtered{root: root, kept: make([]uint64, (root.SubtreeEnd()-root.Index()+63)/64), ns: map[nsKey]bool{}}
+}
+
+func (s filtered) Root() *xdm.Node { return s.root }
+
+func (s filtered) Contains(n *xdm.Node) bool {
+	// A namespace node's -1 gives a negative i.
+	i := n.Index() - s.root.Index()
+	return i >= 0 && i < len(s.kept)*64 && s.kept[i/64]&(1<<(i%64)) != 0
+}
+
 func (s filtered) ContainsNamespace(e *xdm.Node, prefix string) bool {
-	return s.ns[nsKey{e, prefix}]
+	return s.Contains(e) != s.ns[nsKey{e, prefix}]
+}
+
+// add puts n, not a namespace node, in s; within the subtree of root, which
+// is where filter walks.
+func (s filtered) add(n *xdm.Node) {
+	i := n.Index() - s.root.Index()
+	s.kept[i/64] |= 1 << (i % 64)
+}
+
+// setNamespace records whether e's namespace node for prefix is in s, once
+// e's own membership is decided.
+func (s filtered) setNamespace(e *xdm.Node, prefix string, in bool) {
+	if in != s.Contains(e) {
+		s.ns[nsKey{e, prefix}] = true
+	}
 }
 
 // without removes the subtree of sig, for an enveloped-signature transform
 // that follows.
 func (s filtered) without(sig *xdm.Node) filtered {
-	maps.DeleteFunc(s.nodes, func(n *xdm.Node, _ bool) bool { return within(n, sig) })
+	if within(sig, s.root) || within(s.root, sig) {
+		// One tree: the subtrees' index ranges overlap where they nest.
+		lo, hi := max(sig.Index()-s.root.Index(), 0), min(sig.SubtreeEnd()-s.root.Index(), len(s.kept)*64)
+		for i := lo; i < hi; i++ {
+			s.kept[i/64] &^= 1 << (i % 64)
+		}
+	}
 	maps.DeleteFunc(s.ns, func(k nsKey, _ bool) bool { return within(k.elem, sig) })
 	return s
 }
 
-// member reports whether n, any node kind including a namespace node, is in
-// the data's node set.
+// member reports whether n, not a namespace node, is in the data's node
+// set.
 func (d *data) member(n *xdm.Node) bool {
-	switch {
-	case d.stripComments && n.Kind() == xdm.KindComment:
-		return false
-	case n.Kind() == xdm.KindNamespace:
-		if s, ok := d.ns.(c14n.NamespaceSet); ok {
-			return s.ContainsNamespace(n.Parent(), n.Name().Local)
-		}
-		return d.ns.Contains(n.Parent())
+	return !(d.stripComments && n.Kind() == xdm.KindComment) && d.ns.Contains(n)
+}
+
+// memberNamespace reports whether e's namespace node for prefix is in the
+// data's node set.
+func (d *data) memberNamespace(e *xdm.Node, prefix string) bool {
+	if s, ok := d.ns.(c14n.NamespaceSet); ok {
+		return s.ContainsNamespace(e, prefix)
 	}
-	return d.ns.Contains(n)
+	return d.ns.Contains(e)
 }
 
 // filter applies an XPath (XML-DSig 6.6.3) or XPath Filter 2.0 transform:
@@ -250,13 +286,19 @@ func (d *data) filter(t TransformSpec, sig *xdm.Node) error {
 	here := t.el.ChildElements()
 
 	var keep func(*xdm.Node) (bool, error)
+	// keepNS decides e's namespace node for prefix without making it, where
+	// the transform needs no node; nil where it does.
+	var keepNS func(e *xdm.Node, prefix string) bool
 	if t.Algorithm == xmlsec.TransformXPath {
 		c, err := xpathfilter.Compile(t.XPath, t.XPathNamespaces)
 		if err != nil {
 			return err
 		}
-		lib := xpathfilter.Library(here[0], doc)
-		keep = func(n *xdm.Node) (bool, error) { return c.EvalBool(xpath.NewContext(n, lib).WithFocus(n, 1, 1)) }
+		// One context for the transform, refocused per node: each Eval
+		// resets the item and byte budgets, and the depth is counted on the
+		// copy WithFocus makes.
+		ctx := xpath.NewContext(doc, xpathfilter.Library(here[0], doc))
+		keep = func(n *xdm.Node) (bool, error) { return c.EvalBool(ctx.WithFocus(n, 1, 1)) }
 	} else {
 		sets := make([]selection, len(t.XPathFilters))
 		for i, f := range t.XPathFilters {
@@ -265,12 +307,12 @@ func (d *data) filter(t TransformSpec, sig *xdm.Node) error {
 				return err
 			}
 		}
-		keep = func(n *xdm.Node) (bool, error) {
-			// XPath Filter 2.0 section 3.4: the filter node set starts as the
-			// whole document, and the output is its intersection with the input.
+		// XPath Filter 2.0 section 3.4: the filter node set starts as the
+		// whole document, and the output is its intersection with the input.
+		combine := func(selected func(selection) bool) bool {
 			in := true
 			for i, f := range t.XPathFilters {
-				s := sets[i].expanded(n)
+				s := selected(sets[i])
 				switch f.Filter {
 				case "intersect":
 					in = in && s
@@ -280,7 +322,13 @@ func (d *data) filter(t TransformSpec, sig *xdm.Node) error {
 					in = in || s
 				}
 			}
-			return in, nil
+			return in
+		}
+		keep = func(n *xdm.Node) (bool, error) {
+			return combine(func(s selection) bool { return s.expanded(n) }), nil
+		}
+		keepNS = func(e *xdm.Node, prefix string) bool {
+			return combine(func(s selection) bool { return s.ns[nsKey{e, prefix}] || s.expanded(e) })
 		}
 	}
 
@@ -288,34 +336,41 @@ func (d *data) filter(t TransformSpec, sig *xdm.Node) error {
 	// expression), bounded only by xmlsec.MaxParseNodes, MaxTransformsPerReference
 	// and the reference count; the allow-list keeps the expression the
 	// caller's own. Add a node budget if an allowed expression is ever costly.
-	out := filtered{root: d.ns.Root(), nodes: map[*xdm.Node]bool{}, ns: map[nsKey]bool{}}
+	out := newFiltered(d.ns.Root())
 	var err error
-	var walk func(n *xdm.Node)
+	// decide reports whether the transform keeps n, which is in the input,
+	// and records n in d.cut if not; for a namespace node, n is its element,
+	// which is within the same subtrees.
+	decide := func(n *xdm.Node, keep func() (bool, error)) bool {
+		k, e := keep()
+		if e != nil {
+			err = fmt.Errorf("%w: evaluating %s: %v", xmlsec.ErrMalformed, t.Algorithm, e)
+			return false
+		}
+		if !k && !within(n, sig) {
+			d.cut = append(d.cut, n)
+		}
+		return k
+	}
 	visit := func(n *xdm.Node) {
-		if err != nil || !d.member(n) {
-			return
-		}
-		var k bool
-		if k, err = keep(n); err != nil {
-			err = fmt.Errorf("%w: evaluating %s: %v", xmlsec.ErrMalformed, t.Algorithm, err)
-			return
-		}
-		switch {
-		case !k:
-			if !within(n, sig) {
-				d.cut = append(d.cut, n)
-			}
-		case n.Kind() == xdm.KindNamespace:
-			out.ns[nsKey{n.Parent(), n.Name().Local}] = true
-		default:
-			out.nodes[n] = true
+		if err == nil && d.member(n) && decide(n, func() (bool, error) { return keep(n) }) {
+			out.add(n)
 		}
 	}
+	var walk func(n *xdm.Node)
 	walk = func(n *xdm.Node) {
 		visit(n)
 		if n.Kind() == xdm.KindElement {
-			for _, ns := range xpath.NamespaceNodesOf(n) {
-				visit(ns)
+			// After n itself: setNamespace compares with n's membership.
+			if keepNS == nil {
+				for _, ns := range xpath.NamespaceNodesOf(n) {
+					p := ns.Name().Local
+					out.setNamespace(n, p, err == nil && d.memberNamespace(n, p) && decide(n, func() (bool, error) { return keep(ns) }))
+				}
+			} else {
+				for p := range n.InScopeNamespaceBindings() {
+					out.setNamespace(n, p, d.memberNamespace(n, p) && decide(n, func() (bool, error) { return keepNS(n, p), nil }))
+				}
 			}
 			for a := range n.Attrs() {
 				visit(a)
@@ -370,12 +425,9 @@ func selectFilter(expr string, ns map[string]string, lib xpath.FunctionLibrary, 
 	return s, nil
 }
 
-// expanded reports whether n is in the subtree expansion of s: in s, or
-// with an ancestor in s (section 3.4).
+// expanded reports whether n, not a namespace node, is in the subtree
+// expansion of s: in s, or with an ancestor in s (section 3.4).
 func (s selection) expanded(n *xdm.Node) bool {
-	if n.Kind() == xdm.KindNamespace && s.ns[nsKey{n.Parent(), n.Name().Local}] {
-		return true
-	}
 	// ponytail: an ancestor walk per node per filter, O(nodes x depth); mark
 	// subtrees top-down if deep documents ever make it show.
 	for ; n != nil; n = n.Parent() {

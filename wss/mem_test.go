@@ -126,3 +126,92 @@ func BenchmarkBinarySecurityTokenFloodMemory(b *testing.B) {
 		}
 	}
 }
+
+// A Header holds the wsse:Security element of the latest tree, not of the
+// tree NewHeader made, which would keep that whole tree alive.
+func TestHeaderHoldsLatestTree(t *testing.T) {
+	doc := newDoc(t, env11)
+	h, err := NewHeader(doc, xmlsec.NSSOAP11, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if _, err := h.AddBinarySecurityToken(testCert(t, "c"), nil, xmlsec.BSTValueTypeX509v3); err != nil {
+			t.Fatal(err)
+		}
+		if h.el.Root() != doc.Root() {
+			t.Fatal("Header holds an earlier tree")
+		}
+	}
+}
+
+// checkTokenOrder outside a header refuses exactly the pairs that a
+// numbering of every element in document order refuses, which it once
+// built, and a reference in another tree.
+func TestCheckTokenOrderDocumentOrder(t *testing.T) {
+	doc := parseDoc(t, `<r><a><b/><c><d/></c></a><e/><f><g/></f></r>`)
+	pos := map[*xdm.Node]int{}
+	var els []*xdm.Node
+	xmltree.Walk(doc, func(e *xdm.Node) { pos[e] = len(pos) + 1; els = append(els, e) })
+	for _, str := range els {
+		for _, tok := range els {
+			if got, want := checkTokenOrder(doc, str, tok) != nil, pos[str] <= pos[tok]; got != want {
+				t.Fatalf("%s, %s: refused %v, want %v", str.Name().Local, tok.Name().Local, got, want)
+			}
+		}
+	}
+	other := xmltree.DocumentElement(parseDoc(t, `<r><a/></r>`))
+	if checkTokenOrder(doc, other.FirstChild(), els[0]) == nil || checkTokenOrder(doc, els[1], other) == nil {
+		t.Fatal("a node of another tree accepted")
+	}
+}
+
+// BenchmarkCheckTokenOrderMemory reports the heap per document byte of
+// checking a reference's order outside a header. WSS_PEAK_MIB sets the
+// sizes.
+func BenchmarkCheckTokenOrderMemory(b *testing.B) {
+	for _, mib := range memSizes() {
+		var s strings.Builder
+		s.WriteString("<r><t/>")
+		for s.Len() < mib<<20 {
+			s.WriteString("<i/>")
+		}
+		s.WriteString("<s/></r>")
+		tree, err := xmlsec.Parse([]byte(s.String()))
+		if err != nil {
+			b.Fatal(err)
+		}
+		r := xmltree.DocumentElement(tree.Root)
+		tok, str := r.FirstChild(), r.LastChild()
+		b.Run(fmt.Sprintf("%dMiB", mib), func(b *testing.B) {
+			for b.Loop() {
+				peak := peakHeap(func() { _ = checkTokenOrder(tree.Root, str, tok) })
+				b.ReportMetric(float64(peak)/float64(s.Len()), "peak-B/B")
+			}
+		})
+	}
+}
+
+// BenchmarkIDForMemory reports the heap per document byte of checking a
+// new ID against a document where every element has one. WSS_PEAK_MIB sets
+// the sizes.
+func BenchmarkIDForMemory(b *testing.B) {
+	for _, mib := range memSizes() {
+		var s strings.Builder
+		s.WriteString(`<r xmlns:wsu="` + xmlsec.NSWSU + `">`)
+		for i := 0; s.Len() < mib<<20; i++ {
+			fmt.Fprintf(&s, `<i wsu:Id="id-%d"/>`, i)
+		}
+		s.WriteString("</r>")
+		tree, err := xmlsec.Parse([]byte(s.String()))
+		if err != nil {
+			b.Fatal(err)
+		}
+		b.Run(fmt.Sprintf("%dMiB", mib), func(b *testing.B) {
+			for b.Loop() {
+				peak := peakHeap(func() { _, _ = idFor(tree.Root, "fresh") })
+				b.ReportMetric(float64(peak)/float64(s.Len()), "peak-B/B")
+			}
+		})
+	}
+}

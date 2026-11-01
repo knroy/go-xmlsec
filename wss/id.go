@@ -210,21 +210,21 @@ func idFor(doc *xdm.Node, id string) (string, error) {
 	if !xdm.IsNCName(id) {
 		return "", fmt.Errorf("%w: ID %q is not an NCName", xmlsec.ErrMalformed, id)
 	}
-	if usedIDs(doc)[id] {
+	if idUsed(doc, id) {
 		return "", fmt.Errorf("%w: %q is already in use", xmlsec.ErrAmbiguousID, id)
 	}
 	return id, nil
 }
 
-// usedIDs returns every value of an attribute this module may resolve as an
-// ID, anywhere in doc.
-func usedIDs(doc *xdm.Node) map[string]bool {
-	used := map[string]bool{}
+// idUsed reports whether id is the value of an attribute this module may
+// resolve as an ID, anywhere in doc.
+func idUsed(doc *xdm.Node, id string) bool {
+	used := false
 	if doc != nil {
 		xmltree.Walk(doc.Root(), func(e *xdm.Node) {
 			for a := range e.Attrs() {
-				if isAnyID(a.Name()) {
-					used[a.Value()] = true
+				if isAnyID(a.Name()) && a.Value() == id {
+					used = true
 				}
 			}
 		})
@@ -234,13 +234,12 @@ func usedIDs(doc *xdm.Node) map[string]bool {
 
 // newID returns an ID not used anywhere in doc.
 func newID(doc *xdm.Node) (string, error) {
-	used := usedIDs(doc)
 	for {
 		var b [16]byte
 		if _, err := io.ReadFull(randReader, b[:]); err != nil {
 			return "", err
 		}
-		if id := "id-" + hex.EncodeToString(b[:]); !used[id] {
+		if id := "id-" + hex.EncodeToString(b[:]); !idUsed(doc, id) {
 			return id, nil
 		}
 	}

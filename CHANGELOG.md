@@ -5,6 +5,30 @@ versioning](https://semver.org): within a major version no exported name is
 removed or changed. See [RELEASE.md](RELEASE.md) for the compatibility
 promise and how a release is cut.
 
+## Unreleased
+
+A pre-authentication memory fix, and the go-xmlsec findings of a memory audit.
+No exported API changes. Digests, signatures and ciphertext are byte-identical
+to v2.0.1, which tests pin with golden hashes taken from it.
+
+### Fixed — security
+
+| Change | Problem → solution | Commit |
+|---|---|---|
+| A PkiPath or PKCS7 `BinarySecurityToken` of many tiny elements exhausted memory before authentication | Resolving the signer's key decoded a PkiPath into a slice of every element, and read every SignedData field, before the signature was checked: a 60 MiB message of 2-byte NULLs allocated 4.2 GB (PkiPath) or 3.3 GB (PKCS7), about 77× and 59× the token. The PkiPath is walked one element at a time, keeping only the last, and refused past 16 certificates with `ErrUnsupportedKeyInfo`, as PKCS7 already was; a seventh SignedData field is `ErrMalformed`. Peak heap is now 0.76× the token (the base64 decode). `AddBinarySecurityToken` refuses a PkiPath chain of more than 15 beside the certificate. | *this commit* |
+
+### Changed — memory
+
+| Change | Problem → solution | Commit |
+|---|---|---|
+| An `xmlsec.Document` kept every earlier tree | Each change kept a map from every node to its copy, whose keys pinned every old tree: the send flow (`AssignID`, `NewHeader`, timestamp, token, `dsig.Sign`, `Prepend`) peaked at 55× and retained 53× a 1 MiB message. Each change now keeps runs of positions (`Node.Index`) and holds earlier trees only by weak pointer; `Node` answers as before. Peak 16×, retained 5.3×, allocation −57%. A `wss.Header` holds its element in the latest tree. | *this commit* |
+| The BSP R5205 token-order check and every new ID built a map over the document | Outside a header, the order check numbered every element (10× the document at 1 MiB); it compares `Node.Index`. A new or supplied ID was checked against a set of every ID value (2.3× on an ID-dense document); each candidate is looked for by walking. Results and errors are unchanged. | *this commit* |
+| The NFC check of `Sign`, and of `Verify` with `RequireNFC`, buffered the whole canonical form | It is checked as written, keeping only the text after the last normalization boundary: a detached `Sign` at 10 MiB peaks at 0.017× the reference (from 2.65×), `Verify` with `RequireNFC` at 0.016×. Tested against whole-buffer `IsNormal` over random write splits. | *this commit* |
+| The XPath transform made an evaluation context for every node, and both XPath transforms kept a map entry per node of their output | One context per transform, refocused per node; the output node set is a bitset by `Node.Index`. XPath 1.0 allocation 133× → 54× the document, XPath Filter 2.0 subtract peak 16.8× → 0.88×. The go-xml node budget (`MaxNodes`) is now charged across the transform rather than per node: stricter, and unreachable by an XPath 1.0 filter, which constructs no nodes. | *this commit* |
+| Encryption and decryption copied their buffers | `EncryptElement`, `EncryptContent` and `EncryptHeader` seal AES-GCM in place and write base64 straight into the text (allocation 6.0× → 3.8× at 10 MiB); decryption opens in the buffer it decoded, never in bytes the caller supplied (`DecryptData` 2× → 1×); `DecryptAndReplace` and `DecryptHeader` rebuild the document without a node map (peak 8.7× → 7.1×); `EncryptAttachment` Complete seals one buffer (2× → 1×); a wrapped `CipherValue` is decoded in chunks (1.73 → 0.73 bytes per text byte, twice as fast). | *this commit* |
+| `go-xml` v2.0.3 → v2.1.0 | Its memory release, which addressed what go-xmlsec reported: pooled c14n buffers (a 50-reference `Verify` 8.3 MB → 0.15 MB), sized `c14n.Bytes` (3.6× → 1.2× the output), long text handed to the tree (base64 text parse 2.0× → 1.1×), and `Node.Index` and `Tree.NodeAt`, which the `Document` change uses. Canonical output is unchanged. | *this commit* |
+| `Parse` memory figures | Re-measured on go-xml v2.1.0: about 20 times the input at worst, from about 40; [docs/security.md](docs/security.md) has the table. | *this commit* |
+
 ## v2.0.1 — 2026-10-31
 
 No API change.

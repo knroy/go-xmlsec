@@ -84,7 +84,9 @@ func tripleDES(key []byte) (cipher.Block, error) {
 // 6.1.1 and does not close it: CBC has no integrity, so an attacker who can
 // submit ciphertext still learns from whatever the application does with
 // the plaintext, such as fail to parse it.
-func cbcOpen(alg string, key, data []byte) ([]byte, error) {
+//
+// With own, data is decrypted in place, as open does.
+func cbcOpen(alg string, key, data []byte, own bool) ([]byte, error) {
 	var b cipher.Block
 	var err error
 	if alg == xmlsec.EncTripleDESCBC {
@@ -99,7 +101,10 @@ func cbcOpen(alg string, key, data []byte) ([]byte, error) {
 	if len(data) < 2*bs || len(data)%bs != 0 {
 		return nil, errDecrypt
 	}
-	pt := make([]byte, len(data)-bs)
+	pt := data[bs:]
+	if !own {
+		pt = make([]byte, len(data)-bs)
+	}
 	cipher.NewCBCDecrypter(b, data[:bs]).CryptBlocks(pt, data[bs:])
 	n := int(pt[len(pt)-1])
 	if subtle.ConstantTimeLessOrEq(1, n)&subtle.ConstantTimeLessOrEq(n, bs) != 1 {

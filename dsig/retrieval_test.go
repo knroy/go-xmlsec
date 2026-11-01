@@ -23,7 +23,7 @@ func graft(t *testing.T, doc, sig *xdm.Node, fragment string) (*xdm.Node, *xdm.N
 	el := xmltree.DocumentElement(doc)
 	e.Insert(el, el.NumChildren(), xmltree.DocumentElement(parse(t, []byte(fragment))))
 	root, m := xmltree.Rebuild(doc, &e)
-	return root, m[sig]
+	return root, m.Of(sig)
 }
 
 // target is a ds or dsig11 element with wsu:Id "k" holding inner.

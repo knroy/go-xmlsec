@@ -99,7 +99,7 @@ func tighten(name string, v, pinned int64) (int64, error) {
 // A DOCTYPE is refused, with ErrMalformed, and no EntityResolver is ever
 // supplied.
 //
-// Memory use can reach about 40 times len(b) within the limits above, before
+// Memory use can reach about 20 times len(b) within the limits above, before
 // anything is authenticated. Cap the size of b to what the profile needs, or
 // use ParseWithLimits.
 func Parse(b []byte) (*xdm.Tree, error) {

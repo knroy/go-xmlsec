@@ -23,7 +23,7 @@ import (
 	"github.com/knroy/go-xmlsec/v2/wss"
 )
 
-func newKey(t *testing.T, signer crypto.Signer) xmlsec.KeyProvider {
+func newKey(t testing.TB, signer crypto.Signer) xmlsec.KeyProvider {
 	t.Helper()
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
@@ -50,7 +50,7 @@ var rsaKey = func() *rsa.PrivateKey {
 	return k
 }()
 
-func parse(t *testing.T, b []byte) *xdm.Node {
+func parse(t testing.TB, b []byte) *xdm.Node {
 	t.Helper()
 	tree, err := xmlsec.Parse(b)
 	if err != nil {
@@ -81,7 +81,7 @@ func appendChild(parent, n *xdm.Node) *xdm.Node {
 // n's counterpart in it.
 func rebuilt(doc, n *xdm.Node, e *xmltree.Edits) (*xdm.Node, *xdm.Node) {
 	root, m := xmltree.Rebuild(doc, e)
-	return root, m[n]
+	return root, m.Of(n)
 }
 
 func findSignature(doc *xdm.Node) *xdm.Node {

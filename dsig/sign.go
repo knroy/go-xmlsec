@@ -362,13 +362,13 @@ func sign(doc *xdm.Node, key xmlsec.KeyProvider, opts SignOptions, d *xmltree.Do
 
 	at := func(n *xdm.Node) *xdm.Node { return n }
 	var root *xdm.Node
-	var m map[*xdm.Node]*xdm.Node
+	var m *xmltree.Copies
 	switch {
 	case parent != nil:
 		var e xmltree.Edits
 		e.Insert(parent, parent.NumChildren(), sig)
 		root, m, _ = d.Prepare(&e) // parent is in d's current tree
-		at = func(n *xdm.Node) *xdm.Node { return m[n] }
+		at = m.Of
 		doc = root
 	case doc == nil:
 		doc = sig // enveloping: the signature is all there is

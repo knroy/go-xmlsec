@@ -54,18 +54,18 @@ func TestEdits(t *testing.T) {
 	if canon(t, doc) != `<r xmlns:p="urn:p" a="1"><x></x><!--c--><y></y></r>` {
 		t.Fatal("source changed")
 	}
-	if root.Kind() != xdm.KindDocument || m[doc] != root || root.BaseURI() != doc.BaseURI() || root.Tree() == nil {
+	if root.Kind() != xdm.KindDocument || m.Of(doc) != root || root.BaseURI() != doc.BaseURI() || root.Tree() == nil {
 		t.Fatal("document node not rebuilt as a document")
 	}
 	nr := root.FirstChild()
-	if m[r] != nr || m[y] != nr.ChildAt(4) || m[ins1] != nr.ChildAt(1) || m[ins1.FirstChild()] != nr.ChildAt(1).FirstChild() ||
-		m[rep] != nr.ChildAt(3) || m[r.AttrAt(0)] != nr.Attr("", "a") {
+	if m.Of(r) != nr || m.Of(y) != nr.ChildAt(4) || m.Of(ins1) != nr.ChildAt(1) || m.Of(ins1.FirstChild()) != nr.ChildAt(1).FirstChild() ||
+		m.Of(rep) != nr.ChildAt(3) || m.Of(r.AttrAt(0)) != nr.Attr("", "a") {
 		t.Fatal("map does not take nodes to their copies")
 	}
-	if _, ok := m[x]; ok {
+	if m.Of(x) != nil {
 		t.Fatal("removed node mapped")
 	}
-	if _, ok := m[c]; ok {
+	if m.Of(c) != nil {
 		t.Fatal("replaced node mapped")
 	}
 }
@@ -76,10 +76,10 @@ func TestRebuildFragment(t *testing.T) {
 	k := Element(f, "", "", "k")
 	Text(k, "v")
 	root, m := Rebuild(k, nil)
-	if root == f || m[f] != root || root.Parent() != nil || root.Tree() != nil || canon(t, root) != canon(t, f) {
+	if root == f || m.Of(f) != root || root.Parent() != nil || root.Tree() != nil || canon(t, root) != canon(t, f) {
 		t.Fatalf("fragment copy %s", canon(t, root))
 	}
-	if m[k].Parent() != root {
+	if m.Of(k).Parent() != root {
 		t.Fatal("child copy not under root copy")
 	}
 }
@@ -110,7 +110,7 @@ func TestDoc(t *testing.T) {
 		t.Fatal(err)
 	}
 	v2 := d.Root()
-	if v2 == doc || m1[a] != d.Node(a) || AttrValue(d.Node(a), "", "v") != "2" {
+	if v2 == doc || m1.Of(a) != d.Node(a) || AttrValue(d.Node(a), "", "v") != "2" {
 		t.Fatal("version 2")
 	}
 
@@ -125,10 +125,10 @@ func TestDoc(t *testing.T) {
 	if got := canon(t, d.Root()); got != `<r><a v="2"><n></n></a></r>` {
 		t.Fatal(got)
 	}
-	if d.Node(b) != nil || d.Node(m1[b]) != nil {
+	if d.Node(b) != nil || d.Node(m1.Of(b)) != nil {
 		t.Fatal("removed node still found")
 	}
-	if d.Node(a) != d.Node(m1[a]) || d.Node(a).Root() != d.Root() || d.Node(n) == nil || d.Node(n).Parent() != d.Node(a) {
+	if d.Node(a) != d.Node(m1.Of(a)) || d.Node(a).Root() != d.Root() || d.Node(n) == nil || d.Node(n).Parent() != d.Node(a) {
 		t.Fatal("nodes of earlier versions not mapped to the latest")
 	}
 
@@ -153,5 +153,143 @@ func TestDoc(t *testing.T) {
 	}
 	if d.Node(v2) != d.Root() {
 		t.Fatal("root of an earlier version")
+	}
+}
+
+// label names a node of the trees TestDocNodeEveryVersion builds, in which
+// every element name and every text, comment and PI value is unique: the
+// same label in two versions is the same node.
+func label(n *xdm.Node) string {
+	switch n.Kind() {
+	case xdm.KindDocument:
+		return "/"
+	case xdm.KindElement:
+		return n.Name().Local
+	case xdm.KindAttribute:
+		return label(n.Parent()) + "@" + n.Name().Local
+	}
+	return "#" + n.Value()
+}
+
+// allNodes returns n and every node under it, attributes included.
+func allNodes(n *xdm.Node) []*xdm.Node {
+	out := []*xdm.Node{n}
+	for a := range n.Attrs() {
+		out = append(out, a)
+	}
+	for c := range n.Children() {
+		out = append(out, allNodes(c)...)
+	}
+	return out
+}
+
+// checkEveryVersion checks that d.Node takes every node of every tree in
+// seen to the node of the current tree with its label, or nil when there
+// is none: what a map from each node to its copy, followed change by
+// change, gives.
+func checkEveryVersion(t *testing.T, d *Doc, seen [][]*xdm.Node) {
+	t.Helper()
+	cur := map[string]*xdm.Node{}
+	for _, n := range allNodes(d.Root()) {
+		cur[label(n)] = n
+	}
+	checked := 0
+	for v, nodes := range seen {
+		for _, n := range nodes {
+			if got, want := d.Node(n), cur[label(n)]; got != want {
+				t.Fatalf("version %d, %s: got %v, want %v", v, label(n), got, want)
+			}
+			checked++
+		}
+	}
+	if checked < 20 {
+		t.Fatalf("checked only %d nodes", checked)
+	}
+}
+
+func TestDocNodeEveryVersion(t *testing.T) {
+	frag := func(s string) *xdm.Node { return parse(t, s).FirstChild() }
+	for name, start := range map[string]*xdm.Node{
+		"document": parse(t, `<r xmlns:p="urn:p" ra="1"><a aa="1">ta<b ba="1">tb</b><!--ca--></a><c ca="1">tc</c><d da="1"><e/></d><?pi x?></r>`),
+		"fragment": xdm.Copy(frag(`<r xmlns:p="urn:p" ra="1"><a aa="1">ta<b ba="1">tb</b><!--ca--></a><c ca="1">tc</c><d da="1"><e/></d><?pi x?></r>`)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := NewDoc(start)
+			seen := [][]*xdm.Node{allNodes(d.Root())}
+			el := func(local string) *xdm.Node {
+				for _, n := range allNodes(d.Root()) {
+					if n.Kind() == xdm.KindElement && n.Name().Local == local {
+						return n
+					}
+				}
+				t.Fatalf("no %s", local)
+				return nil
+			}
+			apply := func(e *Edits, inserted ...*xdm.Node) {
+				t.Helper()
+				prev := allNodes(d.Root())
+				c, err := d.Apply(e)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, n := range inserted {
+					seen = append(seen, allNodes(n))
+				}
+				seen = append(seen, allNodes(d.Root()))
+				checkEveryVersion(t, d, seen)
+				// The Copies Apply returns agree with Node for the
+				// previous tree.
+				for _, n := range prev {
+					if c.Of(n) != d.Node(n) {
+						t.Fatalf("Copies.Of(%s) = %v, Node %v", label(n), c.Of(n), d.Node(n))
+					}
+				}
+			}
+			r, a, c := el("r"), el("a"), el("c")
+
+			var e1 Edits
+			e1.SetAttr(a, xdm.QName{Local: "aa"}, "2")
+			e1.SetAttr(c, xdm.QName{Local: "na"}, "1")
+			e1.Declare(el("d"), "q", "urn:q")
+			apply(&e1)
+
+			// Keyed on nodes of the first version.
+			f, h := frag(`<f fa="1">tf<g/></f>`), frag(`<h ha="1"/>`)
+			var e2 Edits
+			e2.Insert(r, 1, f)
+			e2.ReplaceNode(el("e"), h)
+			apply(&e2, f, h)
+
+			// Keyed on a node of the second version, on an inserted node
+			// and on the nodes it was copied to.
+			i, j := frag(`<i>ti</i>`), frag(`<j/>`)
+			var e3 Edits
+			e3.ReplaceNode(el("b"))
+			e3.Insert(el("r"), el("r").NumChildren(), i)
+			e3.Insert(f, 0, j)
+			e3.SetAttr(c, xdm.QName{Local: "ca"}, "3")
+			apply(&e3, i, j)
+
+			root, m, err := d.Prepare(&Edits{Namespaces: map[*xdm.Node][]Binding{a: {{"z", "urn:z"}}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			d.Commit(root, m)
+			seen = append(seen, allNodes(d.Root()))
+			checkEveryVersion(t, d, seen)
+			if got := canon(t, d.Root()); got != `<r xmlns:p="urn:p" ra="1"><a xmlns:z="urn:z" aa="2">ta<!--ca--></a><f fa="1"><j></j>tf<g></g></f><c ca="3" na="1">tc</c><d xmlns:q="urn:q" da="1"><h ha="1"></h></d><?pi x?><i>ti</i></r>` {
+				t.Fatal(got)
+			}
+		})
+	}
+}
+
+func TestRebuildTree(t *testing.T) {
+	doc := parse(t, `<r><a/></r>`)
+	var e Edits
+	e.SetAttr(doc.FirstChild(), xdm.QName{Local: "v"}, "1")
+	want, _ := Rebuild(doc, &e)
+	if got := RebuildTree(doc, &e); canon(t, got) != canon(t, want) {
+		t.Fatal(canon(t, got))
 	}
 }

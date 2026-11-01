@@ -120,7 +120,7 @@ func resign(sig *xdm.Node) (*xdm.Node, *xdm.Node, bool) {
 	}
 	e.Insert(kids[1], kids[1].NumChildren(), xdm.NewNode(xdm.KindText, xdm.QName{}, base64.StdEncoding.EncodeToString(v)))
 	root, m := xmltree.Rebuild(sig, &e)
-	return root, m[sig], true
+	return root, m.Of(sig), true
 }
 
 const fuzzSigOpen = `<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#">`
