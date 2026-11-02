@@ -29,6 +29,7 @@ func ReferencedData(list *xdm.Node) ([]*xdm.Node, error) {
 	}
 	find := findIDs(list)
 	var out []*xdm.Node
+	seen := map[*xdm.Node]bool{}
 	for _, r := range list.ChildElements() {
 		if r.IsElement(xmlsec.NSXEnc, "KeyReference") {
 			continue
@@ -53,9 +54,10 @@ func ReferencedData(list *xdm.Node) ([]*xdm.Node, error) {
 		if !t.IsElement(xmlsec.NSXEnc, "EncryptedData") {
 			return nil, malformed("xenc:DataReference %q names a %s, not an xenc:EncryptedData", uri, t.Name().Local)
 		}
-		if slices.Contains(out, t) {
+		if seen[t] {
 			return nil, malformed("xenc:DataReference %q listed twice", uri)
 		}
+		seen[t] = true
 		out = append(out, t)
 	}
 	if len(out) == 0 {

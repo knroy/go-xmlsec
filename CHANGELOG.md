@@ -5,6 +5,14 @@ versioning](https://semver.org): within a major version no exported name is
 removed or changed. See [RELEASE.md](RELEASE.md) for the compatibility
 promise and how a release is cut.
 
+## Unreleased
+
+### Fixed — security
+
+| Change | Problem → solution | Commit |
+|---|---|---|
+| `xenc.ReferencedData` still checked for duplicate references quadratically | v2.0.2's single walk left a scan of the result for each reference: 80,000 references took 25 s under the race detector, and CI's 20,000-reference test failed its 2 s limit on every OS. Duplicates are found with a set; 80,000 references: 1 s under the race detector. | *this commit* |
+
 ## v2.0.2 — 2026-11-02
 
 Fixes for resource exhaustion before authentication, two correctness fixes,
