@@ -123,7 +123,7 @@ Defences here:
   to plant a second target: with the default set, an `ID` or `Id` attribute
   is neither resolved nor counted. `xdm.ElementByID` is never used on the
   verify path: on duplicates it returns the first depth-first match
-  (confirmed against go-xml v2.0.3), which is exactly the ambiguity the
+  (confirmed against go-xml v2.2.0), which is exactly the ambiguity the
   attack needs.
 * The enveloped-signature transform removes the enclosing signature by
   identity, not every `ds:Signature` in the document. Over a node set parsed
@@ -223,17 +223,17 @@ The two depth limits differ, so a document can parse and then fail to
 canonicalize. That is a bounded outcome, not a bug.
 
 **Bounded is not cheap.** Measured on an arm64 Mac (Apple M3 Pro, Go 1.26)
-with go-xml v2.1.0, as peak live heap sampled with `runtime.ReadMemStats` at
-`GOGC=10`, parsing costs up to about 20 times the input in memory, before
+with go-xml v2.2.0, as peak live heap sampled with `runtime.ReadMemStats` at
+`GOGC=10`, parsing costs up to about 13 times the input in memory, before
 anything is authenticated:
 
 | Input | Size | Outcome | Peak memory |
 |---|---:|---|---:|
-| 16M empty elements | 64 MB | refused at the node limit after 0.75 s | 426 MB (6.3×) |
-| one element, many attributes | 60 MB | accepted | 1.3 GB (20×) |
-| many namespace declarations on one element | 60 MB | accepted | 976 MB (16×) |
+| 16M empty elements | 64 MB | refused at the node limit after 0.73 s | 401 MB (6.0×) |
+| one element, many attributes | 60 MB | accepted | 730 MB (11.6×) |
+| many namespace declarations on one element | 60 MB | accepted | 791 MB (12.6×) |
 | 1,000,000-deep nesting | 6.7 MB | refused at depth 1000 | under 1 MB |
-| over the byte limit | 65 MB | refused | 149 MB (2.2×) |
+| over the byte limit | 65 MB | refused | 75 MB (1.1×) |
 
 The pinned limits cannot be loosened.
 A server should tighten them to what its profile needs with
