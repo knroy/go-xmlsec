@@ -28,6 +28,10 @@ func init() {
 	// other c14n user in the process.
 	c14n.MaxDepth = MaxC14NDepth
 	xmltree.Parse = func(r io.Reader) (*xdm.Tree, error) { return parse(r, ParseLimits{}) }
+	xmltree.ParseOptions = func() xdm.ParseOptions {
+		o, _ := parseOptions(ParseLimits{})
+		return o
+	}
 }
 
 // ParseLimits tightens the pinned parse limits for one call. A zero field
@@ -49,23 +53,10 @@ func ParseWithLimits(b []byte, l ParseLimits) (*xdm.Tree, error) {
 
 // parse is ParseWithLimits for the octets r holds.
 func parse(r io.Reader, l ParseLimits) (*xdm.Tree, error) {
-	bytesLimit, err := tighten("MaxBytes", l.MaxBytes, MaxParseBytes)
+	opts, err := parseOptions(l)
 	if err != nil {
 		return nil, err
 	}
-	depth, err := tighten("MaxDepth", int64(l.MaxDepth), MaxParseDepth)
-	if err != nil {
-		return nil, err
-	}
-	nodes, err := tighten("MaxNodes", int64(l.MaxNodes), MaxParseNodes)
-	if err != nil {
-		return nil, err
-	}
-	opts := xdm.ParseOptions{
-		MaxDepth: int(depth),
-		MaxBytes: bytesLimit,
-		MaxNodes: int(nodes),
-	}.WithEntityBudget(xdm.NewEntityBudget())
 	tree, err := xdm.Parse(r, opts)
 	switch {
 	case errors.Is(err, xdm.ErrResourceLimit):
@@ -74,6 +65,27 @@ func parse(r io.Reader, l ParseLimits) (*xdm.Tree, error) {
 		return nil, doctypeError{err}
 	}
 	return tree, err
+}
+
+// parseOptions are the pinned options, tightened by l.
+func parseOptions(l ParseLimits) (xdm.ParseOptions, error) {
+	bytesLimit, err := tighten("MaxBytes", l.MaxBytes, MaxParseBytes)
+	if err != nil {
+		return xdm.ParseOptions{}, err
+	}
+	depth, err := tighten("MaxDepth", int64(l.MaxDepth), MaxParseDepth)
+	if err != nil {
+		return xdm.ParseOptions{}, err
+	}
+	nodes, err := tighten("MaxNodes", int64(l.MaxNodes), MaxParseNodes)
+	if err != nil {
+		return xdm.ParseOptions{}, err
+	}
+	return xdm.ParseOptions{
+		MaxDepth: int(depth),
+		MaxBytes: bytesLimit,
+		MaxNodes: int(nodes),
+	}.WithEntityBudget(xdm.NewEntityBudget()), nil
 }
 
 // doctypeError is the parser's DOCTYPE refusal, whose message names a parse

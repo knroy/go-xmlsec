@@ -169,6 +169,10 @@ func AttrValue(e *xdm.Node, uri, local string) string {
 // a document assembled from pieces is parsed without being copied whole.
 var Parse func(r io.Reader) (*xdm.Tree, error)
 
+// ParseOptions are the pinned options Parse parses with, for a parse go-xml
+// makes itself. Package xmlsec sets it.
+var ParseOptions func() xdm.ParseOptions
+
 // Clone returns a detached deep copy of n: its attributes, namespace
 // declarations and descendants.
 func Clone(n *xdm.Node) *xdm.Node { return xdm.Copy(n) }

@@ -7,11 +7,31 @@ promise and how a release is cut.
 
 ## Unreleased
 
+go-xml v2.3.0, whose streaming the XSLT transform now uses, and XPath
+filters evaluated by XPath 1.0 rules. No exported API changes. Digests,
+signatures and ciphertext are byte-identical to v2.0.2 but for an XPath
+filter whose result depends on the number rules, listed under
+*Changed — behaviour*.
+
 ### Fixed — security
 
 | Change | Problem → solution | Commit |
 |---|---|---|
 | `xenc.ReferencedData` still checked for duplicate references quadratically | v2.0.2's single walk left a scan of the result for each reference: 80,000 references took 25 s under the race detector, and CI's 20,000-reference test failed its 2 s limit on every OS. Duplicates are found with a set; 80,000 references: 1 s under the race detector. | *this commit* |
+
+### Changed — behaviour
+
+| Change | Problem → solution | Commit |
+|---|---|---|
+| XML-DSig XPath expressions were evaluated in XPath 2.0's 1.0 compatibility mode | XML-DSig specifies XPath 1.0, and compatibility mode still used 2.0's number model: `number('1e3')` was 1000 and `"10" < "9"` compared strings. Expressions, in the XPath and XPath Filter 2.0 transforms and in an xenc `CipherReference`, are compiled with go-xml's new XPath 1.0 mode, as go-xml's own c14n XPath transforms now are: `number('1e3')` is NaN, a comparison converts strings to numbers, `1 < 2 < 3` compiles, and an exponent literal is `ErrMalformed`. An allowed expression that depends on these selects what xmlsec1 and Santuario select. | *this commit* |
+
+### Changed — memory
+
+| Change | Problem → solution | Commit |
+|---|---|---|
+| The XSLT transform built its input and its result as trees | It runs through go-xml's `TransformReader`, parsing with `xmlsec.Parse`'s options, and writes its output as it is produced with `TransformOptions.Output`. A stylesheet whose initial mode is streamable (XSLT 3.0 `<xsl:mode streamable="yes"/>`) builds no tree of its input. An identity transform of 10 MiB alone: XSLT 1.0 on the tree 8.97× → 5.68×, XSLT 3.0 streamed 8.15× → 0.20×; with `Sign` and `Verify` around it, 9.3× → 6.1× and 8.3× → 5.3×. The stylesheet is compiled from a document holding a copy of it, with the namespaces in scope at `ds:Transform` declared, because go-xml v2.3.0 streams only a stylesheet compiled from a document node. Output is unchanged. | *this commit* |
+| `go-xml` v2.2.0 → v2.3.0 | XSLT streaming, the XPath 1.0 mode, and its hardening release. Canonical output is unchanged: the c14n conformance figures are the same, and the golden hashes and the interop suite pass. `ParseOptions.MaxNodes` now also counts text that is not all white space, comments and PIs, so a document near the 10,000,000-node limit may now be refused. | *this commit* |
+| `Parse` memory figures | Re-measured on go-xml v2.3.0: still about 13 times the input at worst (attributes 12.4×, namespace declarations 10.4×); [docs/security.md](docs/security.md#resource-limits). | *this commit* |
 
 ## v2.0.2 — 2026-11-02
 

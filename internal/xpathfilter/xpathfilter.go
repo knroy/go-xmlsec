@@ -42,13 +42,13 @@ func (prefixMap) DefaultElementNamespace() string  { return "" }
 func (prefixMap) DefaultFunctionNamespace() string { return xdm.NSFN }
 
 // Compile compiles an XML-DSig expression, which is XPath 1.0, with the
-// bindings ns alone, under XPath 1.0 compatibility mode.
+// bindings ns alone, by XPath 1.0's number model and comparison grammar.
 func Compile(expr string, ns map[string]string) (*xpath.Compiled, error) {
-	c, err := xpath.CompileWith(strings.TrimSpace(expr), xpath.CompileOptions{Namespaces: prefixMap(ns)})
+	c, err := xpath.CompileWith(strings.TrimSpace(expr), xpath.CompileOptions{Namespaces: prefixMap(ns), XPath10: true})
 	if err != nil {
 		return nil, fmt.Errorf("%w: XPath %q: %v", xmlsec.ErrMalformed, expr, err)
 	}
-	return c.WithCompatMode(true), nil
+	return c, nil
 }
 
 // Library is the XPath 1.0 core function library plus XML-DSig's here()

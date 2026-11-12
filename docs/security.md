@@ -123,7 +123,7 @@ Defences here:
   to plant a second target: with the default set, an `ID` or `Id` attribute
   is neither resolved nor counted. `xdm.ElementByID` is never used on the
   verify path: on duplicates it returns the first depth-first match
-  (confirmed against go-xml v2.2.0), which is exactly the ambiguity the
+  (confirmed against go-xml v2.3.0), which is exactly the ambiguity the
   attack needs.
 * The enveloped-signature transform removes the enclosing signature by
   identity, not every `ds:Signature` in the document. Over a node set parsed
@@ -203,11 +203,12 @@ silently change what is accepted. Each is enforced before the work it bounds.
 |---|---:|---|
 | Parse depth | 1000 | `xmlsec.MaxParseDepth` |
 | Document size | 64 MB | `xmlsec.MaxParseBytes` |
-| Node count | 10,000,000 | `xmlsec.MaxParseNodes` |
+| Node count | 10,000,000 | `xmlsec.MaxParseNodes`: elements, comments, processing instructions and text that is not all white space |
 | Canonicalization depth | 500 | `xmlsec.MaxC14NDepth`, applied to `c14n.MaxDepth` at init |
 | References per signature | 64 | `dsig.DefaultMaxReferences`, or `VerifyOptions.MaxReferences`; counted before any is parsed |
 | Transforms per reference | 8 | `dsig.MaxTransformsPerReference` |
 | XPath evaluations per transform | one per input node | bounded by the node count above; an allowed expression is the caller's own, so its cost is too |
+| XSLT input | the parse limits above | parsed by go-xml with `xmlsec.Parse`'s options, streamed when the stylesheet's initial mode is streamable |
 | XSLT output | 64 MB | `xmlsec.MaxParseBytes`, while it is written; over it is `ErrLimitExceeded` |
 | Diffie-Hellman group size | 2048 to 8192 bits of P | `xenc.MinDHBits`, `xenc.MaxDHBits`, checked before any exponentiation |
 | PBKDF2 iterations received | 1000 to 10,000,000 | `xenc.MinPBKDF2Iterations`, `xenc.MaxPBKDF2Iterations`, checked before any derivation; over the cap is `ErrLimitExceeded` |
@@ -223,15 +224,15 @@ The two depth limits differ, so a document can parse and then fail to
 canonicalize. That is a bounded outcome, not a bug.
 
 **Bounded is not cheap.** Measured on an arm64 Mac (Apple M3 Pro, Go 1.26)
-with go-xml v2.2.0, as peak live heap sampled with `runtime.ReadMemStats` at
+with go-xml v2.3.0, as peak live heap sampled with `runtime.ReadMemStats` at
 `GOGC=10`, parsing costs up to about 13 times the input in memory, before
 anything is authenticated:
 
 | Input | Size | Outcome | Peak memory |
 |---|---:|---|---:|
-| 16M empty elements | 64 MB | refused at the node limit after 0.73 s | 401 MB (6.0×) |
-| one element, many attributes | 60 MB | accepted | 730 MB (11.6×) |
-| many namespace declarations on one element | 60 MB | accepted | 791 MB (12.6×) |
+| 16M empty elements | 64 MB | refused at the node limit after 0.83 s | 400 MB (6.0×) |
+| one element, many attributes | 60 MB | accepted | 782 MB (12.4×) |
+| many namespace declarations on one element | 60 MB | accepted | 655 MB (10.4×) |
 | 1,000,000-deep nesting | 6.7 MB | refused at depth 1000 | under 1 MB |
 | over the byte limit | 65 MB | refused | 75 MB (1.1×) |
 

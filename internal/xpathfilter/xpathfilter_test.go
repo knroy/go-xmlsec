@@ -65,3 +65,29 @@ func TestCompileAndLibrary(t *testing.T) {
 		}
 	}
 }
+
+// Expressions follow XPath 1.0's number model and comparison grammar, which
+// XML-DSig specifies, not XPath 2.0's.
+func TestCompileXPath10(t *testing.T) {
+	tree, err := xmlsec.Parse([]byte(`<a/>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := xpath.NewContext(tree.Root, xpath.NewLibrary(xpath.Builtins())).WithFocus(tree.Root, 1, 1)
+	for expr, want := range map[string]string{
+		`string(number('1e3'))`: "NaN",
+		`string("10" < "9")`:    "false",
+		`string(1 < 2 < 3)`:     "true",
+	} {
+		c, err := Compile(expr, nil)
+		if err != nil {
+			t.Fatal(expr, err)
+		}
+		if got, err := c.EvalString(ctx); err != nil || got != want {
+			t.Errorf("%s = %v, %v; want %s", expr, got, err, want)
+		}
+	}
+	if _, err := Compile(`1e3`, nil); !errors.Is(err, xmlsec.ErrMalformed) {
+		t.Errorf("exponent literal: %v", err)
+	}
+}

@@ -287,16 +287,22 @@ accepted when it equals an entry of `AllowedXSLTStylesheets` under Exclusive
 C14N with every prefix the entry binds rendered. Anything else is refused
 before any cryptographic work.
 
-- Expressions are XPath 1.0, evaluated in go-xml's XPath 1.0 compatibility
-  mode. `here()` is the `ds:XPath` (or `dsig-xpath:XPath`) element, so it
-  needs a signature computed in place (`SignOptions.Parent`).
+- Expressions are XPath 1.0, compiled with go-xml's XPath 1.0 number model
+  and comparison grammar: `number('1e3')` is NaN, `"10" < "9"` compares
+  numbers, and an exponent literal is refused. `here()` is the `ds:XPath`
+  (or `dsig-xpath:XPath`) element, so it needs a signature computed in
+  place (`SignOptions.Parent`).
 - The XPath transform evaluates its expression once for every node of its
   input, namespace and attribute nodes included, and keeps the input nodes
   for which it is true: the output never holds more than the input, for
   example after enveloped-signature or under a `#id` reference.
 - XSLT runs with no resolver of any kind: `xsl:include`, `xsl:import`,
   `document()`, `doc()` and `unparsed-text()` fail, and nothing is read
-  from a file or the network. Its output is bounded by `xmlsec.MaxParseBytes`.
+  from a file or the network. Its input is parsed with `xmlsec.Parse`'s
+  limits, and read as the transform runs, with no tree built, when the
+  stylesheet's initial mode is streamable (XSLT 3.0
+  `<xsl:mode streamable="yes"/>`); its output is written as it is produced,
+  bounded by `xmlsec.MaxParseBytes`.
 - A transform that drops part of what a reference names takes it out of
   `Coverage`: an element is listed only when all of its subtree was digested,
   `WholeDocumentSigned` only when nothing but the signature was dropped. An

@@ -113,3 +113,11 @@ func TestParseReader(t *testing.T) {
 		}
 	}
 }
+
+// The options go-xml parses an XSLT transform's input with are the pinned ones.
+func TestParseOptionsPinned(t *testing.T) {
+	o := xmltree.ParseOptions()
+	if o.MaxDepth != MaxParseDepth || o.MaxBytes != MaxParseBytes || o.MaxNodes != MaxParseNodes {
+		t.Fatalf("%+v", o)
+	}
+}

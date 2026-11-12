@@ -1,7 +1,9 @@
 package dsig
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -82,9 +84,11 @@ func copyStylesheet(tr, s *xdm.Node) {
 // is the transform's octets. The stylesheet runs sandboxed: no module,
 // schema or package resolver, so xsl:include, xsl:import and their kin load
 // nothing, and no document, collection, text or environment resolver, so
-// document(), fn:doc and the rest read nothing. The output is bounded by
-// the largest document xmlsec.Parse accepts. With out set, the output is
-// written to it as it is produced, within the same bound, and not kept.
+// document(), fn:doc and the rest read nothing. The octets are parsed with
+// xmlsec.Parse's options; a stylesheet whose initial mode is streamable
+// reads them as it runs, and builds no tree of them. The output is
+// serialized as it is produced, bounded by the largest document
+// xmlsec.Parse accepts. With out set, it is written to out and not kept.
 func (d *data) transformXSLT(t TransformSpec, out io.Writer) error {
 	src := d.octets
 	if d.ns != nil {
@@ -94,31 +98,52 @@ func (d *data) transformXSLT(t TransformSpec, out io.Writer) error {
 		}
 		src = b
 	}
-	in, err := xmlsec.Parse(src)
-	if err != nil {
-		return fmt.Errorf("%w: parsing the XSLT transform input: %w", xmlsec.ErrMalformed, err)
-	}
 	// The stylesheet is compiled where it stands inside ds:Transform, as the
 	// signer's was: a literal result element copies the namespaces in scope
 	// there. Verify has matched it against an allowed stylesheet.
-	sheet, err := xslt.Compile(t.el.ChildElements()[0], xslt.CompileOptions{})
+	sheet, err := xslt.Compile(standalone(t.el.ChildElements()[0]), xslt.CompileOptions{})
 	if err != nil {
 		return fmt.Errorf("%w: compiling the stylesheet: %v", xmlsec.ErrMalformed, err)
 	}
-	res, err := sheet.Transform(context.Background(), in.Root, xslt.TransformOptions{})
-	if err != nil {
-		return fmt.Errorf("%w: XSLT transform: %v", xmlsec.ErrMalformed, err)
-	}
 	w := &boundedWriter{w: out, max: maxXSLTOutput}
-	if err := res.Serialize(w); err != nil {
-		if w.over {
-			return fmt.Errorf("%w: XSLT output over %d bytes", xmlsec.ErrLimitExceeded, w.max)
-		}
-		return fmt.Errorf("%w: XSLT output: %v", xmlsec.ErrMalformed, err)
+	_, err = sheet.TransformReader(context.Background(), bytes.NewReader(src), xslt.TransformOptions{
+		SourceParseOptions: xmltree.ParseOptions(),
+		Output:             w,
+	})
+	switch {
+	case w.over:
+		return fmt.Errorf("%w: XSLT output over %d bytes", xmlsec.ErrLimitExceeded, w.max)
+	case errors.Is(err, xdm.ErrResourceLimit):
+		return fmt.Errorf("%w: %w: XSLT transform: %w", xmlsec.ErrMalformed, xmlsec.ErrLimitExceeded, err)
+	case err != nil:
+		return fmt.Errorf("%w: XSLT transform: %v", xmlsec.ErrMalformed, err)
 	}
 	// The output is new content, not nodes of the document.
 	d.ns, d.octets, d.opaque = nil, w.b, true
 	return nil
+}
+
+// standalone returns a document holding a copy of the stylesheet el, with
+// the namespaces in scope at el declared on it and el's base URI.
+// ponytail: go-xml v2.3.0 streams only a stylesheet compiled from a document
+// node; compile el directly once it streams one compiled from an element.
+func standalone(el *xdm.Node) *xdm.Node {
+	t := xdm.NewTree()
+	t.Root.SetBaseURI(el.BaseURI())
+	c := t.Root.AppendShallowCopy(el)
+	for p, u := range el.InScopeNamespaces() {
+		if p != "xml" {
+			c.AddNamespace(p, u)
+		}
+	}
+	for a := range el.Attrs() {
+		c.AppendShallowCopy(a)
+	}
+	for ch := range el.Children() {
+		c.AppendCopy(ch)
+	}
+	t.Finalize()
+	return t.Root
 }
 
 // boundedWriter passes at most max bytes on to w, or collects them in b

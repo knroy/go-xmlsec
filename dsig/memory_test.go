@@ -266,15 +266,27 @@ const memSheet = `<xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transfor
 	`<xsl:template match="@*|node()"><xsl:copy><xsl:apply-templates select="@*|node()"/></xsl:copy></xsl:template>` +
 	`</xsl:stylesheet>`
 
+// memStreamSheet copies its input, in a mode XSLT 3.0 can stream.
+const memStreamSheet = `<xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="3.0">` +
+	`<xsl:mode streamable="yes" on-no-match="shallow-copy"/></xsl:stylesheet>`
+
 // BenchmarkXSLTMemory measures an XSLT transform that copies a document, as
-// the last transform.
+// the last transform, on the tree (1.0) and streamed (3.0).
 func BenchmarkXSLTMemory(b *testing.B) {
 	for _, mib := range memSizes() {
+		for name, text := range map[string]string{"tree": memSheet, "streamed": memStreamSheet} {
+			benchXSLT(b, mib, name, text)
+		}
+	}
+}
+
+func benchXSLT(b *testing.B, mib int, name, text string) {
+	{
 		src := memDoc(mib)
-		sheet := xmltree.DocumentElement(parse(b, []byte(memSheet)))
+		sheet := xmltree.DocumentElement(parse(b, []byte(text)))
 		doc := parse(b, []byte(src))
 		ts := dsig.TransformSpec{Algorithm: xmlsec.TransformXSLT, Stylesheet: sheet}
-		b.Run(fmt.Sprintf("sign/%dMiB", mib), func(b *testing.B) {
+		b.Run(fmt.Sprintf("%s/sign/%dMiB", name, mib), func(b *testing.B) {
 			memRun(b, len(src), func() error {
 				_, _, err := memSign(b, doc, false, ts)
 				return err
@@ -284,7 +296,7 @@ func BenchmarkXSLTMemory(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		b.Run(fmt.Sprintf("verify/%dMiB", mib), func(b *testing.B) {
+		b.Run(fmt.Sprintf("%s/verify/%dMiB", name, mib), func(b *testing.B) {
 			opts := dsig.VerifyOptions{Certificate: newKey(b, rsaKey).Certificate, AllowedXSLTStylesheets: []*xdm.Node{sheet}}
 			memRun(b, len(src), func() error {
 				_, err := dsig.Verify(signed, sig, opts)
