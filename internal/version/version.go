@@ -18,4 +18,4 @@ package version
 //
 // The major version is 2: a breaking change to the API needs a new module
 // path, github.com/knroy/go-xmlsec/v3, not a new version of this one.
-const Version = "2.0.2"
+const Version = "2.1.0"
