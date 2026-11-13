@@ -5,6 +5,15 @@ versioning](https://semver.org): within a major version no exported name is
 removed or changed. See [RELEASE.md](RELEASE.md) for the compatibility
 promise and how a release is cut.
 
+## Unreleased
+
+### Changed — memory
+
+| Change | Problem → solution | Commit |
+|---|---|---|
+| The XSLT transform compiled a copy of the stylesheet | go-xml v2.3.0 streamed only a stylesheet compiled from a document node, so v2.1.0 compiled one holding a copy of the stylesheet, with the namespaces in scope at `ds:Transform` declared. go-xml v2.3.1 streams one compiled from its element, and the stylesheet is compiled where it stands, with no copy. Output and the 10 MiB peaks are unchanged (streamed 1.85×, tree 6.0×, with `Sign` and `Verify`). | *this commit* |
+| `go-xml` v2.3.0 → v2.3.1 | Streaming of a stylesheet compiled from its element, nested in another document. Nothing else changed. | *this commit* |
+
 ## v2.1.0 — 2026-11-12
 
 go-xml v2.3.0, whose streaming the XSLT transform now uses, and XPath

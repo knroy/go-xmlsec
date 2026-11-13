@@ -454,11 +454,11 @@ known-answer test.
 ## Canonicalization
 
 Every digest and signature this library computes is over octets from
-`go-xml/c14n` (`github.com/knroy/go-xml/v2`), pinned at v2.3.0. It is tested in go-xml, not here, and its
+`go-xml/c14n` (`github.com/knroy/go-xml/v2`), pinned at v2.3.1. It is tested in go-xml, not here, and its
 figures are published only in that module's
-[docs/c14n.md](https://github.com/knroy/go-xml/blob/v2.3.0/docs/c14n.md#conformance-and-verification),
+[docs/c14n.md](https://github.com/knroy/go-xml/blob/v2.3.1/docs/c14n.md#conformance-and-verification),
 not in the conformance table of its README, where its sibling packages
-report theirs. At v2.3.0, the same figures as at v1.6.0;
+report theirs. At v2.3.1, the same figures as at v1.6.0;
 go-xml's changelog lists no change to canonical output between them:
 
 | Check | Result |

@@ -101,7 +101,7 @@ func (d *data) transformXSLT(t TransformSpec, out io.Writer) error {
 	// The stylesheet is compiled where it stands inside ds:Transform, as the
 	// signer's was: a literal result element copies the namespaces in scope
 	// there. Verify has matched it against an allowed stylesheet.
-	sheet, err := xslt.Compile(standalone(t.el.ChildElements()[0]), xslt.CompileOptions{})
+	sheet, err := xslt.Compile(t.el.ChildElements()[0], xslt.CompileOptions{})
 	if err != nil {
 		return fmt.Errorf("%w: compiling the stylesheet: %v", xmlsec.ErrMalformed, err)
 	}
@@ -121,29 +121,6 @@ func (d *data) transformXSLT(t TransformSpec, out io.Writer) error {
 	// The output is new content, not nodes of the document.
 	d.ns, d.octets, d.opaque = nil, w.b, true
 	return nil
-}
-
-// standalone returns a document holding a copy of the stylesheet el, with
-// the namespaces in scope at el declared on it and el's base URI.
-// ponytail: go-xml v2.3.0 streams only a stylesheet compiled from a document
-// node; compile el directly once it streams one compiled from an element.
-func standalone(el *xdm.Node) *xdm.Node {
-	t := xdm.NewTree()
-	t.Root.SetBaseURI(el.BaseURI())
-	c := t.Root.AppendShallowCopy(el)
-	for p, u := range el.InScopeNamespaces() {
-		if p != "xml" {
-			c.AddNamespace(p, u)
-		}
-	}
-	for a := range el.Attrs() {
-		c.AppendShallowCopy(a)
-	}
-	for ch := range el.Children() {
-		c.AppendCopy(ch)
-	}
-	t.Finalize()
-	return t.Root
 }
 
 // boundedWriter passes at most max bytes on to w, or collects them in b
