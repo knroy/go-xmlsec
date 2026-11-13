@@ -30,6 +30,12 @@ const maxX509Certificates = 16
 // which are decoded and reported.
 const maxX509CRLs = 16
 
+// maxX509Descriptors bounds the ds:X509IssuerSerial, X509SKI,
+// X509SubjectName and dsig11:X509Digest elements one ds:KeyInfo may carry.
+// StrictX509Data matches each against every certificate; a signer emits
+// one of each kind per certificate.
+const maxX509Descriptors = 4 * maxX509Certificates
+
 // maxSerialDigits bounds the decimal digits of a ds:X509SerialNumber, whose
 // parsing takes time quadratic in them. RFC 5280 section 4.1.2.2 allows 20
 // octets, 49 digits.
@@ -182,6 +188,7 @@ func identifier(descs []X509Identifier) (X509Identifier, error) {
 // readX509Data reads ds:X509Data elements.
 func (c *keyContext) readX509Data(els []*xdm.Node) (x509Data, error) {
 	var d x509Data
+	descs := 0 // descriptors, counted before any is decoded or matched
 	for _, x := range els {
 		for _, e := range x.ChildElements() {
 			local := e.Name().Local
@@ -190,6 +197,12 @@ func (c *keyContext) readX509Data(els []*xdm.Node) (x509Data, error) {
 			}
 			if e.IsElement(xmlsec.NSDSig, "X509CRL") && c.pinned {
 				continue // reported only for a key from ds:KeyInfo
+			}
+			if !e.IsElement(xmlsec.NSDSig, "X509Certificate") && !e.IsElement(xmlsec.NSDSig, "X509CRL") {
+				if descs == maxX509Descriptors {
+					return d, fmt.Errorf("%w: more than %d X509Data descriptors", xmlsec.ErrUnsupportedKeyInfo, maxX509Descriptors)
+				}
+				descs++
 			}
 			var b []byte
 			var err error

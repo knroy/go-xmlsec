@@ -203,6 +203,9 @@ func rsaOAEPWrap(m *xdm.Node, key []byte, opts EncryptOptions) ([]byte, error) {
 // size of RSA-OAEP key transport (section 3.2). The wrapped key may be
 // named by an xenc:CipherReference, as for UnwrapEncryptedKey.
 func DecryptEncryptedKey(el *xdm.Node, dec crypto.Decrypter, opts DecryptOptions) ([]byte, error) {
+	if err := checkParts(el, opts); err != nil {
+		return nil, err
+	}
 	if err := strictKey(el, opts); err != nil {
 		return nil, err
 	}

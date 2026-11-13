@@ -149,6 +149,55 @@ func TestOwnIDs(t *testing.T) {
 	}
 }
 
+// XML-DSig 6.6.4: the enveloped-signature transform removes the whole
+// signature, so a reference to the signature's own ds:Object through it
+// digests nothing of the Object, whatever it holds. Sign and Verify accept
+// it, as the specification does, but the Object is not covered, also when an
+// XPath transform comes first. Neither is an Object an XPath transform
+// drops part of: the exemption for the signature's own nodes applies only
+// to a target outside the signature.
+func TestOwnObjectThroughEnvelopedNotCovered(t *testing.T) {
+	const object = `<a:Role xmlns:a="urn:t">user</a:Role><x:drop xmlns:x="urn:x">d</x:drop>`
+	for _, c := range []struct {
+		name       string
+		transforms []dsig.TransformSpec
+		tampered   bool
+	}{
+		{"enveloped", []dsig.TransformSpec{xpEnv, xpExc}, true},
+		{"xpath, enveloped", []dsig.TransformSpec{xp("true()", nil), xpEnv, xpExc}, true},
+		{"filter 2.0, enveloped", []dsig.TransformSpec{filter2(nil, "union", "/"), xpEnv, xpExc}, true},
+		{"xpath dropping a node", []dsig.TransformSpec{xp(xpNoX, xpNS), xpExc}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			doc := parse(t, []byte(`<r><a xml:id="a">x</a></r>`))
+			if _, err := signAt(&doc, newKey(t, rsaKey), dsig.SignOptions{
+				SignatureAlgorithm:        xmlsec.SigRSASHA256,
+				CanonicalizationAlgorithm: string(c14n.Exclusive10),
+				References:                []dsig.Reference{{URI: "#obj", DigestAlgorithm: xmlsec.DigestSHA256, Transforms: c.transforms}},
+				Objects:                   []dsig.Object{{ID: "obj", Content: content(t, `<r>`+object+`</r>`)}},
+				Parent:                    xmltree.DocumentElement(doc),
+			}); err != nil {
+				t.Fatal(err)
+			}
+			signed := string(serialize(t, doc))
+			if c.tampered {
+				signed = strings.Replace(signed, ">user<", ">admin<", 1)
+			}
+			doc = parse(t, []byte(signed))
+			sig := findSignature(doc)
+			cov, err := dsig.Verify(doc, sig, dsig.VerifyOptions{PublicKey: &rsaKey.PublicKey,
+				AllowedXPathExpressions: append(slices.Clone(xpAllow), dsig.XPathExpression{Expr: "/"})})
+			if err != nil {
+				t.Fatal(err)
+			}
+			obj := sig.LastChild()
+			if !obj.IsElement(xmlsec.NSDSig, "Object") || cov.Covers("obj") || cov.CoversNodes(obj) || len(cov.SignedElements) != 0 {
+				t.Fatalf("own Object reported covered: %+v", cov)
+			}
+		})
+	}
+}
+
 func TestObjectRefusals(t *testing.T) {
 	attr := xdm.NewNode(xdm.KindAttribute, xdm.QName{Local: "a"}, "")
 	el := content(t, `<r xmlns:t="urn:t"><t:x/></r>`)

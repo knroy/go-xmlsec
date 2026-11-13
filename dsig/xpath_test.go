@@ -505,3 +505,51 @@ func TestXPathNodeSetShapes(t *testing.T) {
 		})
 	}
 }
+
+// nsHeavy is a document element declaring k prefixes over m copies of el.
+func nsHeavy(k, m int, el string) string {
+	var b strings.Builder
+	b.WriteString("<r")
+	for i := range k {
+		b.WriteString(` xmlns:p` + strconv.Itoa(i) + `="urn:p"`)
+	}
+	b.WriteString(">" + strings.Repeat(el, m) + "</r>")
+	return b.String()
+}
+
+// Every element has a namespace node per binding in scope, inherited ones
+// included, and an XPath or XPath Filter 2.0 transform decides each: k
+// declarations on the root and m elements are k x m decisions from k+m
+// parsed nodes. They are bounded linearly in the input's other nodes, and
+// a document over the bound is refused, on either path. One with many
+// declarations whose elements hold text and attributes verifies, as does a
+// compact one whose elements hold only text under 300 declarations, as an
+// XBRL instance may, and a small one with more declarations.
+func TestXPathNamespaceNodeBudget(t *testing.T) {
+	allow := dsig.VerifyOptions{AllowedXPathExpressions: []dsig.XPathExpression{{Expr: "true()"}, {Expr: "/"}}}
+	for _, tr := range []dsig.TransformSpec{xp("true()", nil), filter2(nil, "union", "/")} {
+		t.Run(tr.Algorithm, func(t *testing.T) {
+			// Signed small, then given the declarations: SignedInfo's
+			// Exclusive C14N does not render them, so only digesting sees them.
+			doc, _ := mustSignInPlace(t, nsHeavy(0, 2000, "<a/>"), "", xpEnv, tr, xpExc)
+			heavy := strings.Replace(string(serialize(t, doc)), "<r>", strings.TrimSuffix(nsHeavy(2000, 0, ""), "</r>"), 1)
+			doc = parse(t, []byte(heavy))
+			if _, err := xpVerify(t, doc, findSignature(doc), allow); !errors.Is(err, xmlsec.ErrLimitExceeded) {
+				t.Fatalf("2000 declarations over 2000 elements: %v", err)
+			}
+
+			doc, sig := mustSignInPlace(t, nsHeavy(100, 2000, `<p0:a p1:at="1">text</p0:a>`), "", xpEnv, tr, xpExc)
+			if _, err := xpVerify(t, doc, sig, allow); err != nil {
+				t.Fatal(err)
+			}
+			doc, sig = mustSignInPlace(t, nsHeavy(300, 2000, "<p0:a>x</p0:a>"), "", xpEnv, tr, xpExc)
+			if _, err := xpVerify(t, doc, sig, allow); err != nil {
+				t.Fatalf("300 declarations over text-only elements: %v", err)
+			}
+			doc, sig = mustSignInPlace(t, nsHeavy(2000, 1, "<a/>"), "", xpEnv, tr, xpExc)
+			if _, err := xpVerify(t, doc, sig, allow); err != nil {
+				t.Fatalf("a small document with many declarations: %v", err)
+			}
+		})
+	}
+}

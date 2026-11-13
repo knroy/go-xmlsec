@@ -392,6 +392,9 @@ func join(parts [][]byte) []byte {
 // from anything that differs afterwards, such as whether the plaintext
 // parses. Only authentication bound to the key closes it: AES-GCM.
 func DecryptData(el *xdm.Node, sessionKey []byte, opts DecryptOptions) ([]byte, error) {
+	if err := checkParts(el, opts); err != nil {
+		return nil, err
+	}
 	if err := strictData(el, opts); err != nil {
 		return nil, err
 	}

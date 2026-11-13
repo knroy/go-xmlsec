@@ -433,6 +433,13 @@ type DecryptOptions struct {
 	// only CBC, 3DES, RSA v1.5 and rsa-oaep-mgf1p, are not enforced: the
 	// allow-lists decide algorithms, and those are decryption-only opt-ins.
 	StrictBSP bool
+
+	// MaxEncryptedParts caps the xenc:EncryptedData, xenc:EncryptedKey and
+	// xenc11:DerivedKey elements, together, in the document of the element
+	// a Decrypt, Unwrap or Derive function is given. Zero means
+	// DefaultMaxEncryptedParts, as does a negative value. Set it to what
+	// the profile needs: it bounds how much work one message can force.
+	MaxEncryptedParts int
 }
 
 // The default allow-lists, used when a caller passes an empty one.

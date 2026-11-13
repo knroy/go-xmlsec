@@ -166,6 +166,9 @@ func contentType(att *xmlsec.Attachment) string {
 //     xmlsec.ErrDecryptionFailed, that a wrong key or bad padding gives, so
 //     that a receiver is no oracle for the plaintext's format.
 func DecryptAttachment(el *xdm.Node, ciphertext []byte, sessionKey []byte, opts DecryptOptions) (*xmlsec.Attachment, error) {
+	if err := checkParts(el, opts); err != nil {
+		return nil, err
+	}
 	if err := strictData(el, opts); err != nil {
 		return nil, err
 	}

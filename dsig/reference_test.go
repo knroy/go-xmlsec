@@ -160,7 +160,8 @@ func TestSwATransformNotLast(t *testing.T) {
 
 // XML-DSig 6.6.2: base64 over a node set decodes the concatenated text
 // nodes, in document order, skipping comments and markup. Such a chain ends
-// in octets, so it does not rely on implicit canonicalization.
+// in octets, so it does not rely on implicit canonicalization. Only the
+// text is digested, so the element is not covered.
 func TestBase64OfNodeSet(t *testing.T) {
 	key := newKey(t, rsaKey)
 	doc := parse(t, []byte(`<r xmlns:wsu="`+xmlsec.NSWSU+`"><d wsu:Id="d">aGVs<!-- c -->bG8<i>h</i></d></r>`))
@@ -183,8 +184,36 @@ func TestBase64OfNodeSet(t *testing.T) {
 		RequireExplicitCanonicalization:   true,
 		AllowedCanonicalizationAlgorithms: []string{string(c14n.Exclusive10)},
 	})
-	if err != nil || !cov.Covers("d") {
-		t.Fatalf("verify: %v", err)
+	if err != nil || cov.Covers("d") || len(cov.SignedElements) != 0 || len(cov.References) != 1 {
+		t.Fatalf("verify: %v, %+v", err, cov)
+	}
+}
+
+// The base64 transform over a node set digests its text only, so markup
+// added to the element leaves the digest as it was: the signature verifies,
+// and the element, which it does not protect, is not reported as covered.
+func TestBase64OfNodeSetTampered(t *testing.T) {
+	key := newKey(t, rsaKey)
+	doc := parse(t, []byte(`<r xmlns:wsu="`+xmlsec.NSWSU+`"><d wsu:Id="d">aGVsbG8h</d></r>`))
+	if _, err := signAt(&doc, key, dsig.SignOptions{
+		SignatureAlgorithm:        xmlsec.SigRSASHA256,
+		CanonicalizationAlgorithm: string(c14n.Exclusive10),
+		References: []dsig.Reference{{URI: "#d", DigestAlgorithm: xmlsec.DigestSHA256,
+			Transforms: []dsig.TransformSpec{{Algorithm: xmlsec.TransformBase64}}}},
+		Parent: xmltree.DocumentElement(doc),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s := strings.Replace(string(serialize(t, doc)), `<d wsu:Id="d">aGVsbG8h</d>`,
+		`<d wsu:Id="d" admin="true">aGVs<evil role="root"> !! </evil><!-- injected --><?pi x?>bG8h</d>`, 1)
+	doc = parse(t, []byte(s))
+	cov, err := dsig.Verify(doc, findSignature(doc), dsig.VerifyOptions{Certificate: key.Certificate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := xmltree.DocumentElement(doc).FirstChild()
+	if d.AttrValue("admin") != "true" || cov.Covers("d") || cov.CoversNodes(d) || cov.WholeDocumentSigned {
+		t.Fatalf("tampered element reported covered: %+v", cov)
 	}
 }
 

@@ -168,7 +168,9 @@ in full.
 3. **Pass allow-lists** (`dsig.VerifyOptions`, `xenc.DecryptOptions`) naming
    exactly the algorithms your profile permits.
 4. **Parse with `xmlsec.Parse`**, or `xmlsec.ParseWithLimits` to tighten the
-   limits to what your profile needs.
+   limits to what your profile needs, and set `VerifyOptions.MaxReferences`
+   and `DecryptOptions.MaxEncryptedParts` (both 64 by default) to what it
+   sends.
 
 [docs/security.md](docs/security.md) explains each rule, with the threat model
 and measured costs.

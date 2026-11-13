@@ -429,3 +429,28 @@ func TestX509CRLsBounded(t *testing.T) {
 		t.Fatalf("pinned: %v, %+v", err, cov)
 	}
 }
+
+// At most 64 descriptors are read, since StrictX509Data matches each
+// against every certificate: more are refused before TrustKey sees the
+// key, and a pinned key, which they do not describe, ignores them.
+func TestX509DescriptorsBounded(t *testing.T) {
+	p := newPKI(t)
+	ski := `<ds:X509SKI>` + b64(p.leaf.SubjectKeyId) + `</ds:X509SKI>`
+	for _, c := range []struct {
+		n    int
+		want error
+	}{{64, nil}, {65, xmlsec.ErrUnsupportedKeyInfo}, {1000, xmlsec.ErrUnsupportedKeyInfo}} {
+		doc, sig := signedCovDoc(t, covKI(`<ds:X509Data>`+x509Cert(p.leaf)+strings.Repeat(ski, c.n)+`</ds:X509Data>`))
+		trusted := false
+		_, err := dsig.Verify(doc, sig, dsig.VerifyOptions{StrictX509Data: true, TrustKey: func(*x509.Certificate, crypto.PublicKey) error {
+			trusted = true
+			return nil
+		}})
+		if !errors.Is(err, c.want) || err != nil && (trusted || !strings.Contains(err.Error(), "descriptors")) || err == nil && !trusted {
+			t.Errorf("%d descriptors: %v, TrustKey called %v", c.n, err, trusted)
+		}
+		if _, err := dsig.Verify(doc, sig, dsig.VerifyOptions{Certificate: p.leaf, StrictX509Data: true}); err != nil {
+			t.Errorf("%d descriptors, pinned: %v", c.n, err)
+		}
+	}
+}

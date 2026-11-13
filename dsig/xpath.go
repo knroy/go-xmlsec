@@ -188,6 +188,21 @@ func checkXPathSpec(t TransformSpec) error {
 	return nil
 }
 
+// namespaceDecisionsPerNode is how many namespace nodes an XPath or XPath
+// Filter 2.0 transform decides, beyond minNamespaceDecisions, per other node
+// of its input (element, attribute, text, comment or processing
+// instruction); more are refused with xmlsec.ErrLimitExceeded. Each element
+// has a namespace node per binding in scope, so this is the average number
+// of bindings an element may have in scope per node of its own. An element
+// holding text is two nodes, three with the whitespace that indents it, and
+// each attribute adds one: real documents, such as UBL or XBRL whose roots
+// declare up to a few hundred prefixes, stay below it.
+const namespaceDecisionsPerNode = 256
+
+// minNamespaceDecisions is the namespace nodes a transform may decide
+// whatever its input, so a small document with many declarations passes.
+const minNamespaceDecisions = 4096
+
 type nsKey struct {
 	elem   *xdm.Node
 	prefix string
@@ -269,8 +284,8 @@ func (d *data) memberNamespace(e *xdm.Node, prefix string) bool {
 
 // filter applies an XPath (XML-DSig 6.6.3) or XPath Filter 2.0 transform:
 // the output is the input nodes the expression keeps. Dropping any but
-// those of sig sets d.cut, so that Coverage reports only what was
-// digested.
+// those of sig, or any at all of an input within sig, sets d.cut, so that
+// Coverage reports only what was digested.
 func (d *data) filter(t TransformSpec, sig *xdm.Node) error {
 	if d.ns == nil {
 		// 6.6.3: octets become a node set with comments.
@@ -337,11 +352,33 @@ func (d *data) filter(t TransformSpec, sig *xdm.Node) error {
 		}
 	}
 
-	// ponytail: the expression runs once per input node, O(nodes x
-	// expression), bounded only by xmlsec.MaxParseNodes, MaxTransformsPerReference
-	// and the reference count; the allow-list keeps the expression the
-	// caller's own. Add a node budget if an allowed expression is ever costly.
+	// The expression runs once per input node, namespace nodes included,
+	// O(nodes x expression); the allow-list keeps the expression the
+	// caller's own. Every element has a namespace node for each binding in
+	// scope, inherited ones included (XPath data model), so K declarations
+	// on the root and M elements give K x M of them from K+M parsed nodes:
+	// budget keeps their count linear in the input's other nodes.
 	out := newFiltered(d.ns.Root())
+	budget := minNamespaceDecisions
+	var count func(n *xdm.Node)
+	count = func(n *xdm.Node) {
+		for a := range n.Attrs() {
+			if d.member(a) {
+				budget += namespaceDecisionsPerNode
+			}
+		}
+		if d.member(n) {
+			budget += namespaceDecisionsPerNode
+		}
+		for c := range n.Children() {
+			count(c)
+		}
+	}
+	count(out.root)
+	limit := budget
+	// The signature's own nodes are exempt from setting d.cut, unless the
+	// input lies within the signature: then they are the target.
+	inSig := within(out.root, sig)
 	var err error
 	// decide reports whether the transform keeps n, which is in the input,
 	// and sets d.cut if not; for a namespace node, n is its element, which
@@ -352,10 +389,18 @@ func (d *data) filter(t TransformSpec, sig *xdm.Node) error {
 			err = fmt.Errorf("%w: evaluating %s: %v", xmlsec.ErrMalformed, t.Algorithm, e)
 			return false
 		}
-		if !k && !within(n, sig) {
+		if !k && (inSig || !within(n, sig)) {
 			d.cut = true
 		}
 		return k
+	}
+	// decideNS is decide for a namespace node of n, within the budget.
+	decideNS := func(n *xdm.Node, keep func() (bool, error)) bool {
+		if budget--; budget < 0 {
+			err = fmt.Errorf("%w: %s over more than %d namespace nodes", xmlsec.ErrLimitExceeded, t.Algorithm, limit)
+			return false
+		}
+		return decide(n, keep)
 	}
 	visit := func(n *xdm.Node) {
 		if err == nil && d.member(n) && decide(n, func() (bool, error) { return keep(n) }) {
@@ -364,17 +409,20 @@ func (d *data) filter(t TransformSpec, sig *xdm.Node) error {
 	}
 	var walk func(n *xdm.Node)
 	walk = func(n *xdm.Node) {
+		if err != nil {
+			return
+		}
 		visit(n)
 		if n.Kind() == xdm.KindElement {
 			// After n itself: setNamespace compares with n's membership.
 			if keepNS == nil {
 				for _, ns := range xpath.NamespaceNodesOf(n) {
 					p := ns.Name().Local
-					out.setNamespace(n, p, err == nil && d.memberNamespace(n, p) && decide(n, func() (bool, error) { return keep(ns) }))
+					out.setNamespace(n, p, err == nil && d.memberNamespace(n, p) && decideNS(n, func() (bool, error) { return keep(ns) }))
 				}
 			} else {
 				for p := range n.InScopeNamespaceBindings() {
-					out.setNamespace(n, p, d.memberNamespace(n, p) && decide(n, func() (bool, error) { return keepNS(n, p), nil }))
+					out.setNamespace(n, p, err == nil && d.memberNamespace(n, p) && decideNS(n, func() (bool, error) { return keepNS(n, p), nil }))
 				}
 			}
 			for a := range n.Attrs() {

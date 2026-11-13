@@ -124,6 +124,13 @@ func WriteComplete(w io.Writer, att *xmlsec.Attachment) error {
 		if err != nil {
 			return err
 		}
+		// Selected refuses a line break in the received value, but an RFC
+		// 2047 word or RFC 2231 parameter can decode to one. Written here it
+		// would end the line, so a header folded into another's value would
+		// digest as the header itself.
+		if strings.ContainsAny(c, "\r\n") {
+			return fmt.Errorf("%w: MIME header %s has a line break once decoded", xmlsec.ErrMalformed, name)
+		}
 		headers = append(headers, name+":"+c+"\r\n"...)
 		if name == "Content-Type" {
 			// The canonical value starts with the media type, which has no ";".

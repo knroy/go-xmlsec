@@ -201,11 +201,13 @@ type data struct {
 	attachment *xmlsec.Attachment
 
 	// cut is set once an XPath or XPath Filter 2.0 transform dropped a node
-	// of its input, other than the signature's own. reparsed marks a
-	// node set parsed from octets, whose nodes are not the document's;
-	// opaque marks data that no longer shows what of the target it came
-	// from: an XSLT output, or a filter over a reparsed node set that
-	// dropped something.
+	// of its input, other than the signature's own, or an
+	// enveloped-signature transform removed a target within the signature.
+	// reparsed marks a node set parsed from octets, whose nodes are not the
+	// document's; opaque marks data that no longer shows what of the target
+	// it came from: an XSLT output, the text of a node set the base64
+	// transform decoded, or a filter over a reparsed node set that dropped
+	// something.
 	cut      bool
 	reparsed bool
 	opaque   bool
@@ -245,6 +247,12 @@ func (d *data) digest(h hash.Hash, sig *xdm.Node, uri string, transforms []Trans
 				d.ns = f.without(sig)
 			default:
 				d.ns = c14n.ExcludeSubtree(d.ns.Root(), sig)
+			}
+			if within(d.ns.Root(), sig) {
+				// The target lies within the signature, such as its own
+				// ds:Object: the transform removes all of it, and nothing of
+				// it is digested, so it is not covered.
+				d.cut = true
 			}
 
 		case isC14N(alg):
@@ -290,8 +298,11 @@ func (d *data) digest(h hash.Hash, sig *xdm.Node, uri string, transforms []Trans
 			}
 			if d.ns != nil {
 				// XML-DSig 6.6.2: a node set becomes octets as self::text(),
-				// in document order, concatenated.
+				// in document order, concatenated. Its elements, attributes,
+				// comments and processing instructions are not digested, so
+				// nothing of the target is covered.
 				eachText(d.ns, dec.write)
+				d.opaque = true
 			} else {
 				out.Grow(len(d.octets) / 4 * 3)
 				dec.write(string(d.octets))

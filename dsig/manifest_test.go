@@ -187,6 +187,48 @@ func TestBuildManifestRefusals(t *testing.T) {
 	}
 }
 
+// A Manifest in the signature's own ds:Object, signed through the
+// enveloped-signature transform, is digested as nothing: its references and
+// digests can be rewritten and the signature still verifies. The Object is
+// not covered, so VerifyManifest refuses the Manifest.
+func TestManifestThroughEnvelopedNotFollowed(t *testing.T) {
+	refs := []dsig.Reference{ref("#a")}
+	doc := parse(t, []byte(manifestDoc))
+	m, err := dsig.BuildManifest(doc, refs, dsig.SignOptions{ManifestID: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := signAt(&doc, newKey(t, rsaKey), dsig.SignOptions{
+		SignatureAlgorithm:        xmlsec.SigRSASHA256,
+		CanonicalizationAlgorithm: string(c14n.Exclusive10),
+		References:                []dsig.Reference{{URI: "#o", DigestAlgorithm: xmlsec.DigestSHA256, Transforms: envelopedExc}},
+		Objects:                   []dsig.Object{{ID: "o", Content: []*xdm.Node{m}}},
+		Parent:                    xmltree.DocumentElement(doc),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// The target changes, and the Manifest's DigestValue with it.
+	evil := strings.Replace(manifestDoc, "signed through", "changed after", 1)
+	m2, err := dsig.BuildManifest(parse(t, []byte(evil)), refs, dsig.SignOptions{ManifestID: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := func(m *xdm.Node) string { return m.FirstChild().LastChild().StringValue() }
+	signed := strings.Replace(string(serialize(t, doc)), "signed through", "changed after", 1)
+	signed = strings.Replace(signed, digest(m), digest(m2), 1)
+	if digest(m) == digest(m2) || !strings.Contains(signed, digest(m2)) {
+		t.Fatal("DigestValue not rewritten")
+	}
+	doc = parse(t, []byte(signed))
+	cov, err := dsig.Verify(doc, findSignature(doc), dsig.VerifyOptions{PublicKey: &rsaKey.PublicKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dsig.VerifyManifest(doc, findManifest(doc), cov, dsig.VerifyOptions{}); !errors.Is(err, xmlsec.ErrSignatureInvalid) {
+		t.Fatalf("Manifest followed: %v", err)
+	}
+}
+
 // XML-DSig 6.6.4: in a ds:Manifest that no ds:Signature contains, the
 // enveloped-signature transform has no output; VerifyManifest refuses it
 // before any digest rather than digest the document without the Manifest

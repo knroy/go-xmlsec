@@ -102,7 +102,7 @@ Reference forms:
 | `""` | `TransformEnvelopedSignature`, then a canonicalization | the whole document minus the enclosing signature; comments removed |
 | `"#xpointer(/)"` | `TransformEnvelopedSignature`, then a canonicalization | as `""`, comments included |
 | `"cid:..."` | `TransformAttachmentContentSignature`, first | the attachment content, canonicalized: Exclusive C14N for XML types, CRLF line endings for other text, the octets as they are otherwise |
-| `"cid:..."` | `TransformAttachmentCompleteSignature`, first | as above, preceded by the canonical Content-Description, -Disposition, -ID, -Location and -Type headers |
+| `"cid:..."` | `TransformAttachmentCompleteSignature`, first | as above, preceded by the canonical Content-Description, -Disposition, -ID, -Location and -Type headers; a header whose RFC 2047 or RFC 2231 encoding decodes to a line break is refused with `ErrMalformed` |
 | `"#id"` of the signature's own `ds:Object`, `ds:KeyInfo`, or a `ds:Manifest`, `ds:SignatureProperties` or `ds:SignatureProperty` in its `ds:Object` | a canonicalization, last | that element; its unqualified `Id` counts for this signature's own references without `IDAttrDSig` |
 | `"http://..."` or relative | any, or none | the octets `ResolveURI` returns; a relative URI needs `BaseURI` (see External references) |
 | omitted (`OmitURI: true`) | any that accept octets | `SignOptions.OmittedURIData`; at most one Reference |
@@ -113,6 +113,10 @@ its text content, as XML Signature §4.4.3.2 and §6.6.2 describe. The base64
 transform ignores every character outside the base64 alphabet, as RFC 2045
 §6.8 requires, not only whitespace; `ds:DigestValue` and
 `ds:SignatureValue`, which are `base64Binary`, still admit only whitespace.
+Over an element, only that text is digested, not its attributes, child
+elements, comments or processing instructions, so such a reference appears
+in `Coverage.References` only, never as a covered element, as an XSLT one
+does.
 
 When signing, a same-document reference with no transforms, or whose last
 transform leaves a node set, is refused: this library never produces a
@@ -198,7 +202,11 @@ and resolvers as `Verify`, and returns a `Coverage` of what they cover. It
 refuses a Manifest that is not in `cov.SignedElements` (itself, or its
 `ds:Object`), with `ErrSignatureInvalid`: an unsigned Manifest proves nothing.
 The enveloped-signature transform of a Manifest reference removes the
-`ds:Signature` containing the Manifest; in a Manifest outside any signature
+`ds:Signature` containing the Manifest. A Manifest is followed only when
+its signature digested it: a `ds:Object` that the outer reference reached
+through enveloped-signature, which removes the whole signature and so the
+whole Object, is not in `cov.SignedElements`, and `VerifyManifest` refuses
+its Manifest. In a Manifest outside any signature
 it has no output (§6.6.4), and `VerifyManifest` refuses it with
 `ErrMalformed`. `BuildManifest` digests before the Manifest is placed, so
 such a reference is valid once the Manifest stands in the signature's
@@ -296,6 +304,13 @@ before any cryptographic work.
   input, namespace and attribute nodes included, and keeps the input nodes
   for which it is true: the output never holds more than the input, for
   example after enveloped-signature or under a `#id` reference.
+- Every element has a namespace node for each binding in scope, inherited
+  ones included, so declarations on the root multiply by the elements below
+  it. The XPath and XPath Filter 2.0 transforms decide at most 4096
+  namespace nodes plus 256 for every other node of their input (element,
+  attribute, text, comment or processing instruction), and refuse more with
+  `ErrLimitExceeded`: an element holding text under a few hundred
+  declarations passes, a document built to multiply them does not.
 - XSLT runs with no resolver of any kind: `xsl:include`, `xsl:import`,
   `document()`, `doc()` and `unparsed-text()` fail, and nothing is read
   from a file or the network. Its input is parsed with `xmlsec.Parse`'s
@@ -308,6 +323,13 @@ before any cryptographic work.
   `WholeDocumentSigned` only when nothing but the signature was dropped. An
   XSLT output is new content, so a reference through XSLT appears only in
   `Coverage.References`.
+- Dropping the signature's own nodes is not dropping part of a target only
+  when the signature lies inside that target. A reference to an element
+  inside the signature, such as its own `ds:Object`, through
+  enveloped-signature, or through an XPath that drops any of it, digests
+  less than the element (with enveloped-signature, nothing), so it verifies
+  but the element is not covered. To cover your own `ds:Object`, reference
+  it with a canonicalization only.
 
 ## WS-Security
 
@@ -794,7 +816,7 @@ More options:
 | `ResolveURI xmlsec.URIResolver` | Supplies the octets of a reference to an absolute URI such as `http:`; see External references below. Without it, such a reference is refused. |
 | `BaseURI string` | The absolute URI a relative reference URI is resolved against before `ResolveURI` sees it; never taken from the document. Without it, a relative URI is refused. |
 | `RequireNFC` | Refuse with `ErrNotNFC` a `ds:SignedInfo`, or the canonical octets of a same-document reference, that is not in Unicode Normalization Form C; the octets a final base64 transform decodes are not checked. Off by default. |
-| `StrictX509Data` | Refuse an `X509IssuerSerial`, `X509SKI`, `X509SubjectName` or `dsig11:X509Digest` beside the carried certificates that describes none of them (XML Signature §4.5.4). Off by default: a descriptor beside a certificate selects nothing, and real signers leave stale ones after renewing. |
+| `StrictX509Data` | Refuse an `X509IssuerSerial`, `X509SKI`, `X509SubjectName` or `dsig11:X509Digest` beside the carried certificates that describes none of them (XML Signature §4.5.4). Off by default: a descriptor beside a certificate selects nothing, and real signers leave stale ones after renewing. With it or without, more than 64 descriptors in one `ds:KeyInfo` are refused with `ErrUnsupportedKeyInfo`, before any is matched. |
 | `ResolveKeyName`, `ResolveX509`, `ResolveKeyInfoURI` | Resolve a key the message names without carrying it; see [KeyInfo forms](#keyinfo-forms). |
 
 Then check `Coverage`, every time. The three `Covers` methods of a nil
@@ -1118,6 +1140,18 @@ for _, ed := range eds {
     }
 }
 ```
+
+Each call in this loop costs time in the size of the document, so every
+`Decrypt`, `Unwrap` and `Derive` function first counts the `EncryptedData`,
+`EncryptedKey` and `DerivedKey` elements of the whole document, and refuses
+more than `DecryptOptions.MaxEncryptedParts` (zero means
+`xenc.DefaultMaxEncryptedParts`, 64) with `xmlsec.ErrLimitExceeded`, before
+any key is used or any ciphertext read. A message over it fails at its first
+part, and one the loop accepts costs at most 64 times its size. Set
+`MaxEncryptedParts` to what your profile sends. `ReferencedData` and
+`FindEncryptedKey` have no limit of their own: the decryption that follows
+them refuses the message. Several `ds:RetrievalMethod` elements naming one
+key are looked up once per distinct URI.
 
 `xenc.DecryptHeader` (§9.4.4) requires exactly one `EncryptedData` in the
 `EncryptedHeader` (R3230), decrypts it, parses the plaintext in the

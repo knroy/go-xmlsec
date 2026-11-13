@@ -180,6 +180,9 @@ func unwrap(el *xdm.Node, alg string, kek []byte, opts DecryptOptions) ([]byte, 
 // xenc:CipherReference, resolved as DecryptData resolves one, through
 // opts.ResolveURI for an external URI, after the algorithm is accepted.
 func UnwrapEncryptedKey(el *xdm.Node, kek []byte, opts DecryptOptions) ([]byte, error) {
+	if err := checkParts(el, opts); err != nil {
+		return nil, err
+	}
 	if err := strictKey(el, opts); err != nil {
 		return nil, err
 	}

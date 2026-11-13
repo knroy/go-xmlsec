@@ -109,6 +109,8 @@ func TestRefused(t *testing.T) {
 		"header with two values":     {"Content-ID": {"<a>", "<b>"}},
 		"header with no value":       {"Content-ID": {}},
 		"line break left":            {"Content-ID": {"<a>\r\nX: y"}},
+		"line break once decoded":    {"Content-Description": {`=?utf-8?q?Invoice=0D=0AContent-Disposition:attachment;filename=3D"invoice.pdf"?=`}},
+		"RFC 2231 line break":        {"Content-Disposition": {"attachment; filename*=utf-8''a%0D%0AContent-ID:%3Cq%3E"}},
 		"bad Content-Type":           {"Content-Type": {"text/plain; charset"}},
 		"bad Content-Disposition":    {"Content-Disposition": {"attachment; filename"}},
 		"unknown RFC 2047 charset":   {"Content-Description": {"=?x-unknown?Q?a?="}},

@@ -109,7 +109,11 @@ type VerifyOptions struct {
 	// A transform that drops part of what a reference names takes it out of
 	// Coverage: an element is reported only when all of its subtree was
 	// digested, the whole document only when nothing but the signature was
-	// dropped. Evaluation costs one expression per node of the input.
+	// dropped. Evaluation costs one expression per node of the input,
+	// namespace nodes included: every element has one for each namespace
+	// binding in scope, inherited ones too. Those are bounded, linearly in
+	// the input's other nodes, and a transform over more is refused with
+	// xmlsec.ErrLimitExceeded.
 	AllowedXPathExpressions []XPathExpression
 
 	// AllowedXSLTStylesheets opts in to the XSLT transform

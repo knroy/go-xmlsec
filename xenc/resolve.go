@@ -106,11 +106,22 @@ func inKeyInfo(el, ki *xdm.Node, k keyKind) (*xdm.Node, error) {
 		retrievals = retrievals && c.IsElement(xmlsec.NSDSig, "RetrievalMethod")
 	}
 	if retrievals {
+		// Each URI is looked up once: a repeated one names what it named
+		// before. Distinct URIs agree only while they are IDs of one
+		// element, so the lookups are few however many children there are.
 		var found *xdm.Node
+		named := map[string]*xdm.Node{}
 		for _, c := range kids {
-			t, err := retrieve(el, c, k)
+			uri, err := retrievalURI(c, k)
 			if err != nil {
 				return nil, err
+			}
+			t, ok := named[uri]
+			if !ok {
+				if t, err = retrieve(el, uri, k); err != nil {
+					return nil, err
+				}
+				named[uri] = t
 			}
 			if found != nil && t != found {
 				return nil, fmt.Errorf("%w: ds:RetrievalMethod elements naming different %s elements", xmlsec.ErrAmbiguousID, k.local)
@@ -142,16 +153,22 @@ func inKeyInfo(el, ki *xdm.Node, k keyKind) (*xdm.Node, error) {
 	return nil, fmt.Errorf("%w: %s in the ds:KeyInfo of an xenc:%s", xmlsec.ErrUnsupportedKeyInfo, c.Name().Local, el.Name().Local)
 }
 
-// retrieve resolves rm, a ds:RetrievalMethod, to the key element of kind k
-// it names in el's document.
-func retrieve(el, rm *xdm.Node, k keyKind) (*xdm.Node, error) {
+// retrievalURI returns the URI of rm, a ds:RetrievalMethod, once its Type
+// is k's and it is a same-document reference without transforms.
+func retrievalURI(rm *xdm.Node, k keyKind) (string, error) {
 	uri, typ := rm.AttrValue("URI"), rm.AttrValue("Type")
 	if k == derivedKeyKind && typ == typeDerivedKey11 {
 		typ = k.typ
 	}
 	if typ != k.typ || !strings.HasPrefix(uri, "#") || len(rm.ChildElements()) > 0 {
-		return nil, fmt.Errorf("%w: only a same-document ds:RetrievalMethod of Type %s without transforms", xmlsec.ErrUnsupportedKeyInfo, k.typ)
+		return "", fmt.Errorf("%w: only a same-document ds:RetrievalMethod of Type %s without transforms", xmlsec.ErrUnsupportedKeyInfo, k.typ)
 	}
+	return uri, nil
+}
+
+// retrieve resolves uri, a ds:RetrievalMethod's "#id", to the key element
+// of kind k it names in el's document.
+func retrieve(el *xdm.Node, uri string, k keyKind) (*xdm.Node, error) {
 	t, err := idref.Find(el, uri[1:], idAttr)
 	if err != nil {
 		return nil, err

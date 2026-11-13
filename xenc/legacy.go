@@ -188,6 +188,9 @@ func mgfHash(uri string) (crypto.Hash, bool) {
 // obtained, and a failure to obtain it reported, before any RSA operation,
 // so the countermeasure above is unchanged.
 func DecryptEncryptedKeyPKCS1v15(el, ed *xdm.Node, dec crypto.Decrypter, opts DecryptOptions) ([]byte, error) {
+	if err := checkParts(el, opts); err != nil {
+		return nil, err
+	}
 	if err := strictKey(el, opts); err != nil {
 		return nil, err
 	}

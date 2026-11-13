@@ -7,6 +7,31 @@ promise and how a release is cut.
 
 ## Unreleased
 
+### Fixed — security
+
+From a full security audit of v2.1.0 (dc5b096). Every fix stays within XML
+Signature 1.1 and XML Encryption 1.1: conforming signatures still verify and
+conforming ciphertext still decrypts. What changes is what `Coverage`
+reports, and new limits on how much work one message can force. The W3C
+vectors, the golden hashes and the xmlsec1, Santuario and WSS4J interop
+suite pass unchanged.
+
+| Change | Problem → solution | Commit |
+|---|---|---|
+| `Coverage` reported a signature's own `ds:Object`, `ds:KeyInfo` or `ds:Manifest` as signed when the enveloped-signature transform had removed all of it | A reference to an element inside the signature, through enveloped-signature, digests nothing of it (§6.6.4), yet the element was listed in `SignedElements`, so it could be rewritten with the signature still valid. `VerifyManifest` trusted that entry. The exemption for dropping the signature's nodes now applies only when the signature lies inside the target, on the enveloped-signature, XPath and Filter 2.0 paths. Such a reference still verifies but covers nothing, and `VerifyManifest` refuses a Manifest reached that way. | *this commit* |
+| `Coverage` reported an element as signed when the base64 transform digested only its text | Over a node set the base64 transform digests text alone (§6.6.2), so attributes, child elements, comments and PIs of a "covered" element could be forged. Such a reference now appears in `Coverage.References` only, as an XSLT one does. | *this commit* |
+| An encoded MIME header could forge another in an Attachment-Complete signature | The canonical header block was checked for line breaks before RFC 2047 and RFC 2231 decoding, not after, so a `Content-Description` decoding to `\r\nContent-Disposition: ...` digested as that header: a signed header could be dropped without breaking the signature. A value with a line break once decoded is now `ErrMalformed`. | *this commit* |
+| Decrypting a message's parts cost time in parts × document size | Each `Decrypt`, `Unwrap` and `Derive` call costs time in the document's size: a same-document `CipherReference` source is decoded again, `DecryptAndReplace` and `DecryptHeader` re-emit the whole document, and `FindEncryptedKey` walks it. Nothing bounded the parts, so a 4 MB message with 16,000 parts took 12.7 s before anything was authenticated. Every such function now refuses a document holding more than `DecryptOptions.MaxEncryptedParts` (new; zero means the new `xenc.DefaultMaxEncryptedParts`, 64) `EncryptedData`, `EncryptedKey` and `DerivedKey` elements, with `ErrLimitExceeded`, before any key lookup or cryptography. | *this commit* |
+| One `FindEncryptedKey` call walked the document once per `ds:RetrievalMethod` | Any number of `RetrievalMethod`s naming one key are allowed, and each was looked up: a 2.7 MB message took 10.4 s. Each distinct URI is now looked up once, and every child is still checked. | *this commit* |
+| `StrictX509Data` matched an unbounded number of `X509Data` descriptors before `TrustKey` | Each descriptor re-hashed or re-parsed the carried certificates: a 1.2 MB message took 950 ms before `TrustKey` could refuse it. More than 64 descriptors in one `ds:KeyInfo` are now `ErrUnsupportedKeyInfo`, before any is matched; a pinned key ignores the refusal as before. | *this commit* |
+| An XPath transform's cost grew with root declarations × elements | Every element has a namespace node per binding in scope, so k declarations over m elements gave k × m evaluations from k + m parsed nodes: a 145 KB message took 8.9 s to verify. The XPath and Filter 2.0 transforms now decide at most 4096 namespace nodes plus 256 per other input node, and refuse more with `ErrLimitExceeded`. | *this commit* |
+
+### Changed — documentation
+
+| Change | Problem → solution | Commit |
+|---|---|---|
+| Allowing CBC exposes keys that protect AES-GCM data | A transported session key carries no data algorithm, and a ConcatKDF or PBKDF2 derivation takes only the message's parameters and the key size, so an attacker's CBC `EncryptedData` can use a key made for AES-GCM or key wrap. XML Encryption 1.1 defines no binding that would refuse it. docs/security.md now says to give CBC peers their own key pair, password or master key and `DecryptOptions`. | *this commit* |
+
 ### Changed — memory
 
 | Change | Problem → solution | Commit |

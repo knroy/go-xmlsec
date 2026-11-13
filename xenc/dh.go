@@ -266,6 +266,9 @@ func dhOriginatorKey(oki *xdm.Node, priv *DHPrivateKey) (*big.Int, error) {
 // refused before any arithmetic in it, so an oversized one costs nothing;
 // an invalid Public is xmlsec.ErrMalformed.
 func DecryptAgreedKeyDH(el *xdm.Node, priv *DHPrivateKey, opts DecryptOptions) ([]byte, error) {
+	if err := checkParts(el, opts); err != nil {
+		return nil, err
+	}
 	if err := strictKey(el, opts); err != nil {
 		return nil, err
 	}
@@ -285,6 +288,9 @@ func DecryptAgreedKeyDH(el *xdm.Node, priv *DHPrivateKey, opts DecryptOptions) (
 // DecryptAgreedKeyDH; the Legacy KDF of dh names the data algorithm.
 // Decrypt ed with the result by DecryptData.
 func DecryptAgreedDataKeyDH(ed *xdm.Node, priv *DHPrivateKey, opts DecryptOptions) ([]byte, error) {
+	if err := checkParts(ed, opts); err != nil {
+		return nil, err
+	}
 	if err := strictData(ed, opts); err != nil {
 		return nil, err
 	}

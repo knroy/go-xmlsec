@@ -59,6 +59,9 @@ func derivedKeyMethod(dk, implied *xdm.Node) (*xdm.Node, error) {
 // there, with the limits UnwrapEncryptedKeyPassword documents. Pass the
 // result to DecryptData or UnwrapEncryptedKey.
 func DeriveKey(dk, target *xdm.Node, master []byte, opts DecryptOptions) ([]byte, error) {
+	if err := checkParts(target, opts); err != nil {
+		return nil, err
+	}
 	if err := strictKey(target, opts); err != nil {
 		return nil, err
 	}
